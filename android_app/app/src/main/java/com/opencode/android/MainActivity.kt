@@ -33,6 +33,10 @@ import com.opencode.android.ui.screens.ConnectionDiagnoseDialog
 import com.opencode.android.ui.screens.PrivacyDialog
 import com.opencode.android.ui.screens.ModelAgentDialog
 import com.opencode.android.ui.screens.ProjectCenterDialog
+import com.opencode.android.ui.screens.ProfileManagerDialog
+import com.opencode.android.ui.screens.ConfigExportDialog
+import com.opencode.android.ui.screens.ConfigImportDialog
+import com.opencode.android.ui.screens.OpLogDialog
 
 class MainActivity : ComponentActivity() {
 
