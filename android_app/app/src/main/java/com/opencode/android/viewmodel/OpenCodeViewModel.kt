@@ -18,6 +18,10 @@ import com.opencode.android.data.model.TaskStatus
 import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.CloudStreamListener
+import com.opencode.android.network.CloudConnectionState
+import com.opencode.android.util.OpLog
+import com.opencode.android.util.ConfigImportExport
+import com.opencode.android.data.model.ConnectionProfile
 import com.opencode.android.network.DeviceInfo
 import com.opencode.android.network.FileEntry
 import com.opencode.android.network.AgentInfo
@@ -101,6 +105,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 cloudServerUrl = prefsManager.getCloudServerUrl(),
                 cloudApiKey = prefsManager.getCloudApiKey(),
                 cloudWorkspacePath = prefsManager.getCloudWorkspacePath(),
+                profiles = prefsManager.getProfiles(),
+                activeProfileId = prefsManager.getActiveProfileId(),
                 availableSessions = savedSessions,
                 currentSessionId = savedSessions.firstOrNull()?.id ?: "",
                 taskStatus = effectiveStatus,
@@ -225,6 +231,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         val state = _uiState.value
         val nonce = state.pendingApproval?.nonce
         _uiState.update { it.copy(pendingApproval = null) }
+        OpLog.record(getApplication(), OpLog.OpType.APPROVE, "callId=$callId")
         // P0-3 修复：直接回传真实权限审批决定，绝不再把 "/approve" 作为普通 prompt 发给大模型！
         // B-5: nonce 原样回传；B-9: 云端模式直调 OpenCode 权限端点
         if (state.appMode == AppMode.DESKTOP_RELAY) {
@@ -241,6 +248,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         val state = _uiState.value
         val nonce = state.pendingApproval?.nonce
         _uiState.update { it.copy(pendingApproval = null) }
+        OpLog.record(getApplication(), OpLog.OpType.REJECT, "callId=$callId")
         // P0-3 修复：回传真实拒绝决定；B-9: 云端模式同上
         if (state.appMode == AppMode.DESKTOP_RELAY) {
             relayClient.sendApprovalResponse(callId, false, "用户在手机端拒绝了修改", nonce)
@@ -354,6 +362,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                     )
                 }
                 onDone(true, "配对成功")
+                OpLog.record(getApplication(), OpLog.OpType.PAIR, "desktop=${result.desktopName.ifBlank { desktopName }}")
             } else {
                 val err = result.error.ifBlank { "配对失败，请重新扫码" }
                 _uiState.update { it.copy(appError = AppError("PAIR_FAILED", err), statusBanner = null) }
@@ -525,6 +534,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 agent = _uiState.value.selectedAgent
             )
         } else {
+            _uiState.update { it.copy(cloudConnectionState = CloudConnectionState.CONNECTING) }
             cloudClient.sendPromptStream(
                 baseUrl = _uiState.value.cloudServerUrl,
                 apiKey = _uiState.value.cloudApiKey,
@@ -536,6 +546,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun cancelExecution() {
+        OpLog.record(getApplication(), OpLog.OpType.ABORT, "session=" + _uiState.value.currentSessionId)
         if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
             relayClient.sendCancel(_uiState.value.currentSessionId)
         } else {
@@ -552,6 +563,90 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     fun clearChat() {
         _uiState.update { it.copy(messages = emptyList()) }
+    }
+
+    // v2.5: SSE 重连状态暴露到顶部状态条
+    override fun onSseStateChanged(retrying: Boolean, attempt: Int) {
+        _uiState.update {
+            it.copy(
+                cloudConnectionState = if (retrying) CloudConnectionState.RECONNECTING
+                else CloudConnectionState.DISCONNECTED
+            )
+        }
+    }
+
+    // ============ v2.5: 多连接 profiles ============
+
+    /** 切换配置：先断开当前连接，再装载 profile 参数 */
+    fun switchProfile(profileId: String) {
+        val profile = prefsManager.getProfiles().firstOrNull { it.id == profileId } ?: return
+        viewModelScope.launch {
+            try { relayClient.disconnect() } catch (_: Exception) { }
+            try { cloudClient.cancelCurrentStream() } catch (_: Exception) { }
+            prefsManager.setActiveProfileId(profileId)
+            _uiState.update {
+                it.copy(
+                    activeProfileId = profileId,
+                    appMode = profile.mode,
+                    accountId = profile.accountId,
+                    secret = prefsManager.getProfileSecret(profileId),
+                    relayUrl = profile.relayUrl.ifBlank { it.relayUrl },
+                    cloudServerUrl = profile.cloudUrl.ifBlank { it.cloudServerUrl },
+                    cloudApiKey = prefsManager.getProfileCloudApiKey(profileId),
+                    cloudWorkspacePath = profile.cloudWorkspace,
+                    profiles = prefsManager.getProfiles(),
+                    isRelayConnected = false,
+                    isAuthenticated = false,
+                    isDesktopOnline = false,
+                    relayConnectionState = RelayConnectionState.DISCONNECTED,
+                    cloudConnectionState = CloudConnectionState.DISCONNECTED
+                )
+            }
+        }
+    }
+
+    fun addProfile(profile: ConnectionProfile) {
+        val list = prefsManager.getProfiles() + profile
+        prefsManager.saveProfiles(list)
+        _uiState.update { it.copy(profiles = list) }
+    }
+
+    fun renameProfile(profileId: String, name: String) {
+        prefsManager.getProfiles().firstOrNull { it.id == profileId }?.let {
+            prefsManager.updateProfile(it.copy(name = name))
+            _uiState.update { s -> s.copy(profiles = prefsManager.getProfiles()) }
+        }
+    }
+
+    fun deleteProfile(profileId: String): Boolean {
+        val ok = prefsManager.deleteProfile(profileId)
+        if (ok) _uiState.update { it.copy(profiles = prefsManager.getProfiles(), activeProfileId = prefsManager.getActiveProfileId()) }
+        return ok
+    }
+
+    // ============ v2.5: 配置导入 / 导出 ============
+
+    /** 导出配置 JSON（不含密钥） */
+    fun exportConfigJson(): String {
+        OpLog.record(getApplication(), OpLog.OpType.CONFIG_EXPORT, "profiles=" + prefsManager.getProfiles().size)
+        return ConfigImportExport.exportJson(prefsManager)
+    }
+
+    /**
+     * 导入配置 JSON。成功返回 true；导入的 profile 没有密钥，
+     * 需提示用户重新配对。
+     */
+    fun importConfigJson(json: String): Boolean {
+        val imported = ConfigImportExport.importJson(prefsManager, json) ?: return false
+        OpLog.record(getApplication(), OpLog.OpType.CONFIG_IMPORT, "imported=" + imported.size)
+        _uiState.update {
+            it.copy(
+                profiles = prefsManager.getProfiles(),
+                appError = null,
+                statusBanner = "已导入 " + imported.size + " 个配置，密钥未导入，请重新配对。"
+            )
+        }
+        return true
     }
 
     // --- RelayListener (电脑中继模式真实回调) ---
@@ -744,6 +839,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onStreamStart(sessionId: String) {
+        _uiState.update { it.copy(cloudConnectionState = CloudConnectionState.STREAMING) }
         val newMsgId = UUID.randomUUID().toString()
         activeAssistantMessageId = newMsgId
         // P1-5: 新一轮流式输出，清空上一轮缓冲
@@ -822,6 +918,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onStreamEnd(sessionId: String) {
+        _uiState.update { it.copy(cloudConnectionState = CloudConnectionState.DISCONNECTED) }
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
         // P1-5: 流结束前把缓冲剩余 chunk 全部刷入，保证不丢失
         streamFlushJob?.cancel()
@@ -946,6 +1043,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     // v2.4: 按 deviceId 撤销
     fun revokeDevice(deviceId: String, deviceName: String = "") {
+        OpLog.record(getApplication(), OpLog.OpType.REVOKE, "device=$deviceName")
         relayClient.revokeDevice(deviceId, deviceName)
     }
 
@@ -1037,6 +1135,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onError(code: String, message: String) {
+        _uiState.update { it.copy(cloudConnectionState = CloudConnectionState.DISCONNECTED) }
         onAppError(code, message)
     }
 

@@ -133,6 +133,11 @@ data class OpenCodeUiState(
     val isReconnecting: Boolean = false,
     // P0-4: Relay 连接状态机（UI 据此区分网络/鉴权/Desktop 故障）
     val relayConnectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED,
+    // v2.5: 云端直连状态机；顶部状态条按 appMode 二选一订阅显示
+    val cloudConnectionState: CloudConnectionState = CloudConnectionState.DISCONNECTED,
+    // v2.5: 多连接 profiles
+    val profiles: List<ConnectionProfile> = emptyList(),
+    val activeProfileId: String = "",
     // P2-12: 文件浏览器状态
     val fileBrowserPath: String = "",
     val fileBrowserEntries: List<FileEntry> = emptyList(),

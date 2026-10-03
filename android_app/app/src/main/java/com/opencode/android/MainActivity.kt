@@ -75,6 +75,12 @@ class MainActivity : ComponentActivity() {
                 var checkingUpdate by remember { mutableStateOf(false) }
                 // v1.6 P0 多设备管理
                 var showDeviceManager by remember { mutableStateOf(false) }
+                // v2.5: profiles / 配置导入导出 / 操作记录
+                var showProfiles by remember { mutableStateOf(false) }
+                var showConfigExport by remember { mutableStateOf(false) }
+                var showConfigImport by remember { mutableStateOf(false) }
+                var showOpLog by remember { mutableStateOf(false) }
+                var exportJson by remember { mutableStateOf("") }
                 // v1.6 P1 Model/Agent
                 var showModelAgent by remember { mutableStateOf(false) }
                 // v1.6 P1 项目管理中心
@@ -191,6 +197,11 @@ class MainActivity : ComponentActivity() {
                         onShowDeviceManager = {
                             showDeviceManager = true
                         },
+                        // v2.5
+                        onShowProfiles = { showProfiles = true },
+                        onShowConfigExport = { exportJson = viewModel.exportConfigJson(); showConfigExport = true },
+                        onShowConfigImport = { showConfigImport = true },
+                        onShowOpLog = { showOpLog = true },
                         // v1.6 P1 Model/Agent
                         onShowModelAgent = {
                             showModelAgent = true
@@ -256,6 +267,31 @@ class MainActivity : ComponentActivity() {
                             TextButton(onClick = { updateInfo = null }) { Text("知道了") }
                         }
                     )
+                }
+
+                // v2.5: 连接配置管理
+                if (showProfiles) {
+                    ProfileManagerDialog(
+                        profiles = uiState.profiles,
+                        activeProfileId = uiState.activeProfileId,
+                        onSwitch = { viewModel.switchProfile(it) },
+                        onAdd = { viewModel.addProfile(it) },
+                        onRename = { id, name -> viewModel.renameProfile(id, name) },
+                        onDelete = { viewModel.deleteProfile(it) },
+                        onDismiss = { showProfiles = false }
+                    )
+                }
+                if (showConfigExport) {
+                    ConfigExportDialog(json = exportJson, onDismiss = { showConfigExport = false })
+                }
+                if (showConfigImport) {
+                    ConfigImportDialog(
+                        onImport = { viewModel.importConfigJson(it) },
+                        onDismiss = { showConfigImport = false }
+                    )
+                }
+                if (showOpLog) {
+                    OpLogDialog(onDismiss = { showOpLog = false })
                 }
 
                 // v1.6 P0 多设备管理对话框

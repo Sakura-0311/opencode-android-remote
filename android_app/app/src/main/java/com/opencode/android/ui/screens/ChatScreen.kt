@@ -28,10 +28,13 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.android.data.model.*
+import com.opencode.android.network.CloudConnectionState
+import com.opencode.android.network.RelayConnectionState
 import com.opencode.android.ui.components.ToolApprovalDialog
 import com.opencode.android.ui.components.MarkdownText
 import com.opencode.android.ui.components.looksLikeMarkdown
 import com.opencode.android.util.MarkdownExporter
+import com.opencode.android.util.ErrorCodes
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,6 +77,11 @@ fun ChatScreen(
     onShowTaskCenter: () -> Unit = {},
     // P2-15: 连接诊断
     onShowDiagnose: () -> Unit = {},
+    // v2.5: profiles / 配置导入导出 / 操作记录
+    onShowProfiles: () -> Unit = {},
+    onShowConfigExport: () -> Unit = {},
+    onShowConfigImport: () -> Unit = {},
+    onShowOpLog: () -> Unit = {},
     // 对外分发：隐私说明
     onShowPrivacy: () -> Unit = {},
     // 对外分发：崩溃上报开关
@@ -148,6 +156,13 @@ fun ChatScreen(
                                         .size(8.dp)
                                         .clip(CircleShape)
                                         .background(dotColor)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                // v2.5: 统一连接状态条（按 appMode 二选一订阅）
+                                Text(
+                                    text = connectionStatusLabel(uiState),
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
                                 )
                             }
                             val currentSession = uiState.availableSessions.find { it.id == uiState.currentSessionId }
@@ -229,6 +244,40 @@ fun ChatScreen(
                                 },
                                 leadingIcon = { Icon(Icons.Default.SystemUpdate, contentDescription = null) }
                             )
+                            // v2.5: 连接配置 / 导入导出 / 操作记录
+                            DropdownMenuItem(
+                                text = { Text("连接配置") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowProfiles()
+                                },
+                                leadingIcon = { Icon(Icons.Default.SwitchAccount, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导出配置") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowConfigExport()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Upload, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导入配置") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowConfigImport()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("操作记录") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowOpLog()
+                                },
+                                leadingIcon = { Icon(Icons.Default.History, contentDescription = null) }
+                            )
+                            Divider()
                             // v1.6 P0 多设备管理
                             DropdownMenuItem(
                                 text = { Text("设备管理") },
@@ -368,12 +417,21 @@ fun ChatScreen(
                         ) {
                             Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "[${uiState.appError.code}] ${uiState.appError.message}",
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                fontSize = 12.sp,
-                                modifier = Modifier.weight(1f)
-                            )
+                            // v2.5: 错误码映屄表（标题+建议）
+                            val errInfo = remember(uiState.appError.code) { ErrorCodes.lookup(uiState.appError.code) }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "${errInfo.title}：${uiState.appError.message}",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "建议：${errInfo.suggestion}",
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
+                                    fontSize = 11.sp
+                                )
+                            }
                             IconButton(onClick = onDismissError, modifier = Modifier.size(24.dp)) {
                                 Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(16.dp))
                             }
@@ -791,4 +849,30 @@ fun SessionsManagementModal(
             }
         }
     )
+
+/**
+ * v2.5: 统一连接状态文案。中继模式订阅 relayConnectionState，
+ * 云端模式订阅 cloudConnectionState。
+ */
+private fun connectionStatusLabel(s: OpenCodeUiState): String {
+    return if (s.appMode == AppMode.CLOUD_HOSTED) {
+        "云端·" + when (s.cloudConnectionState) {
+            CloudConnectionState.DISCONNECTED -> "未连接"
+            CloudConnectionState.CONNECTING -> "连接中"
+            CloudConnectionState.STREAMING -> "会话进行中"
+            CloudConnectionState.RECONNECTING -> "重连中"
+        }
+    } else {
+        "中继·" + when (s.relayConnectionState) {
+            RelayConnectionState.DISCONNECTED -> "未连接"
+            RelayConnectionState.CONNECTING -> "连接中"
+            RelayConnectionState.CONNECTED -> "已连接，待鉴权"
+            RelayConnectionState.AUTHENTICATING -> "鉴权中"
+            RelayConnectionState.AUTHENTICATED -> "已鉴权，等 Desktop"
+            RelayConnectionState.DESKTOP_ONLINE -> "Desktop 在线"
+            RelayConnectionState.RECONNECTING -> "重连中"
+            RelayConnectionState.AUTH_FAILED -> "鉴权失败"
+        }
+    }
+}
 }

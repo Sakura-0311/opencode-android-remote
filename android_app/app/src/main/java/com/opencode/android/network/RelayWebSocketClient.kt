@@ -33,6 +33,17 @@ enum class RelayConnectionState {
     AUTH_FAILED      // 鉴权失败（Secret 错误等，不自动重连）
 }
 
+/**
+ * v2.5: 云端直连（SSE）连接状态，与 RelayConnectionState 并列，
+ * 顶部状态条按当前 appMode 二选一订阅显示。
+ */
+enum class CloudConnectionState {
+    DISCONNECTED,  // 未连接
+    CONNECTING,    // 正在发起流式请求
+    STREAMING,     // 流式输出进行中
+    RECONNECTING   // SSE 断线退避等待中
+}
+
 interface RelayListener {
     fun onConnected()
     fun onAuthenticated()

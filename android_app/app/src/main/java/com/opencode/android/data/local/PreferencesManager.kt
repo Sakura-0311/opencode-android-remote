@@ -3,6 +3,7 @@ package com.opencode.android.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import com.opencode.android.data.model.AppMode
+import com.opencode.android.data.model.ConnectionProfile
 import com.opencode.android.data.model.SessionItem
 import org.json.JSONArray
 import org.json.JSONObject
@@ -51,6 +52,11 @@ class PreferencesManager(context: Context) {
         private const val KEY_CLOUD_SERVER_URL = "cloud_server_url"
         private const val KEY_CLOUD_API_KEY = "cloud_api_key"
         private const val KEY_CLOUD_WORKSPACE_PATH = "cloud_workspace_path"
+        // v2.5: 多连接 profiles
+        private const val KEY_PROFILES = "connection_profiles_json"
+        private const val KEY_ACTIVE_PROFILE_ID = "active_profile_id"
+        private const val KEY_PROFILE_SECRET_PREFIX = "secret_profile_"
+        private const val KEY_PROFILE_CLOUD_KEY_PREFIX = "cloud_api_key_profile_"
         private const val KEY_SAVED_SESSIONS = "saved_sessions_json"
         private const val KEY_SAVED_TAGS = "saved_tags_json"
         // v1.6 P0 后台保活：任务状态持久化
@@ -102,6 +108,14 @@ class PreferencesManager(context: Context) {
             .apply()
         // relayUrl 非敏感，可走普通偏好
         prefs.edit().putString(KEY_RELAY_URL, relayUrl).apply()
+        // v2.5: 同步到 active profile（密钥进 profile 槽，旧 key 保留作保底）
+        try {
+            val pid = getActiveProfileId()
+            if (pid.isNotEmpty()) {
+                sp.edit().putString(KEY_PROFILE_SECRET_PREFIX + pid, secret).apply()
+                getActiveProfile()?.let { updateProfile(it.copy(relayUrl = relayUrl, accountId = accountId)) }
+            }
+        } catch (_: Exception) { }
         return true
     }
 
@@ -133,6 +147,14 @@ class PreferencesManager(context: Context) {
             .putString(KEY_CLOUD_SERVER_URL, cloudUrl)
             .putString(KEY_CLOUD_WORKSPACE_PATH, workspacePath)
             .apply()
+        // v2.5: 同步到 active profile
+        try {
+            val pid = getActiveProfileId()
+            if (pid.isNotEmpty()) {
+                sp.edit().putString(KEY_PROFILE_CLOUD_KEY_PREFIX + pid, apiKey).apply()
+                getActiveProfile()?.let { updateProfile(it.copy(cloudUrl = cloudUrl, cloudWorkspace = workspacePath)) }
+            }
+        } catch (_: Exception) { }
         return true
     }
 
@@ -290,5 +312,105 @@ class PreferencesManager(context: Context) {
         } catch (e: Exception) {
             0
         }
+    }
+
+    // ============ v2.5: 多连接 profiles ============
+
+    /**
+     * 获取全部 profiles。首次调用时把旧单配置迁移为第一个 profile（名为"默认连接"），
+     * 并把旧密钥复制到该 profile 的密钥槽；旧 key 保留一个版本作为读取保底。
+     * 迁移失败时返回空列表，调用方应继续使用旧单配置读写（失败保底）。
+     */
+    fun getProfiles(): List<ConnectionProfile> {
+        val raw = prefs.getString(KEY_PROFILES, null)
+        if (!raw.isNullOrBlank()) {
+            val list = ConnectionProfile.listFromJson(raw)
+            if (list.isNotEmpty()) return list
+        }
+        return try {
+            val legacy = ConnectionProfile(
+                id = "legacy_default",
+                name = "默认连接",
+                mode = getAppMode(),
+                relayUrl = getRelayUrl(),
+                accountId = getAccountId(),
+                cloudUrl = getCloudServerUrl(),
+                cloudWorkspace = getCloudWorkspacePath()
+            )
+            val sp = securePrefs
+            if (sp != null) {
+                val oldSecret = getSecret()
+                val oldCloudKey = getCloudApiKey()
+                val ed = sp.edit()
+                if (oldSecret.isNotEmpty()) ed.putString(KEY_PROFILE_SECRET_PREFIX + legacy.id, oldSecret)
+                if (oldCloudKey.isNotEmpty()) ed.putString(KEY_PROFILE_CLOUD_KEY_PREFIX + legacy.id, oldCloudKey)
+                ed.apply()
+            }
+            saveProfiles(listOf(legacy))
+            setActiveProfileId(legacy.id)
+            listOf(legacy)
+        } catch (e: Exception) {
+            android.util.Log.e("PrefsManager", "v2.5: profile 迁移失败，保留旧单配置", e)
+            emptyList()
+        }
+    }
+
+    fun saveProfiles(list: List<ConnectionProfile>) {
+        prefs.edit().putString(KEY_PROFILES, ConnectionProfile.listToJson(list)).apply()
+    }
+
+    fun getActiveProfileId(): String {
+        val profiles = getProfiles()
+        val saved = prefs.getString(KEY_ACTIVE_PROFILE_ID, null)
+        return if (profiles.any { it.id == saved }) saved!! else profiles.firstOrNull()?.id ?: ""
+    }
+
+    fun setActiveProfileId(id: String) {
+        prefs.edit().putString(KEY_ACTIVE_PROFILE_ID, id).apply()
+    }
+
+    fun getActiveProfile(): ConnectionProfile? {
+        val id = getActiveProfileId()
+        return getProfiles().firstOrNull { it.id == id }
+    }
+
+    fun updateProfile(profile: ConnectionProfile) {
+        saveProfiles(getProfiles().map { if (it.id == profile.id) profile else it })
+    }
+
+    /** 至少保留一个 profile */
+    fun deleteProfile(id: String): Boolean {
+        val list = getProfiles()
+        if (list.size <= 1) return false
+        saveProfiles(list.filter { it.id != id })
+        securePrefs?.edit()
+            ?.remove(KEY_PROFILE_SECRET_PREFIX + id)
+            ?.remove(KEY_PROFILE_CLOUD_KEY_PREFIX + id)
+            ?.apply()
+        if (getActiveProfileId() == id) setActiveProfileId(getProfiles().firstOrNull()?.id ?: "")
+        return true
+    }
+
+    /** profile 密钥：优先读 profile 槽，空则回退旧单配置 key（迁移保底） */
+    fun getProfileSecret(profileId: String): String {
+        val sp = securePrefs ?: return ""
+        return sp.getString(KEY_PROFILE_SECRET_PREFIX + profileId, null) ?: getSecret()
+    }
+
+    fun saveProfileSecret(profileId: String, s: String): Boolean {
+        val sp = securePrefs ?: return false
+        sp.edit().putString(KEY_PROFILE_SECRET_PREFIX + profileId, s).apply()
+        return true
+    }
+
+    fun getProfileCloudApiKey(profileId: String): String {
+        val sp = securePrefs ?: return ""
+        return sp.getString(KEY_PROFILE_CLOUD_KEY_PREFIX + profileId, null) ?: getCloudApiKey()
+    }
+
+    fun saveProfileCloudApiKey(profileId: String, k: String): Boolean {
+        val sp = securePrefs ?: return false
+        sp.edit().putString(KEY_PROFILE_CLOUD_KEY_PREFIX + profileId, k).apply()
+        return true
     }
 }
