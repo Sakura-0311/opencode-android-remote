@@ -55,7 +55,8 @@ jobs:
       - name: Build Release APK
         working-directory: android_app
         env:
-          RELEASE_KEYSTORE_FILE: app/release.keystore
+          # 注意：路径是相对 app module 目录（android_app/app/）的，keystore 已恢复到该目录
+          RELEASE_KEYSTORE_FILE: release.keystore
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
