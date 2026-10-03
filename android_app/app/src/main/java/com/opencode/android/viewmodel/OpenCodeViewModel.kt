@@ -35,13 +35,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     private val _uiState: MutableStateFlow<OpenCodeUiState>
 
     init {
-        val savedSessions = prefsManager.getSavedSessions().ifEmpty {
-            listOf(
-                SessionItem("default", "Main Workspace", tag = "默认", isPinned = true),
-                SessionItem("debug_session", "API 认证异常排查", tag = "代码调试"),
-                SessionItem("auto_deploy", "云端 Docker 自动化脚本", tag = "自动化任务")
-            )
-        }
+        // P1-1: 彻底移除虚假写死的 Demo 会话数据，以真实服务拉取为准
+        val savedSessions = prefsManager.getSavedSessions()
 
         _uiState = MutableStateFlow(
             OpenCodeUiState(
@@ -52,7 +47,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 cloudServerUrl = prefsManager.getCloudServerUrl(),
                 cloudApiKey = prefsManager.getCloudApiKey(),
                 cloudWorkspacePath = prefsManager.getCloudWorkspacePath(),
-                availableSessions = savedSessions
+                availableSessions = savedSessions,
+                currentSessionId = savedSessions.firstOrNull()?.id ?: ""
             )
         )
     }
@@ -72,7 +68,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     // =========================================================================
-    // 1. 会话分组、标签管理、置顶与归档
+    // 1. 会话分组、标签管理、置顶与归档 (基于真实 Session 数据)
     // =========================================================================
 
     fun setTagFilter(tag: String?) {
@@ -101,7 +97,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun batchArchiveOldSessions() {
-        // 一键归档非置顶的旧会话
         _uiState.update { state ->
             val updated = state.availableSessions.map { s ->
                 if (!s.isPinned && s.id != state.currentSessionId) s.copy(isArchived = true) else s
@@ -135,7 +130,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     // =========================================================================
-    // 2. 工具审批与代码 Diff 预览
+    // 2. 工具审批与代码 Diff 预览 (P0-3: 彻底接通真实协议，废除虚假 /approve 文本)
     // =========================================================================
 
     fun triggerMockToolApprovalForTest() {
@@ -161,14 +156,18 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     fun approveTool(callId: String) {
         _uiState.update { it.copy(pendingApproval = null) }
-        relayClient.sendApprovalResponse(callId, true)
-        sendMessage("/approve $callId")
+        // P0-3 修复：直接回传真实权限审批决定，绝不再把 "/approve" 作为普通 prompt 发给大模型！
+        if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
+            relayClient.sendApprovalResponse(callId, true)
+        }
     }
 
     fun rejectTool(callId: String) {
         _uiState.update { it.copy(pendingApproval = null) }
-        relayClient.sendApprovalResponse(callId, false, "用户拒绝了本次文件修改")
-        sendMessage("/reject $callId - 用户拒绝了本次文件修改")
+        // P0-3 修复：回传真实拒绝决定
+        if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
+            relayClient.sendApprovalResponse(callId, false, "用户在手机端拒绝了修改")
+        }
     }
 
     // =========================================================================
@@ -220,7 +219,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     // =========================================================================
-    // 6. 连接与收发消息核心调度
+    // 6. 连接与收发消息核心调度 (接入真实端点)
     // =========================================================================
 
     fun pairDesktop(accountId: String, secret: String, relayUrl: String) {
@@ -267,7 +266,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
 
         _uiState.update {
-            it.copy(statusBanner = "正在探测云端服务健康状态...")
+            it.copy(statusBanner = "正在探测云端 /global/health 真实健康状态...")
         }
 
         cloudClient.checkHealth(trimmedUrl, trimmedKey) { isSuccess, message ->
@@ -281,12 +280,21 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                         cloudWorkspacePath = trimmedWorkspace,
                         isPaired = true,
                         isAuthenticated = true,
-                        isDesktopOnline = true,
                         isRelayConnected = true,
                         appError = null,
                         diagnostics = null,
                         statusBanner = null
                     )
+                }
+                // 拉取云端真实会话列表
+                cloudClient.getSessions(trimmedUrl, trimmedKey) { realSessions ->
+                    _uiState.update { state ->
+                        val currentId = realSessions.firstOrNull()?.id ?: ""
+                        state.copy(
+                            availableSessions = sortSessions(realSessions),
+                            currentSessionId = currentId
+                        )
+                    }
                 }
             } else {
                 _uiState.update {
@@ -341,7 +349,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             )
         }
 
-        // 启动后台前台保活服务与常驻进度
         OpenCodeKeepAliveService.startTaskProgress(getApplication(), "执行指令: ${trimmed.take(30)}...")
 
         if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
@@ -361,6 +368,11 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
             relayClient.sendCancel(_uiState.value.currentSessionId)
         } else {
+            cloudClient.abortSessionExecution(
+                _uiState.value.cloudServerUrl,
+                _uiState.value.cloudApiKey,
+                _uiState.value.currentSessionId
+            )
             cloudClient.cancelCurrentStream()
         }
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
@@ -371,7 +383,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(messages = emptyList()) }
     }
 
-    // --- RelayListener (电脑中继模式回调) ---
+    // --- RelayListener (电脑中继模式真实回调) ---
 
     override fun onConnected() {
         _uiState.update {
@@ -389,6 +401,35 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 isAuthenticated = true,
                 appError = null,
                 statusBanner = null
+            )
+        }
+        // P1-1: 认证成功后主动向电脑端查询真实会话列表
+        relayClient.sendListSessions()
+    }
+
+    override fun onSessionsListReceived(sessions: List<SessionItem>) {
+        _uiState.update { state ->
+            val merged = if (sessions.isEmpty()) {
+                state.availableSessions
+            } else {
+                sessions.map { s ->
+                    val local = state.availableSessions.find { it.id == s.id }
+                    if (local != null) {
+                        s.copy(tag = local.tag, isPinned = local.isPinned, isArchived = local.isArchived)
+                    } else {
+                        s
+                    }
+                }
+            }
+            prefsManager.saveSessions(merged)
+            val currentId = if (merged.any { it.id == state.currentSessionId }) {
+                state.currentSessionId
+            } else {
+                merged.firstOrNull()?.id ?: ""
+            }
+            state.copy(
+                availableSessions = sortSessions(merged),
+                currentSessionId = currentId
             )
         }
     }
@@ -429,6 +470,9 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onDesktopStatusChanged(isOnline: Boolean) {
         _uiState.update { it.copy(isDesktopOnline = isOnline) }
+        if (isOnline && _uiState.value.isAuthenticated) {
+            relayClient.sendListSessions()
+        }
     }
 
     override fun onToolApprovalRequest(request: ToolApprovalRequest) {

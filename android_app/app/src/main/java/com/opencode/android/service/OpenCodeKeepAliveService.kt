@@ -18,6 +18,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.opencode.android.MainActivity
 
@@ -64,7 +65,7 @@ class OpenCodeKeepAliveService : Service() {
                     context.startService(intent)
                 }
             } catch (e: Exception) {
-                // ignore if background start restricted
+                Log.e("OpenCodeKeepAlive", "startForegroundService failed: ${e.message}", e)
             }
         }
 
@@ -76,7 +77,7 @@ class OpenCodeKeepAliveService : Service() {
             try {
                 context.startService(intent)
             } catch (e: Exception) {
-                // ignore
+                Log.w("OpenCodeKeepAlive", "service call failed: ${e.message}", e)
             }
         }
 
@@ -87,7 +88,7 @@ class OpenCodeKeepAliveService : Service() {
             try {
                 context.startService(intent)
             } catch (e: Exception) {
-                // ignore
+                Log.w("OpenCodeKeepAlive", "service call failed: ${e.message}", e)
             }
         }
 
@@ -99,7 +100,7 @@ class OpenCodeKeepAliveService : Service() {
             try {
                 context.startService(intent)
             } catch (e: Exception) {
-                // ignore
+                Log.w("OpenCodeKeepAlive", "service call failed: ${e.message}", e)
             }
         }
 

@@ -9,7 +9,20 @@ import org.json.JSONObject
 
 class PreferencesManager(context: Context) {
 
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = try {
+        val masterKey = androidx.security.crypto.MasterKey.Builder(context)
+            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        androidx.security.crypto.EncryptedSharedPreferences.create(
+            context,
+            PREFS_NAME,
+            masterKey,
+            androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    } catch (e: Exception) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
 
     companion object {
         private const val PREFS_NAME = "opencode_remote_prefs"
@@ -23,8 +36,8 @@ class PreferencesManager(context: Context) {
         private const val KEY_SAVED_SESSIONS = "saved_sessions_json"
         private const val KEY_SAVED_TAGS = "saved_tags_json"
 
-        private const val DEFAULT_RELAY_URL = "ws://10.0.2.2:8765"
-        private const val DEFAULT_CLOUD_URL = "https://opencode.yourdomain.com:4096"
+        private const val DEFAULT_RELAY_URL = ""
+        private const val DEFAULT_CLOUD_URL = ""
         private const val DEFAULT_CLOUD_WORKSPACE = "/workspace"
     }
 

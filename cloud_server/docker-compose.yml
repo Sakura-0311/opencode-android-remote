@@ -1,31 +1,45 @@
 version: '3.8'
 
 services:
-  opencode-cloud:
-    image: node:20-bookworm-slim
-    container_name: opencode-cloud-server
+  caddy:
+    image: caddy:2-alpine
+    container_name: opencode-caddy
     restart: unless-stopped
     ports:
-      - "4096:4096"
+      - "80:80"
+      - "443:443"
     environment:
-      - PORT=4096
-      - HOSTNAME=0.0.0.0
-      # 强制要求用户提供强口令，避免弱口令导致未授权访问
-      - OPENCODE_AUTH_TOKEN=${OPENCODE_AUTH_TOKEN:?必须设置 OPENCODE_AUTH_TOKEN 强口令，禁止使用默认密码}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DOMAIN_NAME=${DOMAIN_NAME:-localhost}
     volumes:
-      - opencode-workspace:/workspace
-    working_dir: /workspace
-    command: >
-      bash -c "
-      apt-get update && apt-get install -y git curl python3 python3-pip &&
-      npm install -g opencode &&
-      opencode serve --port 4096 --hostname 0.0.0.0
-      "
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - opencode-server
+    networks:
+      - opencode_net
+
+  opencode-server:
+    image: ghcr.io/anomalyco/opencode:latest
+    container_name: opencode-server
+    restart: unless-stopped
+    environment:
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?Error: OPENCODE_SERVER_PASSWORD is required}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+    expose:
+      - "4096"
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - opencode_net
+
+networks:
+  opencode_net:
+    driver: bridge
 
 volumes:
-  opencode-workspace:
-    name: opencode_cloud_workspace
+  caddy_data:
+  caddy_config:

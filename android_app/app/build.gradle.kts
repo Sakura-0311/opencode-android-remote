@@ -64,6 +64,8 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     // OkHttp WebSocket Client
+        // Security Crypto for EncryptedSharedPreferences (SEC-05)
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Kotlin Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

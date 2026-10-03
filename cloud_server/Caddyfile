@@ -1,0 +1,16 @@
+{$DOMAIN_NAME:localhost} {
+    encode gzip zstd
+
+    reverse_proxy opencode-server:4096 {
+        flush_interval -1
+        transport http {
+            keepalive 300s
+        }
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+    }
+}

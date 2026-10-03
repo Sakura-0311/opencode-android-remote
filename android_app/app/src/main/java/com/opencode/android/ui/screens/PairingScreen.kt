@@ -266,11 +266,25 @@ fun PairingScreen(
                     Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 },
                 trailingIcon = {
-                    IconButton(onClick = { isSecretVisible = !isSecretVisible }) {
-                        Icon(
-                            imageVector = if (isSecretVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = "Toggle Secret"
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                        IconButton(onClick = {
+                            clipboard.getText()?.text?.trim()?.let {
+                                if (it.isNotEmpty()) secret = it
+                            }
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.ContentPaste,
+                                contentDescription = "粘贴密钥",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        IconButton(onClick = { isSecretVisible = !isSecretVisible }) {
+                            Icon(
+                                imageVector = if (isSecretVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = "Toggle Secret"
+                            )
+                        }
                     }
                 },
                 visualTransformation = if (isSecretVisible) VisualTransformation.None else PasswordVisualTransformation(),
@@ -286,7 +300,7 @@ fun PairingScreen(
                 value = relayUrl,
                 onValueChange = { relayUrl = it },
                 label = { Text("中继服务地址 (Relay Server URL)") },
-                placeholder = { Text("wss://relay.yourdomain.com 或 ws://10.0.2.2:8765") },
+                placeholder = { Text("如: wss://relay.yourdomain.com 或 ws://192.168.1.x:8765") },
                 leadingIcon = {
                     Icon(Icons.Default.Sensors, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                 },
@@ -373,11 +387,25 @@ fun PairingScreen(
                     Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 },
                 trailingIcon = {
-                    IconButton(onClick = { isCloudKeyVisible = !isCloudKeyVisible }) {
-                        Icon(
-                            imageVector = if (isCloudKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = "Toggle Cloud Key"
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                        IconButton(onClick = {
+                            clipboard.getText()?.text?.trim()?.let {
+                                if (it.isNotEmpty()) cloudKey = it
+                            }
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.ContentPaste,
+                                contentDescription = "粘贴密码",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        IconButton(onClick = { isCloudKeyVisible = !isCloudKeyVisible }) {
+                            Icon(
+                                imageVector = if (isCloudKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = "Toggle Cloud Key"
+                            )
+                        }
                     }
                 },
                 visualTransformation = if (isCloudKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),

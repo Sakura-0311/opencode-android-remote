@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import com.opencode.android.data.model.DiffLine
 import com.opencode.android.data.model.DiffLineType
+import com.opencode.android.data.model.SessionItem
 import com.opencode.android.data.model.ToolApprovalRequest
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -29,6 +30,7 @@ interface RelayListener {
     fun onAppError(code: String, message: String)
     fun onError(error: String)
     fun onToolApprovalRequest(request: ToolApprovalRequest) {}
+    fun onSessionsListReceived(sessions: List<SessionItem>) {}
 }
 
 class RelayWebSocketClient {
@@ -183,6 +185,23 @@ class RelayWebSocketClient {
                     listener?.onDesktopStatusChanged(desktopOnline)
                 }
 
+                // 真实会话列表回调 (P1-1)
+                "sessions_list" -> {
+                    val dataArray = json.optJSONArray("data")
+                    val list = mutableListOf<SessionItem>()
+                    if (dataArray != null) {
+                        for (i in 0 until dataArray.length()) {
+                            val itemObj = dataArray.getJSONObject(i)
+                            val id = itemObj.optString("id", "")
+                            val title = itemObj.optString("title", itemObj.optString("name", "会话 $id"))
+                            if (id.isNotEmpty()) {
+                                list.add(SessionItem(id = id, title = title, tag = "默认"))
+                            }
+                        }
+                    }
+                    listener?.onSessionsListReceived(list)
+                }
+
                 // 流式交互
                 "stream_start" -> {
                     val sessionId = json.optString("session_id", "default")
@@ -202,7 +221,7 @@ class RelayWebSocketClient {
                     listener?.onStreamEnd(sessionId)
                 }
 
-                // 工具调用审批请求
+                // 工具调用审批请求 (P0-3)
                 "tool_approval_request", "approval_request" -> {
                     val callId = json.optString("call_id", UUID.randomUUID().toString())
                     val toolName = json.optString("tool_name", "edit_file")
@@ -241,13 +260,28 @@ class RelayWebSocketClient {
                     val message = json.optString("message", "发生未知错误")
                     listener?.onAppError(code, message)
                 }
-                else -> {
-                    // 兼容旧格式或扩展字段
-                }
+                else -> {}
             }
         } catch (e: Exception) {
             listener?.onError("数据解析错误: ${e.message}")
         }
+    }
+
+    fun sendListSessions() {
+        val envelope = JSONObject().apply {
+            put("action", "list_sessions")
+            put("req_id", UUID.randomUUID().toString())
+        }
+        webSocket?.send(envelope.toString())
+    }
+
+    fun sendCreateSession(title: String) {
+        val envelope = JSONObject().apply {
+            put("action", "create_session")
+            put("req_id", UUID.randomUUID().toString())
+            put("payload", JSONObject().apply { put("title", title) })
+        }
+        webSocket?.send(envelope.toString())
     }
 
     fun sendPrompt(prompt: String, sessionId: String) {

@@ -1,3 +1,4 @@
+import hmac
 import asyncio
 import hashlib
 import json
@@ -20,6 +21,16 @@ app = FastAPI(title="OpenCode Cloud Relay Server", version="1.1.0")
 # ==============================================================================
 # P0-3: 内存滑动窗口防爆破与限流器
 # ==============================================================================
+TRUSTED_PROXIES = set(filter(None, os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1").split(",")))
+
+def get_client_ip(ws: WebSocket) -> str:
+    direct = ws.client.host if ws.client else "unknown"
+    if direct in TRUSTED_PROXIES:
+        xff = ws.headers.get("x-forwarded-for")
+        if xff:
+            return xff.split(",")[0].strip()
+    return direct
+
 class RateLimiter:
     """
     轻量级内存防爆破与连接频次限流器：
@@ -126,7 +137,7 @@ class ConnectionManager:
         room = self.rooms[account_id]
 
         # 密码比对
-        if room["secret_hash"] != secret_hash:
+        if not hmac.compare_digest(room["secret_hash"], secret_hash):
             return False, "Invalid secret for account_id."
 
         session.is_authenticated = True
@@ -282,7 +293,7 @@ async def websocket_endpoint(
     path_account_id: Optional[str] = None,
     path_client_type: Optional[str] = None
 ):
-    client_ip = websocket.client.host if websocket.client else "unknown"
+    client_ip = get_client_ip(websocket)
 
     # 1. 检查 IP 限流
     if not rate_limiter.check_connection_allowed(client_ip):
@@ -381,7 +392,8 @@ if __name__ == "__main__":
     ssl_cert = os.getenv("SSL_CERTFILE")
     ssl_key = os.getenv("SSL_KEYFILE")
 
-    kwargs = {"host": host, "port": port}
+    kwargs = {"host": host, "port": port, "workers": 1}
+    logger.info("Ensuring single-worker operation to preserve in-memory room state.")
     if ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key):
         logger.info(f"Starting WSS (TLS) server with cert: {ssl_cert}")
         kwargs["ssl_certfile"] = ssl_cert
