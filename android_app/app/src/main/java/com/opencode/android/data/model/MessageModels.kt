@@ -1,6 +1,8 @@
 package com.opencode.android.data.model
 
+import com.opencode.android.network.AgentInfo
 import com.opencode.android.network.DeviceInfo
+import com.opencode.android.network.ModelInfo
 
 enum class MessageRole {
     USER,
@@ -97,6 +99,11 @@ data class OpenCodeUiState(
     val taskStatusDetail: String = "",
     // v1.6 P0 多设备管理：已配对设备列表
     val pairedDevices: List<DeviceInfo> = emptyList(),
+    // v1.6 P1 Model/Agent：可用列表与当前选择
+    val availableAgents: List<AgentInfo> = emptyList(),
+    val availableModels: List<ModelInfo> = emptyList(),
+    val selectedAgent: AgentInfo? = null,
+    val selectedModel: ModelInfo? = null,
     
     // 电脑中继模式参数
     val accountId: String = "",

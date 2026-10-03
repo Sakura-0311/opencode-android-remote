@@ -25,6 +25,7 @@ import com.opencode.android.util.UpdateChecker
 import com.opencode.android.viewmodel.OpenCodeViewModel
 import com.opencode.android.service.OpenCodeKeepAliveService
 import com.opencode.android.ui.screens.DeviceManagementDialog
+import com.opencode.android.ui.screens.ModelAgentDialog
 
 class MainActivity : ComponentActivity() {
 
@@ -67,6 +68,8 @@ class MainActivity : ComponentActivity() {
                 var checkingUpdate by remember { mutableStateOf(false) }
                 // v1.6 P0 多设备管理
                 var showDeviceManager by remember { mutableStateOf(false) }
+                // v1.6 P1 Model/Agent
+                var showModelAgent by remember { mutableStateOf(false) }
 
                 if (!uiState.isPaired) {
                     PairingScreen(
@@ -168,6 +171,10 @@ class MainActivity : ComponentActivity() {
                         },
                         onShowDeviceManager = {
                             showDeviceManager = true
+                        },
+                        // v1.6 P1 Model/Agent
+                        onShowModelAgent = {
+                            showModelAgent = true
                         }
                     )
                 }
@@ -208,6 +215,20 @@ class MainActivity : ComponentActivity() {
                         onRevoke = { name -> viewModel.revokeDevice(name) },
                         onRename = { old, new -> viewModel.renameDevice(old, new) },
                         onDismiss = { showDeviceManager = false }
+                    )
+                }
+
+                // v1.6 P1 Model/Agent 选择对话框
+                if (showModelAgent) {
+                    ModelAgentDialog(
+                        agents = uiState.availableAgents,
+                        models = uiState.availableModels,
+                        selectedAgent = uiState.selectedAgent,
+                        selectedModel = uiState.selectedModel,
+                        onRefresh = { viewModel.requestModelConfig() },
+                        onSelectAgent = { viewModel.selectAgent(it) },
+                        onSelectModel = { viewModel.selectModel(it) },
+                        onDismiss = { showModelAgent = false }
                     )
                 }
             }

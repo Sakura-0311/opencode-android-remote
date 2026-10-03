@@ -20,6 +20,8 @@ from opencode_api import (
     respond_to_permission,
     send_session_message_async,
     subscribe_events_stream,
+    get_agents,
+    get_providers,
 )
 
 logging.basicConfig(
@@ -355,6 +357,28 @@ async def handle_mobile_message(
                 "data": []
             }))
 
+    # v1.6 P1: 获取 Model/Agent 配置（动态，非硬编码）
+    elif action == "get_config":
+        try:
+            agents = await get_agents(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            providers = await get_providers(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            await ws_relay.send(json.dumps({
+                "type": "config_data",
+                "req_id": req_id,
+                "agents": agents,
+                "providers": providers,
+            }))
+            logger.info(f"v1.6: sent config to mobile ({len(agents)} agents)")
+        except Exception as e:
+            logger.error(f"Error fetching config: {e}")
+            await ws_relay.send(json.dumps({
+                "type": "config_data",
+                "req_id": req_id,
+                "agents": [],
+                "providers": {},
+                "error": str(e),
+            }))
+
     # 3. 创建真实会话 (POST /session)
     elif action == "create_session":
         title = payload.get("title", "Mobile Task")
@@ -378,6 +402,9 @@ async def handle_mobile_message(
     # 4. 发送提示词 (POST /session/:id/message)
     elif action == "send_prompt":
         prompt_text = payload.get("prompt", "")
+        # v1.6 P1: 移动端可指定 model {providerID, modelID} 与 agent
+        req_model = payload.get("model")
+        req_agent = payload.get("agent")
         # 自检本地 OpenCode 服务
         is_healthy, version, err = await check_opencode_health(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
         if not is_healthy:
@@ -422,7 +449,9 @@ async def handle_mobile_message(
                 target_session_id,
                 prompt_text,
                 OPENCODE_API_URL,
-                OPENCODE_PASSWORD
+                OPENCODE_PASSWORD,
+                model=req_model if isinstance(req_model, dict) else None,
+                agent=req_agent if isinstance(req_agent, str) else None,
             )
         except Exception as e:
             logger.error(f"Error sending message to OpenCode: {e}")

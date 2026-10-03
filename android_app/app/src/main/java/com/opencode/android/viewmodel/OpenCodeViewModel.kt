@@ -19,6 +19,8 @@ import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.CloudStreamListener
 import com.opencode.android.network.DeviceInfo
+import com.opencode.android.network.AgentInfo
+import com.opencode.android.network.ModelInfo
 import com.opencode.android.network.PairClaimResult
 import com.opencode.android.network.PairingClient
 import com.opencode.android.network.RelayListener
@@ -476,7 +478,13 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         )
 
         if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
-            relayClient.sendPrompt(trimmed, _uiState.value.currentSessionId)
+            // v1.6 P1: 透传用户选择的 Model/Agent
+            relayClient.sendPrompt(
+                trimmed,
+                _uiState.value.currentSessionId,
+                model = _uiState.value.selectedModel,
+                agent = _uiState.value.selectedAgent
+            )
         } else {
             cloudClient.sendPromptStream(
                 baseUrl = _uiState.value.cloudServerUrl,
@@ -759,6 +767,44 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onDeviceRenamed(deviceName: String) {
         requestDeviceList()
+    }
+
+    // =========================================================================
+    // v1.6 P1 Model/Agent 管理
+    // =========================================================================
+
+    fun requestModelConfig() {
+        if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
+            relayClient.requestConfig()
+        }
+    }
+
+    fun selectAgent(agent: AgentInfo?) {
+        _uiState.update { it.copy(selectedAgent = agent) }
+        prefsManager.saveSelectedAgent(agent?.id ?: "")
+    }
+
+    fun selectModel(model: ModelInfo?) {
+        _uiState.update { it.copy(selectedModel = model) }
+        prefsManager.saveSelectedModel(
+            model?.providerId ?: "", model?.modelId ?: ""
+        )
+    }
+
+    override fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>) {
+        // 恢复上次选择
+        val savedAgentId = prefsManager.getSelectedAgent()
+        val (savedProvider, savedModel) = prefsManager.getSelectedModel()
+        val agent = agents.find { it.id == savedAgentId }
+        val model = models.find { it.providerId == savedProvider && it.modelId == savedModel }
+        _uiState.update {
+            it.copy(
+                availableAgents = agents,
+                availableModels = models,
+                selectedAgent = agent ?: it.selectedAgent,
+                selectedModel = model ?: it.selectedModel
+            )
+        }
     }
 
     override fun onError(code: String, message: String) {

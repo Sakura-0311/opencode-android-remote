@@ -61,7 +61,9 @@ fun ChatScreen(
     onRequestDeviceList: () -> Unit = {},
     onRevokeDevice: (String) -> Unit = {},
     onRenameDevice: (String, String) -> Unit = { _, _ -> },
-    onShowDeviceManager: () -> Unit = {}
+    onShowDeviceManager: () -> Unit = {},
+    // v1.6 P1 Model/Agent
+    onShowModelAgent: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -220,6 +222,15 @@ fun ChatScreen(
                                     onShowDeviceManager()
                                 },
                                 leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) }
+                            )
+                            // v1.6 P1 Model/Agent
+                            DropdownMenuItem(
+                                text = { Text("Model / Agent") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowModelAgent()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) }
                             )
                             DropdownMenuItem(
                                 text = { Text("断开连接", color = MaterialTheme.colorScheme.error) },

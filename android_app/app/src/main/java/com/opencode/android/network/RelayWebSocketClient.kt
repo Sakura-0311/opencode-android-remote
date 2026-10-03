@@ -39,7 +39,28 @@ interface RelayListener {
     fun onDeviceListReceived(devices: List<DeviceInfo>) {}
     fun onDeviceRevoked(deviceName: String) {}
     fun onDeviceRenamed(deviceName: String) {}
+
+    // v1.6 P1 Model/Agent 管理
+    fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>) {}
 }
+
+/**
+ * v1.6 P1: Agent 信息
+ */
+data class AgentInfo(
+    val id: String,
+    val name: String,
+    val description: String = ""
+)
+
+/**
+ * v1.6 P1: Model 信息
+ */
+data class ModelInfo(
+    val providerId: String,
+    val modelId: String,
+    val displayName: String = ""
+)
 
 /**
  * v1.6 P0 多设备管理：设备信息
@@ -295,6 +316,49 @@ class RelayWebSocketClient {
                     listener?.onSessionsListReceived(list)
                 }
 
+                // v1.6 P1: Model/Agent 配置
+                "config_data" -> {
+                    val agents = mutableListOf<AgentInfo>()
+                    val agentArr = json.optJSONArray("agents")
+                    if (agentArr != null) {
+                        for (i in 0 until agentArr.length()) {
+                            val o = agentArr.optJSONObject(i) ?: continue
+                            val id = o.optString("id", o.optString("name", ""))
+                            if (id.isNotEmpty()) {
+                                agents.add(AgentInfo(
+                                    id = id,
+                                    name = o.optString("name", id),
+                                    description = o.optString("description", "")
+                                ))
+                            }
+                        }
+                    }
+                    val models = mutableListOf<ModelInfo>()
+                    val providersObj = json.optJSONObject("providers")
+                    // 兼容两种格式：{providers: [...]} 或 {providerId: {...}}
+                    val providersArr = providersObj?.optJSONArray("providers")
+                    if (providersArr != null) {
+                        for (i in 0 until providersArr.length()) {
+                            val p = providersArr.optJSONObject(i) ?: continue
+                            val pid = p.optString("id", "")
+                            val modelsObj = p.optJSONObject("models")
+                            if (modelsObj != null) {
+                                val keys = modelsObj.keys()
+                                while (keys.hasNext()) {
+                                    val mid = keys.next()
+                                    val mObj = modelsObj.optJSONObject(mid)
+                                    models.add(ModelInfo(
+                                        providerId = pid,
+                                        modelId = mid,
+                                        displayName = mObj?.optString("name", mid) ?: mid
+                                    ))
+                                }
+                            }
+                        }
+                    }
+                    listener?.onConfigDataReceived(agents, models)
+                }
+
                 // 流式交互
                 "stream_start" -> {
                     val sessionId = json.optString("session_id", "default")
@@ -387,19 +451,6 @@ class RelayWebSocketClient {
         webSocket?.send(envelope.toString())
     }
 
-    fun sendPrompt(prompt: String, sessionId: String) {
-        val payload = JSONObject().apply {
-            put("prompt", prompt)
-        }
-        val envelope = JSONObject().apply {
-            put("action", "send_prompt")
-            put("session_id", sessionId)
-            put("req_id", UUID.randomUUID().toString())
-            put("payload", payload)
-        }
-        webSocket?.send(envelope.toString())
-    }
-
     /**
      * v1.6 P0 多设备管理：请求设备列表 / 撤销设备 / 重命名设备
      */
@@ -420,6 +471,43 @@ class RelayWebSocketClient {
             put("old_name", oldName)
             put("new_name", newName)
         }.toString())
+    }
+
+    /**
+     * v1.6 P1: 请求 Model/Agent 配置（动态获取）
+     */
+    fun requestConfig() {
+        val envelope = JSONObject().apply {
+            put("action", "get_config")
+            put("req_id", UUID.randomUUID().toString())
+        }
+        webSocket?.send(envelope.toString())
+    }
+
+    /**
+     * v1.6 P1: 发送消息时可指定 model 与 agent
+     */
+    fun sendPrompt(prompt: String, sessionId: String, model: ModelInfo? = null, agent: AgentInfo? = null) {
+        val payload = JSONObject().apply {
+            put("prompt", prompt)
+            // v1.6 P1: 透传模型与 Agent 选择
+            if (model != null) {
+                put("model", JSONObject().apply {
+                    put("providerID", model.providerId)
+                    put("modelID", model.modelId)
+                })
+            }
+            if (agent != null) {
+                put("agent", agent.id)
+            }
+        }
+        val envelope = JSONObject().apply {
+            put("action", "send_prompt")
+            put("session_id", sessionId)
+            put("req_id", UUID.randomUUID().toString())
+            put("payload", payload)
+        }
+        webSocket?.send(envelope.toString())
     }
 
     fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "", nonce: String? = null) {

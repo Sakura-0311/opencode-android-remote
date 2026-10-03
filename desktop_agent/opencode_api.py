@@ -161,13 +161,16 @@ async def send_session_message_async(
     session_id: str,
     prompt: str,
     base_url: str = DEFAULT_OPENCODE_BASE_URL,
-    password: Optional[str] = None
+    password: Optional[str] = None,
+    model: Optional[dict] = None,
+    agent: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     向 OpenCode 真实端点 POST /session/:id/message 发送用户提示词
     按照标准契约使用 parts: [{type: 'text', text: prompt}]
     B-6: 该端点为同步阻塞语义（等待模型回复完成才返回），超时放宽到 300 秒；
     装依赖、跑测试等长任务不再误报 EXECUTION_ERROR。输出仍全量走 /event 事件流。
+    v1.6 P1: 支持按消息指定 model {providerID, modelID} 与 agent。
     """
     clean_url = base_url.rstrip("/")
     url = f"{clean_url}/session/{session_id}/message"
@@ -180,6 +183,14 @@ async def send_session_message_async(
             }
         ]
     }
+    # v1.6 P1: 透传模型与 Agent 选择
+    if model and isinstance(model, dict) and model.get("modelID"):
+        payload["model"] = {
+            "providerID": model.get("providerID", ""),
+            "modelID": model.get("modelID", ""),
+        }
+    if agent:
+        payload["agent"] = agent
 
     async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=300.0)) as resp:
         if resp.status in (200, 201, 202):
@@ -236,3 +247,37 @@ async def subscribe_events_stream(
                     yield event_data
                 except Exception:
                     pass
+
+
+# ============================================================================
+# v1.6 P1 Model/Agent 管理
+# ============================================================================
+async def get_agents(
+    session: aiohttp.ClientSession,
+    base_url: str = "http://127.0.0.1:4096",
+    password: Optional[str] = None,
+) -> list:
+    """GET /agent — 获取可用 Agent 列表（含自定义 Agent）。"""
+    clean_url = base_url.rstrip("/")
+    url = f"{clean_url}/agent"
+    headers = get_auth_headers(password)
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+        if resp.status == 200:
+            data = await resp.json()
+            return data if isinstance(data, list) else data.get("data", [])
+        return []
+
+
+async def get_providers(
+    session: aiohttp.ClientSession,
+    base_url: str = "http://127.0.0.1:4096",
+    password: Optional[str] = None,
+) -> dict:
+    """GET /config/providers — 获取 Provider 与 Model 列表（动态，非硬编码）。"""
+    clean_url = base_url.rstrip("/")
+    url = f"{clean_url}/config/providers"
+    headers = get_auth_headers(password)
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+        if resp.status == 200:
+            return await resp.json()
+        return {}

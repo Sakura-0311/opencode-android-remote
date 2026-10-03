@@ -190,4 +190,27 @@ class PreferencesManager(context: Context) {
             .putString(KEY_TASK_SESSION, "")
             .apply()
     }
+
+    // v1.6 P1 Model/Agent：选择持久化
+    fun saveSelectedAgent(agentId: String) {
+        prefs.edit().putString("selected_agent", agentId).apply()
+    }
+
+    fun getSelectedAgent(): String {
+        return prefs.getString("selected_agent", "") ?: ""
+    }
+
+    fun saveSelectedModel(providerId: String, modelId: String) {
+        prefs.edit()
+            .putString("selected_model_provider", providerId)
+            .putString("selected_model_id", modelId)
+            .apply()
+    }
+
+    fun getSelectedModel(): Pair<String, String> {
+        return Pair(
+            prefs.getString("selected_model_provider", "") ?: "",
+            prefs.getString("selected_model_id", "") ?: ""
+        )
+    }
 }
