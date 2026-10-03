@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
+import com.opencode.android.util.CrashReporting
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -85,6 +87,8 @@ class MainActivity : ComponentActivity() {
                 var showDiagnose by remember { mutableStateOf(false) }
                 // 对外分发：隐私说明
                 var showPrivacy by remember { mutableStateOf(false) }
+                // 对外分发：崩溃上报开关状态
+                var crashReportEnabled by remember { mutableStateOf(CrashReporting.isOptedIn(this@MainActivity)) }
 
                 if (!uiState.isPaired) {
                     PairingScreen(
@@ -211,6 +215,17 @@ class MainActivity : ComponentActivity() {
                         // 对外分发：隐私说明
                         onShowPrivacy = {
                             showPrivacy = true
+                        },
+                        // 对外分发：崩溃上报开关
+                        crashReportEnabled = crashReportEnabled,
+                        onToggleCrashReport = { enabled ->
+                            CrashReporting.setOptedIn(this@MainActivity, enabled)
+                            crashReportEnabled = enabled
+                            Toast.makeText(
+                                this@MainActivity,
+                                if (enabled) "崩溃上报已开启，重启应用后生效" else "崩溃上报已关闭",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     )
                 }

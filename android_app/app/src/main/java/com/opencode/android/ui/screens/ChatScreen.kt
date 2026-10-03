@@ -75,7 +75,10 @@ fun ChatScreen(
     // P2-15: 连接诊断
     onShowDiagnose: () -> Unit = {},
     // 对外分发：隐私说明
-    onShowPrivacy: () -> Unit = {}
+    onShowPrivacy: () -> Unit = {},
+    // 对外分发：崩溃上报开关
+    crashReportEnabled: Boolean = false,
+    onToggleCrashReport: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -288,6 +291,24 @@ fun ChatScreen(
                                     onShowPrivacy()
                                 },
                                 leadingIcon = { Icon(Icons.Default.PrivacyTip, contentDescription = null) }
+                            )
+                            // 对外分发：崩溃上报开关（默认关闭，重启生效）
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("崩溃上报")
+                                        Switch(
+                                            checked = crashReportEnabled,
+                                            onCheckedChange = { onToggleCrashReport(it) }
+                                        )
+                                    }
+                                },
+                                onClick = { onToggleCrashReport(!crashReportEnabled) },
+                                leadingIcon = { Icon(Icons.Default.BugReport, contentDescription = null) }
                             )
                             DropdownMenuItem(
                                 text = { Text("断开连接", color = MaterialTheme.colorScheme.error) },

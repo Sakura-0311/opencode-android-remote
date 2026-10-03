@@ -3,6 +3,7 @@ package com.opencode.android
 import android.app.Application
 import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.RelayWebSocketClient
+import com.opencode.android.util.CrashReporting
 
 /**
  * v1.6 P0 后台保活：
@@ -17,6 +18,8 @@ class OpenCodeApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 对外分发：ACRA 崩溃上报（用户手动开启后才初始化，默认关闭）
+        CrashReporting.init(this)
         // v1.6 P0 断线恢复：尽早恢复持久化序号
         relayClient.setSeqPersistence(
             getSharedPreferences("relay_seq_store", MODE_PRIVATE)

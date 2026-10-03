@@ -9,7 +9,8 @@ import sys
 import time
 from collections import deque
 from typing import Dict, Set, Optional, Tuple
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import JSONResponse
 import uvicorn
 
 logging.basicConfig(
@@ -511,6 +512,46 @@ def index():
         "security": "Transport Layer Encryption (WSS/TLS) Supported",
         "version": "1.1.0"
     }
+
+# 对外分发：ACRA 崩溃上报接收端（仅收脱敏字段，存本地文件）
+CRASH_REPORT_DIR = os.getenv("RELAY_CRASH_REPORT_DIR", "crash_reports")
+
+@app.post("/api/crash-report")
+async def receive_crash_report(request: Request):
+    """
+    接收 Android 端 ACRA 上报的崩溃报告（JSON）。
+    只保留脱敏字段，存入本地文件，不转发、不外传。
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "invalid json"})
+    if not isinstance(data, dict):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "invalid payload"})
+    # 脱敏白名单：只保留这些字段
+    allowed = {
+        "REPORT_ID", "APP_VERSION_CODE", "APP_VERSION_NAME", "PACKAGE_NAME",
+        "ANDROID_VERSION", "PHONE_MODEL", "BRAND",
+        "STACK_TRACE", "USER_APP_START_DATE", "USER_CRASH_DATE",
+    }
+    report = {k: data.get(k) for k in allowed if k in data}
+    # 堆栈截断防爆（最多 64KB）
+    if isinstance(report.get("STACK_TRACE"), str) and len(report["STACK_TRACE"]) > 65536:
+        report["STACK_TRACE"] = report["STACK_TRACE"][:65536] + "\n...[truncated]"
+    try:
+        os.makedirs(CRASH_REPORT_DIR, exist_ok=True)
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        rid = str(report.get("REPORT_ID", "unknown"))[:32]
+        fname = os.path.join(CRASH_REPORT_DIR, f"crash-{ts}-{rid}.json")
+        with open(fname, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        logger.warning(f"Crash report saved: {fname} "
+                       f"(app {report.get('APP_VERSION_NAME')}, "
+                       f"{report.get('PHONE_MODEL')}, Android {report.get('ANDROID_VERSION')})")
+    except Exception as e:
+        logger.error(f"Failed to save crash report: {e}")
+        return JSONResponse(status_code=500, content={"ok": False, "error": "save failed"})
+    return {"ok": True}
 
 @app.websocket("/ws")
 @app.websocket("/ws/{path_account_id}/{path_client_type}")

@@ -121,6 +121,9 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.1")
     implementation("androidx.camera:camera-view:1.3.1")
 
+    // 对外分发：ACRA 崩溃上报（HTTP Sender，自建 Relay 接收端）
+    implementation("ch.acra:acra-http:5.11.3")
+
     // Debugging UI Tooling
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
