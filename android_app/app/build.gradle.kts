@@ -56,6 +56,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // B-12: UpdateChecker 需要读取 BuildConfig.VERSION_NAME
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
