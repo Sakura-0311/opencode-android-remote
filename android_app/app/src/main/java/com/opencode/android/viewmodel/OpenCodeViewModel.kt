@@ -2,6 +2,7 @@ package com.opencode.android.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.opencode.android.data.local.PreferencesManager
 import com.opencode.android.data.model.AppError
 import com.opencode.android.data.model.AppMode
@@ -15,6 +16,8 @@ import com.opencode.android.data.model.SessionItem
 import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.CloudStreamListener
+import com.opencode.android.network.PairClaimResult
+import com.opencode.android.network.PairingClient
 import com.opencode.android.network.RelayListener
 import com.opencode.android.network.RelayWebSocketClient
 import com.opencode.android.network.TunnelDiagnosticsHelper
@@ -23,6 +26,7 @@ import com.opencode.android.util.MarkdownExporter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
 import java.util.UUID
 
