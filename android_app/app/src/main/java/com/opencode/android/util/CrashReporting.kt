@@ -6,9 +6,8 @@ import android.util.Log
 import com.opencode.android.BuildConfig
 import org.acra.ACRA
 import org.acra.ReportField
-import org.acra.config.ConfigurationBuilder
 import org.acra.config.CoreConfigurationBuilder
-import org.acra.config.HttpSenderConfigurationBuilder
+import org.acra.config.HttpSenderConfiguration
 import org.acra.data.StringFormat
 import org.acra.sender.HttpSender
 
@@ -19,6 +18,9 @@ import org.acra.sender.HttpSender
  * - 上报地址 = 用户自己配置的 Relay 服务器 + /api/crash-report，不经过任何第三方。
  * - 仅上报脱敏字段：版本、机型、Android 版本、堆栈、时间；不含 logcat、设备 ID、
  *   SharedPreferences 内容、聊天记录、密钥。
+ *
+ * ACRA 5.11+ 使用 @AutoDsl 生成的 CoreConfigurationBuilder（属性直接赋值），
+ * HttpSenderConfiguration 为普通 data class，直接构造后放入 pluginConfigurations。
  */
 object CrashReporting {
 
@@ -65,31 +67,30 @@ object CrashReporting {
             return
         }
         try {
-            val builder = ConfigurationBuilder(app)
-            builder.setEnabled(true)
-            builder.getPluginConfigurationBuilder(CoreConfigurationBuilder::class.java).apply {
-                setBuildConfigClass(BuildConfig::class.java)
-                setReportFormat(StringFormat.JSON)
-                setDeleteOldUnsentReportsOnApplicationStart(true)
-                // 最小脱敏字段集：无 logcat、无设备 ID、无偏好内容
-                setReportContent(
-                    ReportField.REPORT_ID,
-                    ReportField.APP_VERSION_CODE,
-                    ReportField.APP_VERSION_NAME,
-                    ReportField.PACKAGE_NAME,
-                    ReportField.ANDROID_VERSION,
-                    ReportField.PHONE_MODEL,
-                    ReportField.BRAND,
-                    ReportField.STACK_TRACE,
-                    ReportField.USER_APP_START_DATE,
-                    ReportField.USER_CRASH_DATE
+            val builder = CoreConfigurationBuilder()
+            builder.buildConfigClass = BuildConfig::class.java
+            builder.reportFormat = StringFormat.JSON
+            builder.deleteUnapprovedReportsOnApplicationStart = true
+            // 最小脱敏字段集：无 logcat、无设备 ID、无偏好内容
+            builder.reportContent = listOf(
+                ReportField.REPORT_ID,
+                ReportField.APP_VERSION_CODE,
+                ReportField.APP_VERSION_NAME,
+                ReportField.PACKAGE_NAME,
+                ReportField.ANDROID_VERSION,
+                ReportField.PHONE_MODEL,
+                ReportField.BRAND,
+                ReportField.STACK_TRACE,
+                ReportField.USER_APP_START_DATE,
+                ReportField.USER_CRASH_DATE
+            )
+            builder.pluginConfigurations = listOf(
+                HttpSenderConfiguration(
+                    uri = uri,
+                    httpMethod = HttpSender.Method.POST,
+                    enabled = true
                 )
-            }
-            builder.getPluginConfigurationBuilder(HttpSenderConfigurationBuilder::class.java).apply {
-                setUri(uri)
-                setHttpMethod(HttpSender.Method.POST)
-                setEnabled(true)
-            }
+            )
             ACRA.init(app, builder)
             Log.i(TAG, "crash reporting enabled -> $uri")
         } catch (e: Exception) {
