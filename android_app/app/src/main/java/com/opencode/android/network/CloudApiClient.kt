@@ -169,21 +169,29 @@ class CloudApiClient {
                         try {
                             val eventObj = JSONObject(dataStr)
                             val type = eventObj.optString("type")
-                            val eventSessionId = eventObj.optString("session_id", sessionId)
+                            // B-2b: 会话 ID 优先从 properties 取，顶层仅作兼容分支
+                            val props = eventObj.optJSONObject("properties")
+                            val eventSessionId = props?.optString("sessionID")?.takeIf { it.isNotEmpty() }
+                                ?: props?.optString("sessionId")?.takeIf { it.isNotEmpty() }
+                                ?: eventObj.optString("session_id").takeIf { it.isNotEmpty() }
+                                ?: eventObj.optString("sessionId").takeIf { it.isNotEmpty() }
 
-                            // 仅处理属于当前 session 的事件
-                            if (eventSessionId == sessionId) {
-                                if (type == "message.part.delta" || type == "delta") {
-                                    val delta = eventObj.optString("delta", eventObj.optString("text", ""))
-                                    if (delta.isNotEmpty()) {
-                                        mainHandler.post {
-                                            listener.onStreamChunk(sessionId, delta)
-                                        }
-                                    }
-                                } else if (type == "session.idle" || type == "message.complete") {
+                            // B-3: 无归属或非当前会话的事件直接丢弃，防串台
+                            if (eventSessionId == null || eventSessionId != sessionId) continue
+
+                            if (type == "message.part.delta" || type == "delta") {
+                                // B-2b: 增量文本同样优先从 properties 取
+                                val delta = props?.optString("delta")?.takeIf { it.isNotEmpty() }
+                                    ?: props?.optString("text")?.takeIf { it.isNotEmpty() }
+                                    ?: eventObj.optString("delta", eventObj.optString("text", ""))
+                                if (delta.isNotEmpty()) {
                                     mainHandler.post {
-                                        listener.onStreamEnd(sessionId)
+                                        listener.onStreamChunk(sessionId, delta)
                                     }
+                                }
+                            } else if (type == "session.idle" || type == "message.complete") {
+                                mainHandler.post {
+                                    listener.onStreamEnd(sessionId)
                                 }
                             }
                         } catch (e: Exception) {

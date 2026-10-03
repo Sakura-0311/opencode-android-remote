@@ -6,6 +6,7 @@ import random
 import secrets
 import stat
 import sys
+import time
 from typing import Dict, Optional, Any
 import aiohttp
 import websockets
@@ -150,6 +151,42 @@ class ToolApprovalManager:
 
 tool_guard = ToolApprovalManager(timeout_seconds=120.0)
 
+# ==============================================================================
+# B-2/B-3: SSE 事件解析辅助 — 优先读 properties，拒绝无归属事件
+# 真实 OpenCode SSE 事件形如：
+#   data: {"type":"message.part.delta","properties":{"sessionID":"ses_xxx",...,"delta":"..."}}
+# 旧代码读顶层字段，永远拿到空值；B-3 要求不匹配手机端已知会话的事件直接丢弃
+# ==============================================================================
+known_session_ids: set = set()
+
+def _extract_event_session(event: Dict[str, Any]) -> Optional[str]:
+    """B-2: 优先从 properties 取会话 ID，顶层字段仅作兼容分支"""
+    props = event.get("properties") or {}
+    if isinstance(props, dict):
+        for key in ("sessionID", "sessionId", "session_id"):
+            sid = props.get(key)
+            if sid:
+                return sid
+    for key in ("session_id", "sessionId", "sessionID"):
+        sid = event.get(key)
+        if sid:
+            return sid
+    return None
+
+def _extract_event_delta(event: Dict[str, Any]) -> str:
+    """B-2: 优先从 properties 取增量文本，顶层字段仅作兼容分支"""
+    props = event.get("properties") or {}
+    if isinstance(props, dict):
+        for key in ("delta", "text", "content"):
+            val = props.get(key)
+            if val:
+                return val
+    for key in ("delta", "text", "content"):
+        val = event.get(key)
+        if val:
+            return val
+    return ""
+
 
 # ==============================================================================
 # OpenCode GET /event SSE 实时事件监听与透传
@@ -166,11 +203,14 @@ async def listen_opencode_events_stream(
         try:
             async for event in subscribe_events_stream(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD):
                 event_type = event.get("type", "")
-                session_id = event.get("session_id", event.get("sessionId", "default"))
+                # B-2: 会话 ID 优先从 properties 取；B-3: 无归属或非已知会话的事件直接丢弃，防串台
+                session_id = _extract_event_session(event)
+                if not session_id or (known_session_ids and session_id not in known_session_ids):
+                    continue
 
                 # 1. 增量 Token 输出 (message.part.delta)
                 if event_type in ("message.part.delta", "delta", "stream_chunk"):
-                    delta_text = event.get("delta", event.get("text", event.get("content", "")))
+                    delta_text = _extract_event_delta(event)
                     if delta_text:
                         await ws_relay.send(json.dumps({
                             "type": "stream_chunk",
@@ -224,7 +264,7 @@ async def listen_opencode_events_stream(
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.warning(f"SSE /event connection interrupted: {e}. Reconnecting in 3s...")
+            logger.exception(f"SSE /event connection interrupted ({e}). Reconnecting in 3s...")
             await asyncio.sleep(3.0)
 
 # ==============================================================================
@@ -249,6 +289,11 @@ async def handle_mobile_message(
     if action == "list_sessions":
         try:
             sessions_data = await query_sessions(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            # B-3: 登记手机端可见的真实会话，供 SSE 过滤用
+            for s in sessions_data or []:
+                sid = s.get("id") if isinstance(s, dict) else None
+                if sid:
+                    known_session_ids.add(sid)
             await ws_relay.send(json.dumps({
                 "type": "sessions_list",
                 "req_id": req_id,
@@ -267,6 +312,9 @@ async def handle_mobile_message(
         title = payload.get("title", "Mobile Task")
         try:
             new_session = await create_session(http_session, title, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            # B-3: 新建会话同样登记
+            if isinstance(new_session, dict) and new_session.get("id"):
+                known_session_ids.add(new_session["id"])
             await ws_relay.send(json.dumps({
                 "type": "session_created",
                 "req_id": req_id,
@@ -308,6 +356,9 @@ async def handle_mobile_message(
             else:
                 created = await create_session(http_session, "Mobile Workspace", OPENCODE_API_URL, OPENCODE_PASSWORD)
                 target_session_id = created.get("id", "default")
+        # B-3: 目标会话登记为已知
+        if target_session_id not in ("default", ""):
+            known_session_ids.add(target_session_id)
 
         # 通知手机端流开始
         await ws_relay.send(json.dumps({

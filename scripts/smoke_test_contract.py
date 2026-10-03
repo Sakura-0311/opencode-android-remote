@@ -1,16 +1,36 @@
+"""
+OpenCode 真实契约冒烟测试 (B-4 重写版)
+
+B-4 修复：旧版只用 urllib 手写请求打 mock，项目里 0 行代码被验证，
+导致 agent.py 缺 import time 这种必崩缺陷能溜进 CI。
+本版直接 import 真实项目代码并用其发请求，mock 仅作为服务端替身。
+"""
+import asyncio
 import json
 import sys
 import os
-import urllib.request
-import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# Lightweight Mock HTTP Server implementing official OpenCode endpoints
+# 把仓库根目录和 desktop_agent 目录加入 sys.path，
+# 使得 `import desktop_agent.agent` 可用（agent.py 内部用 from opencode_api import ...）
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DESKTOP_AGENT_DIR = os.path.join(REPO_ROOT, "desktop_agent")
+for p in (REPO_ROOT, DESKTOP_AGENT_DIR):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+# B-4 核心断言：能 import agent 本身（B-1 的缺 import time 会在这里直接炸）
+import desktop_agent.agent as agent_mod
+from desktop_agent import opencode_api
+import aiohttp
+
+
 class MockOpenCodeHandler(BaseHTTPRequestHandler):
     sessions = [{"id": "ses_01JABCDEF0123456789", "title": "Real OpenCode Workspace"}]
     aborted_sessions = set()
     permissions_recorded = {}
+    messages_received = []
 
     def log_message(self, format, *args):
         pass
@@ -27,7 +47,6 @@ class MockOpenCodeHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(self.sessions).encode("utf-8"))
         elif self.path in ("/api/sessions", "/api/chat", "/health"):
-            # Old fake endpoints return 404 to prove contract verification!
             self.send_response(404)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -53,7 +72,9 @@ class MockOpenCodeHandler(BaseHTTPRequestHandler):
         elif self.path.startswith("/session/") and self.path.endswith("/message"):
             sid = self.path.split("/")[2]
             parts = body.get("parts", [])
+            # 真实契约断言：必须按 parts: [{type:'text', text:...}] 发送
             assert len(parts) > 0 and parts[0].get("type") == "text", f"Invalid parts contract: {body}"
+            self.messages_received.append({"session_id": sid, "body": body})
             self.send_response(202)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -67,7 +88,6 @@ class MockOpenCodeHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"aborted": True}).encode("utf-8"))
         elif "/permissions/" in self.path:
             parts = self.path.split("/")
-            sid = parts[2]
             pid = parts[4]
             self.permissions_recorded[pid] = body
             self.send_response(200)
@@ -78,96 +98,70 @@ class MockOpenCodeHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+
 def run_mock_server(port=4199):
     server = HTTPServer(('127.0.0.1', port), MockOpenCodeHandler)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     return server
 
-def run_smoke_tests():
+
+async def run_smoke_tests():
     port = 4199
     base_url = f"http://127.0.0.1:{port}"
     server = run_mock_server(port)
     print(f"[SmokeTest] Mock OpenCode Server listening on {base_url}")
+    print(f"[SmokeTest] Project code imported from: {agent_mod.__file__}")
 
     try:
-        # 1. 探活测试: GET /global/health
-        req = urllib.request.Request(f"{base_url}/global/health")
-        with urllib.request.urlopen(req) as resp:
-            assert resp.status == 200
-            data = json.loads(resp.read().decode())
-            assert data["status"] == "ok"
-            print(f"✔ 1. Health check (/global/health) passed: HTTP 200, {data}")
+        async with aiohttp.ClientSession() as http_session:
+            # 0. B-4 冒烟：agent 模块可 import（B-1 的 NameError 在此被拦）
+            assert hasattr(agent_mod, "tool_guard"), "tool_guard missing"
+            assert hasattr(agent_mod, "ToolApprovalManager"), "ToolApprovalManager missing"
+            # 顺手验证 B-1 修复：create_approval 内部 time.time() 可调用
+            rec = agent_mod.tool_guard.create_approval("ses_smoke", "perm_smoke_0", "edit", {})
+            assert rec["expires_at"] > 0
+            print("✔ 0. import desktop_agent.agent passed (B-1 guard: time.time() callable)")
 
-        # 验证旧虚假端点必须 404
-        for fake_path in ("/api/health", "/api/chat", "/api/sessions"):
-            try:
-                urllib.request.urlopen(f"{base_url}{fake_path}")
-                assert False, f"Old fake path {fake_path} should have 404'd"
-            except urllib.error.HTTPError as e:
-                assert e.code == 404
-        print("✔ 1.1 Verified old fake paths (/api/*) correctly return 404")
+            # 1. 真实 check_opencode_health 打 mock
+            ok, version, err = await opencode_api.check_opencode_health(http_session, base_url, None)
+            assert ok, f"health check failed: {err}"
+            print(f"✔ 1. check_opencode_health via real code passed: version={version}")
 
-        # 2. 查询真实会话列表: GET /session
-        req = urllib.request.Request(f"{base_url}/session")
-        with urllib.request.urlopen(req) as resp:
-            assert resp.status == 200
-            sessions = json.loads(resp.read().decode())
-            assert len(sessions) >= 1
-            assert sessions[0]["id"].startswith("ses_")
-            print(f"✔ 2. Query real sessions (/session) passed: found {len(sessions)} session ({sessions[0]['id']})")
+            # 2. 真实 query_sessions
+            sessions = await opencode_api.query_sessions(http_session, base_url, None)
+            assert len(sessions) >= 1 and sessions[0]["id"].startswith("ses_")
+            print(f"✔ 2. query_sessions via real code passed: {sessions[0]['id']}")
 
-        # 3. 创建真实会话: POST /session
-        req = urllib.request.Request(
-            f"{base_url}/session",
-            data=json.dumps({"title": "Smoke Test Task"}).encode(),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req) as resp:
-            assert resp.status == 201
-            new_sess = json.loads(resp.read().decode())
+            # 3. 真实 create_session
+            new_sess = await opencode_api.create_session(http_session, "Smoke Test Task", base_url, None)
             assert new_sess["id"].startswith("ses_")
-            print(f"✔ 3. Create real session passed: {new_sess['id']}")
+            print(f"✔ 3. create_session via real code passed: {new_sess['id']}")
 
-        # 4. 发送符合真实 parts 契约的消息: POST /session/:id/message
-        req = urllib.request.Request(
-            f"{base_url}/session/{new_sess['id']}/message",
-            data=json.dumps({"parts": [{"type": "text", "text": "Run verification"}]}).encode(),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req) as resp:
-            assert resp.status == 202
-            res = json.loads(resp.read().decode())
+            # 4. 真实 send_session_message_async，mock 断言 parts 契约
+            res = await opencode_api.send_session_message_async(
+                http_session, new_sess["id"], "Run verification", base_url, None)
             assert res.get("status") == "accepted"
-            print(f"✔ 4. Send message with parts contract passed: {res}")
+            sent = MockOpenCodeHandler.messages_received[-1]
+            assert sent["body"]["parts"][0] == {"type": "text", "text": "Run verification"}
+            print(f"✔ 4. send_session_message_async via real code passed, parts contract verified")
 
-        # 5. 中断/取消真实执行: POST /session/:id/abort
-        req = urllib.request.Request(
-            f"{base_url}/session/{new_sess['id']}/abort",
-            data=b"{}",
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req) as resp:
-            assert resp.status == 200
+            # 5. 真实 abort_session
+            assert await opencode_api.abort_session(http_session, new_sess["id"], base_url, None)
             assert new_sess["id"] in MockOpenCodeHandler.aborted_sessions
-            print(f"✔ 5. Abort session passed: session {new_sess['id']} recorded as aborted")
+            print(f"✔ 5. abort_session via real code passed")
 
-        # 6. 回传工具审批真实决定: POST /session/:id/permissions/:permID
-        req = urllib.request.Request(
-            f"{base_url}/session/{new_sess['id']}/permissions/perm_smoke_99",
-            data=json.dumps({"action": "allow", "response": "allow", "reason": "User allowed"}).encode(),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req) as resp:
-            assert resp.status == 200
-            assert "perm_smoke_99" in MockOpenCodeHandler.permissions_recorded
-            assert MockOpenCodeHandler.permissions_recorded["perm_smoke_99"]["action"] == "allow"
-            print(f"✔ 6. Real tool approval response passed: perm_smoke_99 recorded as allow")
-
+            # 6. 真实 respond_to_permission
+            assert await opencode_api.respond_to_permission(
+                http_session, new_sess["id"], "perm_smoke_99", True, "User allowed", base_url, None)
+            recorded = MockOpenCodeHandler.permissions_recorded.get("perm_smoke_99", {})
+            assert recorded.get("action") == "allow" and recorded.get("response") == "allow"
+            print(f"✔ 6. respond_to_permission via real code passed")
     finally:
         server.shutdown()
 
-    print("\n🎉 ALL OPENCODE CONTRACT SMOKE TESTS PASSED 100%!")
+    print("\n🎉 ALL OPENCODE CONTRACT SMOKE TESTS PASSED 100% (real project code exercised)")
+
 
 if __name__ == "__main__":
-    run_smoke_tests()
+    asyncio.run(run_smoke_tests())
