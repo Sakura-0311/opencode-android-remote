@@ -7,8 +7,8 @@ android {
     namespace = "com.opencode.android"
     compileSdk = 34
 
-    // B-12: versionCode 随 versionName 自动递增（1.5.0 -> 10500）
-    val appVersionName = "1.5.0"
+    // B-12: versionCode 随 versionName 自动递增（1.6.0 -> 10600）
+    val appVersionName = "1.6.0"
     val appVersionCode = appVersionName.split(".").let { p ->
         p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
     }
