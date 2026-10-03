@@ -26,7 +26,7 @@ object AppLog {
 
     // ---- 脱敏规则 ----
     // "Bearer <token>" 两段式先处理（kv 规则只会盖住 Bearer 这个词本身）
-    private val bearerPattern = Regex("""(?i)bearer\s+[A-Za-z0-9\\-._~+/=]+""")
+    private val bearerPattern = Regex("""(?i)bearer\s+[A-Za-z0-9._~+/=-]+""")
     // key= value / key: value / key "value" 形式，key 命中敏感词则掩盖值
     private val kvPattern =
         Regex("""(?i)(secret|password|passwd|api[_-]?key|authorization|token|private[_-]?key)\s*["':=]+\s*["']?([^"'{},\s]+)""")
