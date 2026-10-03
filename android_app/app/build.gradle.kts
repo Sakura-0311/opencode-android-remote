@@ -23,17 +23,16 @@ val releaseKeyAlias = secret("keyAlias", "RELEASE_KEY_ALIAS")
 val releaseKeyPass = secret("keyPassword", "RELEASE_KEY_PASSWORD")
 val hasReleaseSigning = listOf(releaseStorePath, releaseStorePass, releaseKeyAlias, releaseKeyPass)
     .all { !it.isNullOrBlank() }
-// v2.2.1-D: release 构建 fail-fast——缺密钥时直接失败，不再静默用 debug 签名
-tasks.named("assembleRelease") {
-    doFirst {
-        if (!hasReleaseSigning) {
-            throw GradleException(
-                "v2.2.1-D: 缺少 release 签名密钥，禁止构建 release 包。" +
-                "请配置环境变量 RELEASE_KEYSTORE_FILE/RELEASE_KEYSTORE_PASSWORD/" +
-                "RELEASE_KEY_ALIAS/RELEASE_KEY_PASSWORD，或 android_app/keystore.properties；" +
-                "本地调试请用 assembleDebug。"
-            )
-        }
+// v2.2.1-D: release 构建 fail-fast——缺密钥时直接失败，不再静默用 debug 签名。
+// 用 taskGraph.whenReady（assemble* task 由 AGP 在配置期后创建，named() 会找不到）。
+val releaseSigningFailMsg =
+    "v2.2.1-D: 缺少 release 签名密钥，禁止构建 release 包。" +
+    "请配置环境变量 RELEASE_KEYSTORE_FILE/RELEASE_KEYSTORE_PASSWORD/" +
+    "RELEASE_KEY_ALIAS/RELEASE_KEY_PASSWORD，或 android_app/keystore.properties；" +
+    "本地调试请用 assembleDebug。"
+gradle.taskGraph.whenReady {
+    if (!hasReleaseSigning && allTasks.any { it.name == "assembleRelease" }) {
+        throw GradleException(releaseSigningFailMsg)
     }
 }
 

@@ -40,11 +40,20 @@ jobs:
       - name: assembleRelease without keystore must fail
         working-directory: android_app
         run: |
-          if gradle :app:assembleRelease --no-daemon --console=plain --stacktrace; then
+          set +e
+          out=$(gradle :app:assembleRelease --no-daemon --console=plain --stacktrace 2>&1)
+          code=$?
+          echo "$out" | tail -5
+          if [ $code -eq 0 ]; then
             echo "::error::assembleRelease 在无密钥时意外成功，fail-fast 失效"
             exit 1
-          else
+          fi
+          # 必须是我们的 fail-fast 文案，而不是配置错误等其他失败
+          if echo "$out" | grep -q "v2.2.1-D: 缺少 release 签名密钥"; then
             echo "OK: assembleRelease correctly refused to build without release keystore"
+          else
+            echo "::error::assembleRelease 失败了，但不是预期的 fail-fast 文案"
+            exit 1
           fi
 
   android-build:
