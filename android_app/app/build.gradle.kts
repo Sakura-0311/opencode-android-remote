@@ -3,6 +3,27 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// N-1: 签名密钥永不进仓库。按优先级读取：
+//   1) 环境变量 RELEASE_KEYSTORE_FILE / RELEASE_KEYSTORE_PASSWORD /
+//      RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD（CI 从 Secrets 注入）
+//   2) android_app/keystore.properties（本地开发，已 gitignore）
+//   缺失时降级为 debug 签名并打警告，保证 CI 不中断；该包不可对外分发。
+val keystoreProps = java.util.Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun secret(key: String, env: String): String? =
+    (System.getenv(env) ?: keystoreProps.getProperty(key))?.takeIf { it.isNotBlank() }
+val releaseStorePath = secret("storeFile", "RELEASE_KEYSTORE_FILE")
+val releaseStorePass = secret("storePassword", "RELEASE_KEYSTORE_PASSWORD")
+val releaseKeyAlias = secret("keyAlias", "RELEASE_KEY_ALIAS")
+val releaseKeyPass = secret("keyPassword", "RELEASE_KEY_PASSWORD")
+val hasReleaseSigning = listOf(releaseStorePath, releaseStorePass, releaseKeyAlias, releaseKeyPass)
+    .all { !it.isNullOrBlank() }
+if (!hasReleaseSigning) {
+    logger.warn("[N-1] 未配置 release 签名密钥，本次构建的 release 包将使用 debug 签名，不可对外分发")
+}
+
 android {
     namespace = "com.opencode.android"
     compileSdk = 34
@@ -26,24 +47,6 @@ android {
         }
     }
 
-    // N-1: 签名密钥永不进仓库。按优先级读取：
-    //   1) 环境变量 RELEASE_KEYSTORE_FILE / RELEASE_KEYSTORE_PASSWORD /
-    //      RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD（CI 从 Secrets 注入）
-    //   2) android_app/keystore.properties（本地开发，已 gitignore）
-    //   缺失时降级为 debug 签名并打警告，保证 CI 不中断；该包不可对外分发。
-    val keystoreProps = java.util.Properties().apply {
-        val f = rootProject.file("keystore.properties")
-        if (f.exists()) f.inputStream().use { load(it) }
-    }
-    fun secret(key: String, env: String): String? =
-        (System.getenv(env) ?: keystoreProps.getProperty(key))?.takeIf { it.isNotBlank() }
-    val releaseStorePath = secret("storeFile", "RELEASE_KEYSTORE_FILE")
-    val releaseStorePass = secret("storePassword", "RELEASE_KEYSTORE_PASSWORD")
-    val releaseKeyAlias = secret("keyAlias", "RELEASE_KEY_ALIAS")
-    val releaseKeyPass = secret("keyPassword", "RELEASE_KEY_PASSWORD")
-    val hasReleaseSigning = listOf(releaseStorePath, releaseStorePass, releaseKeyAlias, releaseKeyPass)
-        .all { !it.isNullOrBlank() }
-
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
@@ -65,16 +68,6 @@ android {
             // N-1: 有密钥才用 release 签名，否则降级 debug 签名（CI 可用，不可分发）
             signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release")
             else signingConfigs.getByName("debug")
-            if (!hasReleaseSigning) {
-                logger.warn("[N-1] 未配置 release 签名密钥，本次包为 debug 签名，不可对外分发")
-            }
-        }
-    }
-            signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release")
-            else signingConfigs.getByName("debug")
-            if (!hasReleaseSigning) {
-                logger.warn("[N-1] 未配置 release 签名密钥，本次包为 debug 签名，不可对外分发")
-            }
         }
     }
     compileOptions {
