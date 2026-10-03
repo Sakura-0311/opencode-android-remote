@@ -1,5 +1,6 @@
 package com.opencode.android.network
 
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import okhttp3.*
@@ -28,7 +29,25 @@ class CloudApiClient {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var activeStreamCall: Call? = null
+    // v1.6 P0 断线恢复：SSE lastEventId 持久化（按服务器+会话区分）
+    private var eventIdPrefs: SharedPreferences? = null
     @Volatile private var lastEventId: String? = null
+    @Volatile private var currentEventKey: String = ""
+
+    fun setEventIdPersistence(prefs: SharedPreferences) {
+        eventIdPrefs = prefs
+    }
+
+    private fun eventKey() = currentEventKey
+
+    private fun loadPersistedEventId() {
+        lastEventId = eventIdPrefs?.getString(eventKey(), null)
+    }
+
+    private fun persistEventId(id: String) {
+        lastEventId = id
+        eventIdPrefs?.edit()?.putString(eventKey(), id)?.apply()
+    }
 
     private fun buildAuthHeader(apiKey: String): String {
         return if (apiKey.isNotBlank()) {
@@ -104,6 +123,10 @@ class CloudApiClient {
         val eventUrl = "$cleanUrl/event"
         val auth = buildAuthHeader(apiKey)
 
+        // v1.6 P0 断线恢复：按服务器+会话恢复游标
+        currentEventKey = "sse_event_id_${cleanUrl.hashCode()}_${sessionId}"
+        loadPersistedEventId()
+
         // 1. 发起 SSE /event 长连接订阅
         val sseRequestBuilder = Request.Builder()
             .url(eventUrl)
@@ -158,7 +181,8 @@ class CloudApiClient {
                         if (call.isCanceled()) break
                         val currentLine = line ?: continue
                         if (currentLine.startsWith("id:")) {
-                            lastEventId = currentLine.removePrefix("id:").trim()
+                            // v1.6: 持久化游标，App 重启/重连后可续传
+                            persistEventId(currentLine.removePrefix("id:").trim())
                             continue
                         }
                         if (!currentLine.startsWith("data:")) continue

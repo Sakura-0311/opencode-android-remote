@@ -35,6 +35,14 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     private val _uiState: MutableStateFlow<OpenCodeUiState>
 
     init {
+        // v1.6 P0 断线恢复：relay 消息序号持久化
+        relayClient.setSeqPersistence(
+            application.getSharedPreferences("relay_seq_store", android.content.Context.MODE_PRIVATE)
+        )
+        // v1.6 P0 断线恢复：云端 SSE 游标持久化
+        cloudClient.setEventIdPersistence(
+            application.getSharedPreferences("sse_event_store", android.content.Context.MODE_PRIVATE)
+        )
         // P1-1: 彻底移除虚假写死的 Demo 会话数据，以真实服务拉取为准
         val savedSessions = prefsManager.getSavedSessions()
 

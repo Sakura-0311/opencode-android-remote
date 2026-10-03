@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import time
+from collections import deque
 from typing import Dict, Set, Optional, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
@@ -116,11 +117,15 @@ class ConnectionManager:
         # account_id -> {
         #   "secret_hash": str,
         #   "desktop": Optional[ClientSession],
-        #   "mobiles": Set[ClientSession]
+        #   "mobiles": Set[ClientSession],
+        #   "msg_buffer": deque,  # v1.6 P0 断线恢复：房间消息环形缓冲
+        #   "next_seq": int,      # v1.6: 下一条消息序号
         # }
         self.rooms: Dict[str, dict] = {}
         # websocket -> ClientSession
         self.sessions: Dict[WebSocket, ClientSession] = {}
+        # v1.6: 每个房间保留最近 N 条下行消息，供移动端断线重连补发
+        self.room_buffer_size = int(os.getenv("RELAY_ROOM_BUFFER_SIZE", "200"))
 
     def get_session(self, ws: WebSocket) -> Optional[ClientSession]:
         return self.sessions.get(ws)
@@ -147,7 +152,10 @@ class ConnectionManager:
             self.rooms[account_id] = {
                 "secret_hash": secret_hash,
                 "desktop": None,
-                "mobiles": set()
+                "mobiles": set(),
+                # v1.6 P0 断线恢复
+                "msg_buffer": deque(maxlen=self.room_buffer_size),
+                "next_seq": 1,
             }
             logger.info(f"New room created: {account_id} by desktop.")
 
@@ -247,9 +255,24 @@ class ConnectionManager:
                 except Exception:
                     pass
         elif sender_session.client_type == "desktop":
+            # v1.6 P0 断线恢复：分配单调序号并入环形缓冲，供移动端断线重连补发
+            seq = room.get("next_seq", 1)
+            room["next_seq"] = seq + 1
+            try:
+                msg_obj = json.loads(message_str)
+                if isinstance(msg_obj, dict):
+                    msg_obj["relay_seq"] = seq
+                    sequenced_str = json.dumps(msg_obj)
+                else:
+                    sequenced_str = message_str
+            except Exception:
+                sequenced_str = message_str
+            buf = room.get("msg_buffer")
+            if buf is not None:
+                buf.append({"seq": seq, "msg": sequenced_str})
             for m_session in list(room.get("mobiles", [])):
                 try:
-                    await m_session.websocket.send_text(message_str)
+                    await m_session.websocket.send_text(sequenced_str)
                 except Exception as e:
                     logger.error(f"Error routing desktop -> mobile in {account_id}: {e}")
 
@@ -373,6 +396,38 @@ async def websocket_endpoint(
         "account_id": account_id,
         "client_type": client_type
     }))
+
+    # v1.6 P0 断线恢复：移动端携带 last_relay_seq 重连时，补发缓冲中缺失的消息
+    if client_type == "mobile":
+        try:
+            last_seq = int(auth_data.get("last_relay_seq", 0) or 0)
+        except (TypeError, ValueError):
+            last_seq = 0
+        room = manager.rooms.get(account_id)
+        if room:
+            missed = [m for m in room.get("msg_buffer", []) if m["seq"] > last_seq]
+            # 超过缓冲窗口：明确告知需要重同步，而非静默丢失
+            if last_seq > 0 and not missed and room.get("next_seq", 1) - 1 > last_seq:
+                await websocket.send_text(json.dumps({
+                    "type": "resync_required",
+                    "message": "断线时间过长，本地缓存已过期，请重新同步会话状态。",
+                    "last_server_seq": room.get("next_seq", 1) - 1
+                }))
+            for m in missed:
+                try:
+                    await websocket.send_text(m["msg"])
+                except Exception:
+                    break
+            if missed:
+                logger.info(f"v1.6: replayed {len(missed)} buffered messages to mobile in {account_id} (after seq {last_seq})")
+        # 告知客户端当前服务端序号，便于幂等去重
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "seq_sync",
+                "server_seq": manager.rooms.get(account_id, {}).get("next_seq", 1) - 1
+            }))
+        except Exception:
+            pass
 
     # 3. 进入双向业务消息收发循环
     try:

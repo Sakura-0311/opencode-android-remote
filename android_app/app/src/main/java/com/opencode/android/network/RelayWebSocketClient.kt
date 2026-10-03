@@ -1,5 +1,6 @@
 package com.opencode.android.network
 
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import com.opencode.android.data.model.DiffLine
@@ -55,6 +56,28 @@ class RelayWebSocketClient {
     private val maxBackoffMs = 60000L
     private var reconnectRunnable: Runnable? = null
 
+    // v1.6 P0 断线恢复：relay 消息序号持久化与幂等去重
+    private var seqPrefs: SharedPreferences? = null
+    @Volatile private var lastRelaySeq: Long = 0L
+    @Volatile private var serverSeq: Long = 0L
+
+    fun setSeqPersistence(prefs: SharedPreferences) {
+        seqPrefs = prefs
+    }
+
+    private fun seqKey() = "last_relay_seq_$currentAccountId"
+
+    private fun loadPersistedSeq() {
+        lastRelaySeq = seqPrefs?.getLong(seqKey(), 0L) ?: 0L
+    }
+
+    private fun persistSeq(seq: Long) {
+        if (seq > lastRelaySeq) {
+            lastRelaySeq = seq
+            seqPrefs?.edit()?.putLong(seqKey(), seq)?.apply()
+        }
+    }
+
     fun connect(relayUrl: String, accountId: String, secret: String, listener: RelayListener) {
         cancelPendingReconnect()
         this.currentUrl = relayUrl.trim().removeSuffix("/")
@@ -62,6 +85,8 @@ class RelayWebSocketClient {
         this.currentSecret = secret.trim()
         this.listener = listener
         this.isExplicitDisconnect = false
+        // v1.6: 恢复该房间的已确认序号
+        loadPersistedSeq()
 
         initiateConnection()
     }
@@ -85,11 +110,13 @@ class RelayWebSocketClient {
                     listener?.onConnected()
 
                     // P0-1: 连接建立后第一包必须发送认证帧
+                    // v1.6: 携带 last_relay_seq，服务端补发断线期间的消息
                     val authPacket = JSONObject().apply {
                         put("type", "auth")
                         put("account_id", currentAccountId)
                         put("secret", currentSecret)
                         put("client_type", "mobile")
+                        put("last_relay_seq", lastRelaySeq)
                     }
                     webSocket.send(authPacket.toString())
                 }
@@ -151,7 +178,24 @@ class RelayWebSocketClient {
     private fun parseIncomingMessage(ws: WebSocket, jsonText: String) {
         try {
             val json = JSONObject(jsonText)
+            // v1.6 P0 断线恢复：幂等去重——服务端补发的消息可能与已收到的重复
+            if (json.has("relay_seq")) {
+                val seq = json.optLong("relay_seq", -1L)
+                if (seq >= 0 && seq <= lastRelaySeq) {
+                    return  // 已处理过，丢弃
+                }
+                if (seq > 0) persistSeq(seq)
+            }
             when (val type = json.optString("type")) {
+                // v1.6 P0 断线恢复：服务端告知当前序号（重连后）
+                "seq_sync" -> {
+                    serverSeq = json.optLong("server_seq", serverSeq)
+                }
+                // v1.6 P0: 缓冲已过期，明确告知需要重同步而非静默丢失
+                "resync_required" -> {
+                    val msg = json.optString("message", "需要重新同步会话状态")
+                    listener?.onAppError("RESYNC_REQUIRED", msg)
+                }
                 // P0-1: 认证反馈
                 "auth_ok" -> {
                     listener?.onAuthenticated()
