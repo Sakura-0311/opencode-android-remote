@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.android.data.model.*
 import com.opencode.android.ui.components.ToolApprovalDialog
+import com.opencode.android.ui.components.MarkdownText
+import com.opencode.android.ui.components.looksLikeMarkdown
 import com.opencode.android.util.MarkdownExporter
 import kotlinx.coroutines.launch
 
@@ -65,7 +67,13 @@ fun ChatScreen(
     // v1.6 P1 Model/Agent
     onShowModelAgent: () -> Unit = {},
     // v1.6 P1 项目管理中心
-    onShowProjectCenter: () -> Unit = {}
+    onShowProjectCenter: () -> Unit = {},
+    // P2-12: 文件浏览器
+    onShowFileBrowser: () -> Unit = {},
+    // P2-13: 任务中心
+    onShowTaskCenter: () -> Unit = {},
+    // P2-15: 连接诊断
+    onShowDiagnose: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -242,6 +250,33 @@ fun ChatScreen(
                                     onShowProjectCenter()
                                 },
                                 leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) }
+                            )
+                            // P2-12: 文件浏览器
+                            DropdownMenuItem(
+                                text = { Text("文件浏览器") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowFileBrowser()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) }
+                            )
+                            // P2-13: 任务中心
+                            DropdownMenuItem(
+                                text = { Text("任务中心") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowTaskCenter()
+                                },
+                                leadingIcon = { Icon(Icons.Default.TaskAlt, contentDescription = null) }
+                            )
+                            // P2-15: 连接诊断
+                            DropdownMenuItem(
+                                text = { Text("连接诊断") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowDiagnose()
+                                },
+                                leadingIcon = { Icon(Icons.Default.NetworkCheck, contentDescription = null) }
                             )
                             DropdownMenuItem(
                                 text = { Text("断开连接", color = MaterialTheme.colorScheme.error) },
@@ -558,6 +593,15 @@ fun MessageBubbleWithHighlight(message: ChatMessage, appMode: AppMode, highlight
 
                 SelectionContainer {
                     val rawText = message.content.ifEmpty { if (message.isStreaming) "▌" else "..." }
+                    val useMarkdown = !isUser && !isError && highlightQuery.isBlank() &&
+                        remember(rawText) { looksLikeMarkdown(rawText) }
+                    if (useMarkdown) {
+                        // P2-11: AI 回复走原生 Markdown 渲染
+                        MarkdownText(
+                            markdown = rawText,
+                            baseColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
                     val annotatedText = buildAnnotatedString {
                         if (highlightQuery.isBlank()) {
                             append(rawText)
@@ -588,6 +632,7 @@ fun MessageBubbleWithHighlight(message: ChatMessage, appMode: AppMode, highlight
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         }
                     )
+                    } // P2-11: useMarkdown=false 分支结束
                 }
 
                 if (message.isStreaming) {

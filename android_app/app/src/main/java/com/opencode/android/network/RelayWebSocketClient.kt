@@ -56,6 +56,11 @@ interface RelayListener {
     fun onDeviceListReceived(devices: List<DeviceInfo>) {}
     fun onDeviceRevoked(deviceName: String) {}
     fun onDeviceRenamed(deviceName: String) {}
+    // P2-12: 文件浏览器
+    fun onFileListResult(reqId: String, path: String, entries: List<FileEntry>) {}
+    fun onFileReadResult(reqId: String, path: String, content: String, truncated: Boolean) {}
+    // P2-15: 连接诊断
+    fun onDiagnoseResult(reqId: String, opencodeOk: Boolean, version: String, error: String) {}
 
     // v1.6 P1 Model/Agent 管理
     fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>, configError: String? = null) {}
@@ -101,6 +106,16 @@ data class DeviceInfo(
     val createdAt: Long = 0L,
     val isOnline: Boolean = false,
     val lastActive: Long = 0L
+)
+
+/**
+ * P2-12: 文件浏览器条目
+ */
+data class FileEntry(
+    val name: String,
+    val isDir: Boolean,
+    val size: Long = 0L,
+    val mtime: Long = 0L
 )
 
 class RelayWebSocketClient {
@@ -408,6 +423,45 @@ class RelayWebSocketClient {
                     listener?.onSessionsListReceived(list)
                 }
 
+                // P2-12: 文件浏览器结果
+                "file_list_result" -> {
+                    val reqId = json.optString("req_id", "")
+                    val path = json.optString("path", "")
+                    val entries = mutableListOf<FileEntry>()
+                    val arr = json.optJSONArray("entries")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val o = arr.getJSONObject(i)
+                            entries.add(
+                                FileEntry(
+                                    name = o.optString("name", ""),
+                                    isDir = o.optBoolean("is_dir", false),
+                                    size = o.optLong("size", 0L),
+                                    mtime = o.optLong("mtime", 0L)
+                                )
+                            )
+                        }
+                    }
+                    listener?.onFileListResult(reqId, path, entries)
+                }
+                "file_read_result" -> {
+                    listener?.onFileReadResult(
+                        json.optString("req_id", ""),
+                        json.optString("path", ""),
+                        json.optString("content", ""),
+                        json.optBoolean("truncated", false)
+                    )
+                }
+                // P2-15: 连接诊断结果
+                "diagnose_result" -> {
+                    listener?.onDiagnoseResult(
+                        json.optString("req_id", ""),
+                        json.optBoolean("opencode_ok", false),
+                        json.optString("opencode_version", ""),
+                        json.optString("opencode_error", "")
+                    )
+                }
+
                 // v1.6 P1: Model/Agent 配置
                 "config_data" -> {
                     val agents = mutableListOf<AgentInfo>()
@@ -597,6 +651,45 @@ class RelayWebSocketClient {
             put("new_name", newName)
         }.toString())
     }
+
+    /**
+     * P2-12: 文件浏览器——列目录 / 读文件（经 Relay 转发给桌面端 agent）
+     */
+    fun sendFileList(path: String): String {
+        val reqId = UUID.randomUUID().toString()
+        val envelope = JSONObject().apply {
+            put("action", "file_list")
+            put("req_id", reqId)
+            put("payload", JSONObject().apply { put("path", path) })
+        }
+        webSocket?.send(envelope.toString())
+        return reqId
+    }
+
+    fun sendFileRead(path: String): String {
+        val reqId = UUID.randomUUID().toString()
+        val envelope = JSONObject().apply {
+            put("action", "file_read")
+            put("req_id", reqId)
+            put("payload", JSONObject().apply { put("path", path) })
+        }
+        webSocket?.send(envelope.toString())
+        return reqId
+    }
+
+    /**
+     * P2-15: 连接诊断——请求桌面端自检 OpenCode 服务健康度
+     */
+    fun sendDiagnose(): String {
+        val reqId = UUID.randomUUID().toString()
+        val envelope = JSONObject().apply {
+            put("action", "diagnose")
+            put("req_id", reqId)
+        }
+        webSocket?.send(envelope.toString())
+        return reqId
+    }
+}
 
     /**
      * v1.6 P1: 请求 Model/Agent 配置（动态获取）

@@ -25,6 +25,9 @@ import com.opencode.android.util.UpdateChecker
 import com.opencode.android.viewmodel.OpenCodeViewModel
 import com.opencode.android.service.OpenCodeKeepAliveService
 import com.opencode.android.ui.screens.DeviceManagementDialog
+import com.opencode.android.ui.screens.FileBrowserDialog
+import com.opencode.android.ui.screens.TaskCenterDialog
+import com.opencode.android.ui.screens.ConnectionDiagnoseDialog
 import com.opencode.android.ui.screens.ModelAgentDialog
 import com.opencode.android.ui.screens.ProjectCenterDialog
 
@@ -73,6 +76,12 @@ class MainActivity : ComponentActivity() {
                 var showModelAgent by remember { mutableStateOf(false) }
                 // v1.6 P1 项目管理中心
                 var showProjectCenter by remember { mutableStateOf(false) }
+                // P2-12: 文件浏览器
+                var showFileBrowser by remember { mutableStateOf(false) }
+                // P2-13: 任务中心
+                var showTaskCenter by remember { mutableStateOf(false) }
+                // P2-15: 连接诊断
+                var showDiagnose by remember { mutableStateOf(false) }
 
                 if (!uiState.isPaired) {
                     PairingScreen(
@@ -182,6 +191,19 @@ class MainActivity : ComponentActivity() {
                         // v1.6 P1 项目管理中心
                         onShowProjectCenter = {
                             showProjectCenter = true
+                        },
+                        // P2-12: 文件浏览器
+                        onShowFileBrowser = {
+                            showFileBrowser = true
+                            viewModel.openFileBrowser()
+                        },
+                        // P2-13: 任务中心
+                        onShowTaskCenter = {
+                            showTaskCenter = true
+                        },
+                        // P2-15: 连接诊断
+                        onShowDiagnose = {
+                            showDiagnose = true
                         }
                     )
                 }
@@ -254,6 +276,48 @@ class MainActivity : ComponentActivity() {
                             showProjectCenter = false
                         },
                         onDismiss = { showProjectCenter = false }
+                    )
+                }
+
+                // P2-12: 文件浏览器
+                if (showFileBrowser) {
+                    FileBrowserDialog(
+                        currentPath = uiState.fileBrowserPath,
+                        entries = uiState.fileBrowserEntries,
+                        loading = uiState.fileBrowserLoading,
+                        previewPath = uiState.filePreviewPath,
+                        previewContent = uiState.filePreviewContent,
+                        previewTruncated = uiState.filePreviewTruncated,
+                        onNavigate = { viewModel.navigateFileBrowser(it) },
+                        onPreview = { viewModel.previewFile(it) },
+                        onClosePreview = { viewModel.closeFilePreview() },
+                        onRefresh = { viewModel.openFileBrowser(uiState.fileBrowserPath) },
+                        onDismiss = { showFileBrowser = false }
+                    )
+                }
+
+                // P2-13: 任务中心
+                if (showTaskCenter) {
+                    TaskCenterDialog(
+                        uiState = uiState,
+                        onSelectSession = { viewModel.switchSession(it) },
+                        onCancelTask = { viewModel.cancelExecution() },
+                        onApprove = {
+                            uiState.pendingApproval?.callId?.let { viewModel.approveTool(it) }
+                        },
+                        onReject = {
+                            uiState.pendingApproval?.callId?.let { viewModel.rejectTool(it) }
+                        },
+                        onDismiss = { showTaskCenter = false }
+                    )
+                }
+
+                // P2-15: 连接诊断
+                if (showDiagnose) {
+                    ConnectionDiagnoseDialog(
+                        uiState = uiState,
+                        onRunDiagnose = { viewModel.runDiagnose() },
+                        onDismiss = { showDiagnose = false }
                     )
                 }
             }

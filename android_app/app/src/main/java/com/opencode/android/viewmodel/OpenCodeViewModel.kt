@@ -19,6 +19,7 @@ import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.CloudStreamListener
 import com.opencode.android.network.DeviceInfo
+import com.opencode.android.network.FileEntry
 import com.opencode.android.network.AgentInfo
 import com.opencode.android.network.ModelInfo
 import com.opencode.android.network.ProjectInfo
@@ -59,6 +60,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 taskStatus = status,
                 taskStatusDetail = detail,
+                // P2-13: 任务中心用——任务开始时间（用于计算耗时）
+                taskStartTimeMs = if (status == TaskStatus.RUNNING) System.currentTimeMillis() else it.taskStartTimeMs,
                 isGenerating = status == TaskStatus.RUNNING
                         || status == TaskStatus.WAITING_INPUT
                         || status == TaskStatus.APPROVAL_REQUIRED
@@ -598,6 +601,66 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             state.copy(
                 availableSessions = sortSessions(merged),
                 currentSessionId = currentId
+            )
+        }
+    }
+
+    // ============ P2-12: 文件浏览器 ============
+
+    /** 打开文件浏览器（path 为空则从桌面端家目录开始） */
+    fun openFileBrowser(path: String = "") {
+        _uiState.update { it.copy(fileBrowserLoading = true, filePreviewPath = "") }
+        relayClient.sendFileList(path)
+    }
+
+    fun navigateFileBrowser(path: String) {
+        openFileBrowser(path)
+    }
+
+    fun closeFilePreview() {
+        _uiState.update { it.copy(filePreviewPath = "", filePreviewContent = "", filePreviewTruncated = false) }
+    }
+
+    fun previewFile(path: String) {
+        _uiState.update { it.copy(fileBrowserLoading = true) }
+        relayClient.sendFileRead(path)
+    }
+
+    override fun onFileListResult(reqId: String, path: String, entries: List<FileEntry>) {
+        _uiState.update {
+            it.copy(
+                fileBrowserPath = path,
+                fileBrowserEntries = entries,
+                fileBrowserLoading = false
+            )
+        }
+    }
+
+    override fun onFileReadResult(reqId: String, path: String, content: String, truncated: Boolean) {
+        _uiState.update {
+            it.copy(
+                filePreviewPath = path,
+                filePreviewContent = content,
+                filePreviewTruncated = truncated,
+                fileBrowserLoading = false
+            )
+        }
+    }
+
+    // ============ P2-15: 连接诊断 ============
+
+    fun runDiagnose() {
+        _uiState.update { it.copy(diagnoseLoading = true, diagnoseOpencodeOk = null) }
+        relayClient.sendDiagnose()
+    }
+
+    override fun onDiagnoseResult(reqId: String, opencodeOk: Boolean, version: String, error: String) {
+        _uiState.update {
+            it.copy(
+                diagnoseLoading = false,
+                diagnoseOpencodeOk = opencodeOk,
+                diagnoseOpencodeVersion = version,
+                diagnoseOpencodeError = error
             )
         }
     }

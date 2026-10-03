@@ -2,6 +2,7 @@ package com.opencode.android.data.model
 
 import com.opencode.android.network.AgentInfo
 import com.opencode.android.network.DeviceInfo
+import com.opencode.android.network.FileEntry
 import com.opencode.android.network.ModelInfo
 import com.opencode.android.network.ProjectInfo
 import com.opencode.android.network.RelayConnectionState
@@ -99,6 +100,8 @@ data class OpenCodeUiState(
     // v1.6 P0 后台保活：明确的任务状态（锁屏/后台/重连后可恢复显示）
     val taskStatus: TaskStatus = TaskStatus.IDLE,
     val taskStatusDetail: String = "",
+    // P2-13: 任务中心用——当前任务开始时间戳
+    val taskStartTimeMs: Long = 0L,
     // v1.6 P0 多设备管理：已配对设备列表
     val pairedDevices: List<DeviceInfo> = emptyList(),
     // v1.6 P1 Model/Agent：可用列表与当前选择
@@ -130,6 +133,18 @@ data class OpenCodeUiState(
     val isReconnecting: Boolean = false,
     // P0-4: Relay 连接状态机（UI 据此区分网络/鉴权/Desktop 故障）
     val relayConnectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED,
+    // P2-12: 文件浏览器状态
+    val fileBrowserPath: String = "",
+    val fileBrowserEntries: List<FileEntry> = emptyList(),
+    val fileBrowserLoading: Boolean = false,
+    val filePreviewPath: String = "",
+    val filePreviewContent: String = "",
+    val filePreviewTruncated: Boolean = false,
+    // P2-15: 连接诊断结果
+    val diagnoseLoading: Boolean = false,
+    val diagnoseOpencodeOk: Boolean? = null,
+    val diagnoseOpencodeVersion: String = "",
+    val diagnoseOpencodeError: String = "",
     
     // 会话与分组管理
     // B-13: 默认空会话列表，无会话时走空状态提示，不再显示假数据

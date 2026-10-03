@@ -368,6 +368,50 @@ async def listen_opencode_events_stream(
 # ==============================================================================
 # 手机端消息调度与处理
 # ==============================================================================
+# ==============================================================================
+# P2-12: 文件浏览器辅助函数
+# ==============================================================================
+FILE_READ_MAX_BYTES = int(os.getenv("AGENT_FILE_READ_MAX_BYTES", str(200 * 1024)))
+
+def _list_dir_entries(path: str) -> list:
+    """列出目录条目：按目录优先、名称排序。"""
+    abs_path = os.path.abspath(os.path.expanduser(path))
+    entries = []
+    with os.scandir(abs_path) as it:
+        for entry in it:
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+                stat = entry.stat(follow_symlinks=False)
+                entries.append({
+                    "name": entry.name,
+                    "is_dir": is_dir,
+                    "size": stat.st_size,
+                    "mtime": int(stat.st_mtime),
+                })
+            except OSError:
+                continue
+    entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+    return entries
+
+def _read_text_file(path: str) -> tuple:
+    """读取文本文件；二进制或超大文件拒绝/截断。返回 (content, truncated)。"""
+    abs_path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.isfile(abs_path):
+        raise FileNotFoundError(f"不是文件: {abs_path}")
+    size = os.path.getsize(abs_path)
+    truncated = size > FILE_READ_MAX_BYTES
+    with open(abs_path, "rb") as f:
+        raw = f.read(FILE_READ_MAX_BYTES)
+    if b"\x00" in raw:
+        raise ValueError("二进制文件不支持预览")
+    # 尝试 utf-8，失败则用系统默认编码容错
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        content = raw.decode("utf-8", errors="replace")
+    return content, truncated
+
+
 async def handle_mobile_message(
     msg_data: dict,
     ws_relay: websockets.WebSocketClientProtocol,
@@ -601,6 +645,72 @@ async def handle_mobile_message(
             tool_guard.remove_approval(call_id)
         else:
             logger.warning(f"respond_to_permission failed for {call_id}, keeping record for retry")
+
+    # P2-12: 文件浏览器——列目录
+    elif action == "file_list":
+        req_path = payload.get("path") or os.path.expanduser("~")
+        try:
+            entries = _list_dir_entries(req_path)
+            await ws_relay.send(json.dumps({
+                "type": "file_list_result",
+                "req_id": req_id,
+                "path": os.path.abspath(req_path),
+                "entries": entries
+            }))
+        except Exception as e:
+            logger.warning(f"file_list failed for {req_path}: {e}")
+            await ws_relay.send(json.dumps({
+                "type": "error",
+                "code": "FILE_LIST_ERROR",
+                "req_id": req_id,
+                "message": f"读取目录失败: {e}"
+            }))
+
+    # P2-12: 文件浏览器——读文件（文本，大小上限 200KB，二进制拒绝）
+    elif action == "file_read":
+        req_path = payload.get("path", "")
+        try:
+            content, truncated = _read_text_file(req_path)
+            await ws_relay.send(json.dumps({
+                "type": "file_read_result",
+                "req_id": req_id,
+                "path": os.path.abspath(req_path),
+                "content": content,
+                "truncated": truncated
+            }))
+        except Exception as e:
+            logger.warning(f"file_read failed for {req_path}: {e}")
+            await ws_relay.send(json.dumps({
+                "type": "error",
+                "code": "FILE_READ_ERROR",
+                "req_id": req_id,
+                "message": f"读取文件失败: {e}"
+            }))
+
+    # P2-15: 连接诊断——桌面端自检 OpenCode 服务健康度
+    elif action == "diagnose":
+        try:
+            is_healthy, version, err = await check_opencode_health(
+                http_session, OPENCODE_API_URL, OPENCODE_PASSWORD
+            )
+            await ws_relay.send(json.dumps({
+                "type": "diagnose_result",
+                "req_id": req_id,
+                "opencode_ok": is_healthy,
+                "opencode_version": version or "",
+                "opencode_error": err or "",
+                "relay_ok": True,
+            }))
+        except Exception as e:
+            logger.warning(f"diagnose failed: {e}")
+            await ws_relay.send(json.dumps({
+                "type": "diagnose_result",
+                "req_id": req_id,
+                "opencode_ok": False,
+                "opencode_version": "",
+                "opencode_error": str(e),
+                "relay_ok": True,
+            }))
 
 # ==============================================================================
 # Agent 主运行循环与自动重连
