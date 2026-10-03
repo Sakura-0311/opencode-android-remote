@@ -172,7 +172,9 @@ jobs:
         run: |
           curl -sSL https://github.com/google/osv-scanner/releases/download/v2.0.3/osv-scanner_linux_amd64 \
             -o /tmp/osv-scanner && chmod +x /tmp/osv-scanner
-          /tmp/osv-scanner --sbom=android_app/app/build/reports/cyclonedx-bom.json
+          # osv-scanner 按文件名识别 SBOM 格式，CycloneDX 需 .cdx.json 后缀
+          cp android_app/app/build/reports/cyclonedx-bom.json /tmp/sbom-scan.cdx.json
+          /tmp/osv-scanner --sbom=/tmp/sbom-scan.cdx.json
       - name: Upload SBOM
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
