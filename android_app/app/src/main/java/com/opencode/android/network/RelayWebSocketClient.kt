@@ -7,6 +7,8 @@ import com.opencode.android.data.model.DiffLine
 import com.opencode.android.data.model.DiffLineType
 import com.opencode.android.data.model.SessionItem
 import com.opencode.android.data.model.ToolApprovalRequest
+import com.opencode.android.util.AppLog
+import com.opencode.android.util.FeatureFlags
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -15,8 +17,6 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import kotlin.math.min
-import kotlin.random.Random
 
 /**
  * P0-4: Relay WebSocket 连接状态机。
@@ -46,6 +46,10 @@ interface RelayListener {
     fun onStreamChunk(sessionId: String, chunk: String)
     fun onStreamEnd(sessionId: String)
     fun onAppError(code: String, message: String)
+    // v2.3: 重同步语义——不再走 onAppError（不弹任务失败通知、不中止进度）
+    fun onResyncRequired(message: String) {}
+    // v2.3: 写操作未确认（socket 不可用，发送失败），由用户手动重试，不自动重发
+    fun onWriteUnconfirmed(action: String, clientMsgId: String) {}
     fun onError(error: String)
     fun onToolApprovalRequest(request: ToolApprovalRequest) {}
     fun onSessionsListReceived(sessions: List<SessionItem>) {}
@@ -154,10 +158,16 @@ class RelayWebSocketClient {
         else -> false
     }
 
-    // P2-10: 指数退避重连机制
-    private var backoffMs = 3000L
-    private val maxBackoffMs = 60000L
+    // v2.3: 统一退避器（3s 起、×1.5、封顶 60s、±15% 抖动，与 v2.2 参数一致）
+    private val backoff = Backoff(
+        baseMs = 3000L, factor = 1.5, maxMs = 60000L,
+        jitterLow = 0.85, jitterHigh = 1.15
+    )
     private var reconnectRunnable: Runnable? = null
+    // v2.3: socket 代号——connect() 先 cancel 旧连接，过期回调直接丢弃
+    private var socketGen = 0
+    // v2.3: 网络层标记离线时暂停重连计时器
+    @Volatile private var networkPaused = false
 
     // v1.6 P0 断线恢复：relay 消息序号持久化与幂等去重
     private var seqPrefs: SharedPreferences? = null
@@ -240,15 +250,37 @@ class RelayWebSocketClient {
         loadPersistedEpoch()  // v2.2.1-C
     }
 
-    private fun persistSeq(seq: Long) {
-        if (seq > lastRelaySeq) {
-            lastRelaySeq = seq
-            seqPrefs?.edit()?.putLong(seqKey(), seq)?.apply()
+    // v2.3: seq 持久化改成「处理后再写」——内存先更新保证去重，磁盘在消息处理成功后 flush，
+    // 避免进程在处理中崩溃时丢一条（at-least-once，重复由去重逻辑消化）
+    private fun trackSeq(seq: Long) {
+        if (seq > lastRelaySeq) lastRelaySeq = seq
+    }
+
+    private fun flushSeq() {
+        val s = lastRelaySeq
+        try {
+            seqPrefs?.edit()?.putLong(seqKey(), s)?.apply()
+        } catch (e: Exception) {
+            // ignore
         }
+    }
+
+    private fun persistSeq(seq: Long) {
+        trackSeq(seq)
+        flushSeq()
     }
 
     fun connect(relayUrl: String, accountId: String, secret: String, listener: RelayListener) {
         cancelPendingReconnect()
+        // v2.3: 先关闭旧连接，避免重复调用留下旧 socket 及其回调
+        try {
+            webSocket?.cancel()
+        } catch (e: Exception) {
+            // ignore
+        }
+        webSocket = null
+        socketGen++ // 旧回调全部作废
+        networkPaused = false
         this.currentUrl = relayUrl.trim().removeSuffix("/")
         this.currentAccountId = accountId.trim()
         this.currentSecret = secret.trim()
@@ -259,6 +291,32 @@ class RelayWebSocketClient {
 
         setState(RelayConnectionState.CONNECTING)
         initiateConnection()
+    }
+
+    // v2.3: 网络回调入口（由 NetworkMonitor 驱动）
+    fun onNetworkLost() {
+        if (!FeatureFlags.USE_NETWORK_MONITOR) return
+        AppLog.i("Relay", "network lost, pausing reconnect")
+        networkPaused = true
+        cancelPendingReconnect()
+        if (connectionState == RelayConnectionState.RECONNECTING) {
+            setState(RelayConnectionState.DISCONNECTED)
+        }
+    }
+
+    fun onNetworkAvailable() {
+        if (!FeatureFlags.USE_NETWORK_MONITOR) return
+        AppLog.i("Relay", "network available, rebuilding connection")
+        val wasPaused = networkPaused
+        networkPaused = false
+        // 离线期间断开的（或从未连上），直接重建，不等 ping 超时
+        if (!isExplicitDisconnect && !isConnected() &&
+            connectionState != RelayConnectionState.AUTH_FAILED) {
+            if (wasPaused || connectionState == RelayConnectionState.DISCONNECTED) {
+                backoff.reset()
+                initiateConnection()
+            }
+        }
     }
 
     private fun initiateConnection() {
@@ -273,11 +331,15 @@ class RelayWebSocketClient {
             .build()
 
         setState(RelayConnectionState.CONNECTING)
+        // v2.3: 每次建连递增代号；回调先验代号，过期直接丢弃
+        val gen = ++socketGen
+        fun isStale(): Boolean = gen != socketGen
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 mainHandler.post {
-                    // 重置退避
-                    backoffMs = 3000L
+                    if (isStale()) return@post
+                    // v2.3: 连接成功，退避归零
+                    backoff.reset()
                     setState(RelayConnectionState.CONNECTED)
                     listener?.onConnected()
 
@@ -297,6 +359,7 @@ class RelayWebSocketClient {
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 mainHandler.post {
+                    if (isStale()) return@post
                     parseIncomingMessage(webSocket, text)
                 }
             }
@@ -307,10 +370,17 @@ class RelayWebSocketClient {
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 mainHandler.post {
+                    if (isStale()) return@post
+                    AppLog.i("Relay", "ws closed code=$code reason=$reason")
                     listener?.onDisconnected("连接已断开: $reason ($code)")
-                    if (!isExplicitDisconnect && code != 4401 && code != 4429) {
-                        setState(RelayConnectionState.RECONNECTING)
-                        scheduleReconnect()
+                    // v2.3: 不可重试错误（鉴权失败/被封禁）绝不重连
+                    if (!isExplicitDisconnect && !Backoff.isNonRetryableCloseCode(code)) {
+                        if (networkPaused) {
+                            setState(RelayConnectionState.DISCONNECTED)
+                        } else {
+                            setState(RelayConnectionState.RECONNECTING)
+                            scheduleReconnect()
+                        }
                     } else if (connectionState != RelayConnectionState.AUTH_FAILED) {
                         // P0-4: 鉴权失败时保持 AUTH_FAILED，不被覆盖
                         setState(RelayConnectionState.DISCONNECTED)
@@ -320,12 +390,18 @@ class RelayWebSocketClient {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 mainHandler.post {
+                    if (isStale()) return@post
                     val errMsg = t.localizedMessage ?: "网络连接异常"
+                    AppLog.w("Relay", "ws failure: $errMsg")
                     listener?.onError(errMsg)
                     listener?.onDisconnected("连接失败: $errMsg")
                     if (!isExplicitDisconnect) {
-                        setState(RelayConnectionState.RECONNECTING)
-                        scheduleReconnect()
+                        if (networkPaused) {
+                            setState(RelayConnectionState.DISCONNECTED)
+                        } else {
+                            setState(RelayConnectionState.RECONNECTING)
+                            scheduleReconnect()
+                        }
                     } else if (connectionState != RelayConnectionState.AUTH_FAILED) {
                         setState(RelayConnectionState.DISCONNECTED)
                     }
@@ -336,14 +412,13 @@ class RelayWebSocketClient {
 
     private fun scheduleReconnect() {
         cancelPendingReconnect()
-        val jitter = Random.nextDouble(0.85, 1.15)
-        val actualDelay = (min(maxBackoffMs.toDouble(), backoffMs * jitter)).toLong()
-        backoffMs = min(maxBackoffMs, (backoffMs * 1.5).toLong())
+        // v2.3: 统一退避器（参数与 v2.2 一致：3s 起、×1.5、封顶 60s、±15% 抖动）
+        val actualDelay = backoff.nextDelayMs()
 
         listener?.onReconnecting(actualDelay)
 
         reconnectRunnable = Runnable {
-            if (!isExplicitDisconnect) {
+            if (!isExplicitDisconnect && !networkPaused) {
                 initiateConnection()
             }
         }
@@ -359,33 +434,44 @@ class RelayWebSocketClient {
         try {
             val json = JSONObject(jsonText)
             // v1.6 P0 断线恢复：幂等去重——服务端补发的消息可能与已收到的重复
+            // v2.3: 先 track（内存），处理成功后再 flush 落盘
+            var newSeqSeen = false
             if (json.has("relay_seq")) {
                 val seq = json.optLong("relay_seq", -1L)
                 if (seq >= 0 && seq <= lastRelaySeq) {
                     return  // 已处理过，丢弃
                 }
-                if (seq > 0) persistSeq(seq)
+                if (seq > 0) {
+                    trackSeq(seq)
+                    newSeqSeen = true
+                }
             }
             when (val type = json.optString("type")) {
                 // v1.6 P0 断线恢复：服务端告知当前序号（重连后）
                 "seq_sync" -> {
                     serverSeq = json.optLong("server_seq", serverSeq)
                     // v2.2.1-C: epoch 变化说明房间重建，seq 归零并提示重同步
+                    // v2.3: 走 onResyncRequired
                     if (checkEpoch(json)) {
-                        listener?.onAppError("RESYNC_REQUIRED", "服务器已重启，消息序号已重置，正在重新同步。")
+                        AppLog.i("Relay", "room_epoch changed, seq reset")
+                        listener?.onResyncRequired("服务器已重启，消息序号已重置，正在重新同步。")
                     }
                 }
                 // v1.6 P0: 缓冲已过期，明确告知需要重同步而非静默丢失
+                // v2.3: 走 onResyncRequired，不再按任务失败处理
                 "resync_required" -> {
                     val msg = json.optString("message", "需要重新同步会话状态")
-                    listener?.onAppError("RESYNC_REQUIRED", msg)
+                    AppLog.i("Relay", "resync_required: $msg")
+                    listener?.onResyncRequired(msg)
                 }
                 // P0-1: 认证反馈
                 "auth_ok" -> {
                     setState(RelayConnectionState.AUTHENTICATED)
                     // v2.2.1-C: auth_ok 也可能携带 epoch，先做检查（seq_sync 还会再确认）
+                    // v2.3: 走 onResyncRequired
                     if (checkEpoch(json)) {
-                        listener?.onAppError("RESYNC_REQUIRED", "服务器已重启，消息序号已重置，正在重新同步。")
+                        AppLog.i("Relay", "room_epoch changed on auth_ok, seq reset")
+                        listener?.onResyncRequired("服务器已重启，消息序号已重置，正在重新同步。")
                     }
                     listener?.onAuthenticated()
                 }
@@ -651,6 +737,8 @@ class RelayWebSocketClient {
                 }
                 else -> {}
             }
+            // v2.3: 消息处理成功后才落盘 seq
+            if (newSeqSeen) flushSeq()
         } catch (e: Exception) {
             listener?.onError("数据解析错误: ${e.message}")
         }
@@ -758,7 +846,25 @@ class RelayWebSocketClient {
     /**
      * v1.6 P1: 发送消息时可指定 model 与 agent
      */
+    // v2.3: 写操作幂等 ID（agent 侧去重，TTL 缓存）
+    private fun newClientMsgId(): String = UUID.randomUUID().toString()
+
+    /** 发送信封；返回 false 表示 socket 不可用（未确认），由调用方处理 */
+    private fun sendEnvelope(action: String, envelope: JSONObject, clientMsgId: String): Boolean {
+        val ok = try {
+            webSocket?.send(envelope.toString()) ?: false
+        } catch (e: Exception) {
+            false
+        }
+        if (!ok) {
+            AppLog.w("Relay", "write unconfirmed: action=$action")
+            listener?.onWriteUnconfirmed(action, clientMsgId)
+        }
+        return ok
+    }
+
     fun sendPrompt(prompt: String, sessionId: String, model: ModelInfo? = null, agent: AgentInfo? = null) {
+        val clientMsgId = newClientMsgId()
         val payload = JSONObject().apply {
             put("prompt", prompt)
             // v1.6 P1: 透传模型与 Agent 选择
@@ -776,9 +882,10 @@ class RelayWebSocketClient {
             put("action", "send_prompt")
             put("session_id", sessionId)
             put("req_id", UUID.randomUUID().toString())
+            put("client_msg_id", clientMsgId)
             put("payload", payload)
         }
-        webSocket?.send(envelope.toString())
+        sendEnvelope("send_prompt", envelope, clientMsgId)
     }
 
     fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "", nonce: String? = null) {
@@ -798,12 +905,14 @@ class RelayWebSocketClient {
     }
 
     fun sendCancel(sessionId: String) {
+        val clientMsgId = newClientMsgId()
         val envelope = JSONObject().apply {
             put("action", "cancel")
             put("session_id", sessionId)
             put("req_id", UUID.randomUUID().toString())
+            put("client_msg_id", clientMsgId)
         }
-        webSocket?.send(envelope.toString())
+        sendEnvelope("cancel", envelope, clientMsgId)
     }
 
     fun disconnect() {

@@ -2,8 +2,12 @@ package com.opencode.android
 
 import android.app.Application
 import com.opencode.android.network.CloudApiClient
+import com.opencode.android.network.NetworkMonitor
 import com.opencode.android.network.RelayWebSocketClient
+import com.opencode.android.util.AppLog
 import com.opencode.android.util.CrashReporting
+import com.opencode.android.util.FeatureFlags
+import java.io.File
 
 /**
  * v1.6 P0 后台保活：
@@ -16,8 +20,13 @@ class OpenCodeApp : Application() {
     val relayClient: RelayWebSocketClient by lazy { RelayWebSocketClient() }
     val cloudClient: CloudApiClient by lazy { CloudApiClient() }
 
+    // v2.3: 网络变化监听（500ms 防抖），驱动 relay 重连
+    private var networkMonitor: NetworkMonitor? = null
+
     override fun onCreate() {
         super.onCreate()
+        // v2.3: 环形文件日志（2×1MB，脱敏）
+        AppLog.init(File(cacheDir, "applog"))
         // 对外分发：ACRA 崩溃上报（用户手动开启后才初始化，默认关闭）
         CrashReporting.init(this)
         // v1.6 P0 断线恢复：尽早恢复持久化序号
@@ -27,5 +36,15 @@ class OpenCodeApp : Application() {
         cloudClient.setEventIdPersistence(
             getSharedPreferences("sse_event_store", MODE_PRIVATE)
         )
+        // v2.3: 网络回调——断网暂停重连，恢复时重建连接（不等 ping 超时）
+        if (FeatureFlags.USE_NETWORK_MONITOR) {
+            networkMonitor = NetworkMonitor(this).also { monitor ->
+                monitor.start(object : NetworkMonitor.Callback {
+                    override fun onNetworkLost() = relayClient.onNetworkLost()
+                    override fun onNetworkAvailable() = relayClient.onNetworkAvailable()
+                })
+            }
+            AppLog.i("App", "NetworkMonitor started")
+        }
     }
 }

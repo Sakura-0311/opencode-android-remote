@@ -1,3 +1,27 @@
+# OpenCode Android Remote - Release v2.3.0（稳定性/弱网）
+
+## 内容
+
+- **网络回调**：`NetworkMonitor`（500ms 防抖），断网时暂停重连计时器，网络恢复时直接重建连接，不再等 OkHttp ping 超时（`FeatureFlags.USE_NETWORK_MONITOR` 可回退旧行为）
+- **重同步语义**：`RESYNC_REQUIRED` / epoch 变化不再走任务失败路径；新增 `onResyncRequired`，只追加同步提示，不中止进度、不弹失败通知
+- **统一重连**：`Backoff` 退避器（Relay 与 Cloud SSE 共用；鉴权失败/被封禁绝不重试）；Cloud SSE 重试上限从固定 8 次改为持续离线 30 分钟，并向 UI 暴露重连状态
+- **connect() 清理**：先 cancel 旧 socket；每个 socket 带代号，过期回调直接丢弃
+- **写操作幂等**：`send_prompt` / `cancel` 带 `client_msg_id`，agent 侧 TTL（10 分钟）去重；发送失败（socket 不可用）显示「未确认」由用户手动重试，绝不自动重发
+- **日志**：`AppLog` 环形文件日志（2×1MB），统一脱敏（Secret/口令/token/URL query，prompt 与代码正文不进日志），可导出
+- **配置 schema**：`PreferencesManager` 加 `schema_version` 与幂等迁移（v1）
+- **seq 持久化**：改成「处理后再写盘」（at-least-once，重复由去重消化）
+
+## 测试
+
+- CI：`testDebugUnitTest`（`BackoffTest`、`AppLogRedactTest`）+ 冒烟测试
+- 待人工真机验证：飞行模式开关 / Wi-Fi↔蜂窝切换后 ≤10s 恢复；relay 重启后（有 epoch）手机能收到新消息；导出日志无 Secret；断线下重复点击发送不产生重复任务
+
+## 兼容性
+
+协议只加可选字段（`client_msg_id`、`duplicate_ignored`）；存储只增 key。详见 `docs/COMPATIBILITY.md`。
+
+---
+
 # OpenCode Android Remote - Release v2.2.1（热修）
 
 > 基于 v2.2 源码的代码审计修订（P0 先修，不加新功能）。v2.x 之间可覆盖升级（签名不变）。

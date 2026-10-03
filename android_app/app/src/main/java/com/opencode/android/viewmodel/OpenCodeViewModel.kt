@@ -882,6 +882,47 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
+     * v2.3: 重同步语义——收到 resync_required / epoch 变化时调用。
+     * 不再按任务失败处理：不中止进度、不弹失败通知，只追加一条同步提示；
+     * 服务端会自动补发缓冲消息（epoch 重置后 lastRelaySeq=0，全量补发）。
+     */
+    override fun onResyncRequired(message: String) {
+        _uiState.update { state ->
+            val notice = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                role = MessageRole.SYSTEM,
+                content = "【同步】$message",
+                isError = false
+            )
+            state.copy(messages = (state.messages + notice).takeLast(MAX_MESSAGES_COUNT))
+        }
+    }
+
+    /**
+     * v2.3: 写操作未确认（socket 不可用）。显示「未确认」提示，由用户手动重试，
+     * 绝不自动重发 prompt（避免断线重连后产生重复任务）。
+     */
+    override fun onWriteUnconfirmed(action: String, clientMsgId: String) {
+        val what = when (action) {
+            "send_prompt" -> "消息"
+            "cancel" -> "中断请求"
+            else -> "操作"
+        }
+        _uiState.update { state ->
+            val notice = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                role = MessageRole.SYSTEM,
+                content = "【未确认】${what}未能发出（连接不可用），请重连后手动重发，不会自动重发。",
+                isError = true
+            )
+            state.copy(
+                messages = (state.messages + notice).takeLast(MAX_MESSAGES_COUNT),
+                isGenerating = false
+            )
+        }
+    }
+
+    /**
      * v1.6 P0 任务通知：AI 等待用户输入（高优先级通知 + 状态）
      */
     override fun onWaitingInput(sessionId: String, prompt: String) {

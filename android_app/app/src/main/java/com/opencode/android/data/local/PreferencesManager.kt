@@ -35,8 +35,15 @@ class PreferencesManager(context: Context) {
     private val prefs: SharedPreferences =
         securePrefs ?: context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    // v2.3: 存储 schema 版本。只增不改 key；变更带幂等迁移。
+    init {
+        migrateIfNeeded()
+    }
+
     companion object {
         private const val PREFS_NAME = "opencode_remote_prefs"
+        private const val KEY_SCHEMA_VERSION = "schema_version"
+        private const val CURRENT_SCHEMA_VERSION = 1
         private const val KEY_APP_MODE = "app_mode"
         private const val KEY_ACCOUNT_ID = "account_id"
         private const val KEY_SECRET = "secret"
@@ -252,5 +259,36 @@ class PreferencesManager(context: Context) {
 
     fun getFavoriteProjects(): List<String> {
         return prefs.getStringSet("favorite_projects", emptySet())?.toList() ?: emptyList()
+    }
+
+    /**
+     * v2.3: schema 迁移（幂等）。v0→v1：现有 key 保持不变，仅打版本号戳。
+     * 后续版本在此按 version < N 逐级迁移。
+     */
+    private fun migrateIfNeeded() {
+        val current = try {
+            prefs.getInt(KEY_SCHEMA_VERSION, 0)
+        } catch (e: Exception) {
+            0
+        }
+        if (current >= CURRENT_SCHEMA_VERSION) return
+        try {
+            var v = current
+            // v0 -> v1: 无 key 变更，仅记录版本
+            if (v < 1) {
+                v = 1
+            }
+            prefs.edit().putInt(KEY_SCHEMA_VERSION, v).apply()
+        } catch (e: Exception) {
+            android.util.Log.w("PrefsManager", "schema migrate failed", e)
+        }
+    }
+
+    fun getSchemaVersion(): Int {
+        return try {
+            prefs.getInt(KEY_SCHEMA_VERSION, 0)
+        } catch (e: Exception) {
+            0
+        }
     }
 }

@@ -41,7 +41,7 @@ android {
     compileSdk = 34
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000）
-    val appVersionName = "2.2.1"
+    val appVersionName = "2.3.0"
     val appVersionCode = appVersionName.split(".").let { p ->
         p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
     }
@@ -139,4 +139,8 @@ dependencies {
     // Debugging UI Tooling
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // v2.3: 本地单测（Backoff / AppLog 脱敏等纯 Kotlin 逻辑）
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

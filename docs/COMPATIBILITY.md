@@ -29,18 +29,21 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 | --- | --- |
 | 2.2.0 | 20200 |
 | 2.2.1 | 20201 |
+| 2.3.0 | 20300 |
 
 ## 协议兼容（v2.2.1）
 
 - 只加可选字段：`auth_ok` / `seq_sync` 新增 `room_epoch`（字符串，可空）。旧 App 忽略未知字段；新 App 连旧 relay（无 epoch）时保持旧行为。
 - `file_list_result` 新增 `roots`（允许根目录列表）；旧 App 忽略。
 - 错误码新增 `PATH_NOT_ALLOWED`（文件沙盒拒绝）；旧 App 会显示为普通错误文案，不影响其他功能。
+- v2.3：`send_prompt` / `cancel` 信封新增可选 `client_msg_id`；agent 可能回复 `duplicate_ignored`（旧 App 忽略未知 type）。
 
 ## 存储兼容
 
 - Android：只增不改 key。新增 `last_relay_seq_<hash>_<account>_<uuid>_epoch`（序号纪元）。
 - Relay：`~/.config/opencode-remote/relay_state.json`（0600，schema_version=1），只存设备密钥哈希与主密钥哈希。
 - Agent：主 Secret 默认位置从启动目录 `.opencode_secret` 迁移到 `~/.config/opencode-remote/.opencode_secret`；旧位置有有效密钥时自动迁移（目录 0700 / 文件 0600）。
+- v2.3：`PreferencesManager` 新增 `schema_version`（当前 1），只增不改 key。
 
 ## 发布顺序
 

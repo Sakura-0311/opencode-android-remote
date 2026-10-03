@@ -3,6 +3,7 @@ package com.opencode.android.network
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
+import com.opencode.android.util.AppLog
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -17,6 +18,8 @@ interface CloudStreamListener {
     fun onStreamChunk(sessionId: String, chunk: String)
     fun onStreamEnd(sessionId: String)
     fun onError(code: String, message: String)
+    // v2.3: SSE 重连状态暴露（UI 可显示"重连中"指示）
+    fun onSseStateChanged(retrying: Boolean, attempt: Int) {}
 }
 
 class CloudApiClient {
@@ -33,11 +36,13 @@ class CloudApiClient {
     private var eventIdPrefs: SharedPreferences? = null
     @Volatile private var lastEventId: String? = null
     @Volatile private var currentEventKey: String = ""
-    // P1-8: SSE 指数退避重连状态
+    // v2.3: SSE 重连改用统一退避器（1s 起、×2、封顶 30s）；重试上限按「持续离线时长」而非固定次数
+    private val sseBackoff = Backoff(baseMs = 1000L, factor = 2.0, maxMs = 30000L)
     private var sseRetryCount: Int = 0
     private var sseRetryRunnable: Runnable? = null
     private var sseStreamActive: Boolean = false
     private var sseLastParams: SseParams? = null
+    private var sseFirstFailureAt: Long = 0L
 
     private data class SseParams(
         val baseUrl: String,
@@ -48,10 +53,8 @@ class CloudApiClient {
     )
 
     companion object {
-        // P1-8: 重连退避参数
-        private const val SSE_RETRY_BASE_MS = 1000L
-        private const val SSE_RETRY_MAX_MS = 30000L
-        private const val SSE_MAX_RETRIES = 8
+        // v2.3: 持续离线超过此时长则停止 SSE 重试（之前是固定 8 次）
+        private const val SSE_MAX_OFFLINE_MS = 30L * 60L * 1000L
     }
 
     fun setEventIdPersistence(prefs: SharedPreferences) {
@@ -147,6 +150,8 @@ class CloudApiClient {
         // P1-8: 保存参数供重连使用；新一轮流重置退避
         sseLastParams = SseParams(cleanUrl, apiKey, sessionId, prompt, listener)
         sseRetryCount = 0
+        sseFirstFailureAt = 0L
+        sseBackoff.reset()
         sseStreamActive = true
 
         subscribeEventStream(sendPrompt = true)
@@ -201,8 +206,8 @@ class CloudApiClient {
                     return
                 }
 
-                // 连接成功：重置退避计数
-                sseRetryCount = 0
+                // v2.3: 连接成功——重置退避与离线计时，并通知 UI 重连结束
+                onSseOpened()
 
                 mainHandler.post {
                     listener.onStreamStart(sessionId)
@@ -435,22 +440,31 @@ class CloudApiClient {
     }
 
     /**
-     * P1-8: SSE 指数退避重连（1s→2s→4s…上限 30s，最多 8 次），用 Last-Event-ID 续传。
+     * v2.3: SSE 指数退避重连（统一 Backoff：1s 起、×2、上限 30s），用 Last-Event-ID 续传。
+     * 重试上限按「持续离线时长」（30 分钟）而非固定次数；状态向 UI 暴露。
      * 达到上限后才向 UI 报错。
      */
     private fun scheduleSseRetry(reason: String) {
         if (!sseStreamActive) return
         val params = sseLastParams ?: return
-        if (sseRetryCount >= SSE_MAX_RETRIES) {
+        val now = System.currentTimeMillis()
+        if (sseFirstFailureAt == 0L) sseFirstFailureAt = now
+        if (now - sseFirstFailureAt > SSE_MAX_OFFLINE_MS) {
             sseStreamActive = false
             sseRetryRunnable = null
+            AppLog.w("Cloud", "SSE retry exhausted after 30min offline")
             mainHandler.post {
+                params.listener.onSseStateChanged(false, sseRetryCount)
                 params.listener.onError("SSE_RETRY_EXHAUSTED", "云端事件流多次重连失败，已停止重试: $reason")
             }
             return
         }
-        val delayMs = (SSE_RETRY_BASE_MS shl sseRetryCount).coerceAtMost(SSE_RETRY_MAX_MS)
+        val delayMs = sseBackoff.nextDelayMs()
         sseRetryCount++
+        AppLog.i("Cloud", "SSE retry #$sseRetryCount in ${delayMs}ms: $reason")
+        mainHandler.post {
+            params.listener.onSseStateChanged(true, sseRetryCount)
+        }
         val runnable = Runnable {
             sseRetryRunnable = null
             if (sseStreamActive) {
@@ -459,6 +473,17 @@ class CloudApiClient {
         }
         sseRetryRunnable = runnable
         mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    /** v2.3: 流成功建立时调用——重置退避与离线计时，并通知 UI */
+    private fun onSseOpened() {
+        sseBackoff.reset()
+        sseRetryCount = 0
+        sseFirstFailureAt = 0L
+        val listener = sseLastParams?.listener ?: return
+        mainHandler.post {
+            listener.onSseStateChanged(false, 0)
+        }
     }
 
     fun cancelCurrentStream() {

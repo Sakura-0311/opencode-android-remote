@@ -508,6 +508,24 @@ def _read_text_file(path: str) -> tuple:
     return content, truncated
 
 
+# v2.3: 写操作幂等——client_msg_id 去重缓存（TTL 10 分钟，防断线重发导致重复任务）
+_client_msg_id_seen: dict = {}
+_CLIENT_MSG_ID_TTL = 600
+
+def _is_duplicate_client_msg(client_msg_id: str) -> bool:
+    """client_msg_id 见过且未过期则返回 True（重复），否则记录并返回 False。"""
+    if not client_msg_id:
+        return False
+    now = time.time()
+    # 顺手清理过期条目（低频操作，直接全扫）
+    expired = [k for k, ts in _client_msg_id_seen.items() if now - ts > _CLIENT_MSG_ID_TTL]
+    for k in expired:
+        del _client_msg_id_seen[k]
+    if client_msg_id in _client_msg_id_seen:
+        return True
+    _client_msg_id_seen[client_msg_id] = now
+    return False
+
 async def handle_mobile_message(
     msg_data: dict,
     ws_relay: websockets.WebSocketClientProtocol,
@@ -517,6 +535,19 @@ async def handle_mobile_message(
     session_id = msg_data.get("session_id", "default")
     payload = msg_data.get("payload", {})
     req_id = msg_data.get("req_id", "")
+    client_msg_id = msg_data.get("client_msg_id", "")
+
+    # v2.3: 写操作幂等——重复的 send_prompt/cancel 直接回 ack，不重新执行
+    if action in ("send_prompt", "cancel") and client_msg_id:
+        if _is_duplicate_client_msg(client_msg_id):
+            logger.info(f"[v2.3] duplicate {action} ignored")
+            await ws_relay.send(json.dumps({
+                "type": "duplicate_ignored",
+                "req_id": req_id,
+                "client_msg_id": client_msg_id,
+                "action": action,
+            }))
+            return
 
     # 1. 心跳响应
     if action == "ping":
