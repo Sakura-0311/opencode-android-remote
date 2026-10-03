@@ -1013,8 +1013,21 @@ async def websocket_endpoint(
 
 
 if __name__ == "__main__":
+    # v2.6: CLI 参数，默认从环境变量读取（优先级：CLI > 环境变量 > 内置默认）
+    import argparse
+    _ap = argparse.ArgumentParser(description="OpenCode Relay Server")
+    _ap.add_argument("--port", type=int, default=None, help="监听端口（默认 $PORT）")
+    _ap.add_argument("--admin-token", default=None, help="建房管理令牌（默认 $RELAY_ADMIN_TOKEN）")
+    _ap.add_argument("--trusted-proxies", default=None,
+                     help="信任的代理 IP，逗号分隔（默认 $TRUSTED_PROXIES）")
+    _args = _ap.parse_args()
+    if _args.admin_token is not None:
+        globals()["RELAY_ADMIN_TOKEN"] = _args.admin_token
+    if _args.trusted_proxies is not None:
+        globals()["TRUSTED_PROXIES"] = set(filter(None, _args.trusted_proxies.split(",")))
+
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8765"))
+    port = _args.port or int(os.getenv("PORT", "8765"))
     ssl_cert = os.getenv("SSL_CERTFILE")
     ssl_key = os.getenv("SSL_KEYFILE")
 

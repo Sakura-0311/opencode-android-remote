@@ -1,6 +1,8 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    // v2.6: SBOM 生成（cyclonedx-bom.json，随 release 产物发布）
+    id("org.cyclonedx.bom") version "2.3.1"
 }
 
 import java.util.Properties
