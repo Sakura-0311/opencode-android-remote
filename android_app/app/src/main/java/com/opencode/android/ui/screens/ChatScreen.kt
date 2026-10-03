@@ -61,8 +61,8 @@ fun ChatScreen(
     onCheckUpdate: () -> Unit,
     // v1.6 P0 多设备管理
     onRequestDeviceList: () -> Unit = {},
-    onRevokeDevice: (String) -> Unit = {},
-    onRenameDevice: (String, String) -> Unit = { _, _ -> },
+    onRevokeDevice: (String, String) -> Unit = { _, _ -> },
+    onRenameDevice: (String, String, String) -> Unit = { _, _, _ -> },
     onShowDeviceManager: () -> Unit = {},
     // v1.6 P1 Model/Agent
     onShowModelAgent: () -> Unit = {},

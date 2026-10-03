@@ -106,6 +106,8 @@ data class ProjectInfo(
  * v1.6 P0 多设备管理：设备信息
  */
 data class DeviceInfo(
+    // v2.4: 设备以 deviceId 标识，deviceName 仅展示
+    val deviceId: String = "",
     val deviceName: String,
     val createdAt: Long = 0L,
     val isOnline: Boolean = false,
@@ -510,6 +512,7 @@ class RelayWebSocketClient {
                         for (i in 0 until arr.length()) {
                             val o = arr.optJSONObject(i) ?: continue
                             devices.add(DeviceInfo(
+                                deviceId = o.optString("device_id", ""),
                                 deviceName = o.optString("device_name", "?"),
                                 createdAt = (o.optDouble("created_at", 0.0) * 1000).toLong(),
                                 isOnline = o.optBoolean("is_online", false),
@@ -763,10 +766,22 @@ class RelayWebSocketClient {
         webSocket?.send(JSONObject().apply { put("type", "list_devices") }.toString())
     }
 
-    fun revokeDevice(deviceName: String) {
+    // v2.4: 按 deviceId 撤销（deviceName 仅兼容旧 relay）
+    fun revokeDevice(deviceId: String, deviceName: String = "") {
         webSocket?.send(JSONObject().apply {
             put("type", "revoke_device")
+            put("device_id", deviceId)
             put("device_name", deviceName)
+        }.toString())
+    }
+
+    // v2.4: 按 deviceId 重命名
+    fun renameDeviceById(deviceId: String, oldName: String, newName: String) {
+        webSocket?.send(JSONObject().apply {
+            put("type", "rename_device")
+            put("device_id", deviceId)
+            put("old_name", oldName)
+            put("new_name", newName)
         }.toString())
     }
 

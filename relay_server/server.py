@@ -1,5 +1,7 @@
 import hmac
 import asyncio
+import uuid
+import ipaddress
 import hashlib
 import json
 import logging
@@ -73,6 +75,24 @@ class RateLimiter:
             self.ip_auth_fails[ip] = 0
         return False
 
+    def cleanup(self) -> None:
+        """v2.4: 定期清理过期 IP 记录，防止长期运行内存缓慢增长。"""
+        now = time.time()
+        for ip in list(self.ip_connection_timestamps.keys()):
+            ts = [t for t in self.ip_connection_timestamps[ip] if now - t < 60]
+            if ts:
+                self.ip_connection_timestamps[ip] = ts
+            else:
+                del self.ip_connection_timestamps[ip]
+        for ip in list(self.ip_jailed_until.keys()):
+            if now >= self.ip_jailed_until[ip]:
+                del self.ip_jailed_until[ip]
+                self.ip_auth_fails.pop(ip, None)
+        # 认证失败计数超过封禁期两倍未再犯，清零
+        for ip in list(self.ip_auth_fails.keys()):
+            if ip not in self.ip_jailed_until and self.ip_auth_fails[ip] == 0:
+                del self.ip_auth_fails[ip]
+
     def check_connection_allowed(self, ip: str) -> bool:
         if self.is_jailed(ip):
             return False
@@ -112,6 +132,9 @@ class ClientSession:
         self.client_ip = client_ip
         self.last_pong_time = time.time()
         self.is_authenticated = False
+        # v2.4: 设备身份（设备密钥登录时填充）
+        self.device_id = ""
+        self.device_name = str()
 
 
 class RoomBuffer:
@@ -172,6 +195,8 @@ class ConnectionManager:
         # v1.6 P0 扫码配对：pairing_token -> 配对会话
         self.pairing_sessions: Dict[str, dict] = {}
         self.pairing_ttl = int(os.getenv("RELAY_PAIRING_TTL", "120"))
+        # v2.4: 记录近期见过的客户端 IP（用于代理/反代配置提示）
+        self.seen_ips: Dict[str, float] = {}
         # v2.2.1-B: 设备密钥持久化（房间销毁/relay 重启后仍可用设备密钥重连）
         self.state_file = os.getenv(
             "RELAY_STATE_FILE",
@@ -231,6 +256,10 @@ class ConnectionManager:
             return
         restored = saved.get("device_secrets") or {}
         if restored:
+            # v2.4: 旧版本条目没有 device_id，补一个（保证撤销按 ID 可用）
+            for h, info in restored.items():
+                if isinstance(info, dict) and not info.get("device_id"):
+                    info["device_id"] = uuid.uuid4().hex
             room["device_secrets"] = dict(restored)
             logger.info(f"[v2.2.1-B] room {account_id} 恢复 {len(restored)} 个设备密钥")
     # ---------------- v2.2.1-B 结束 ----------------
@@ -288,6 +317,8 @@ class ConnectionManager:
             return False, "Invalid secret for account_id."
         if device_info:
             session.device_name = device_info.get("device_name", "unknown")
+            # v2.4: 记录设备 ID，供"仅可撤销自己"鉴权
+            session.device_id = device_info.get("device_id", "")
 
         session.is_authenticated = True
         self.sessions[session.websocket] = session
@@ -366,41 +397,66 @@ class ConnectionManager:
         secret_hash = hashlib.sha256(device_secret.encode("utf-8")).hexdigest()
         now_ts = time.time()
         room.setdefault("device_secrets", {})[secret_hash] = {
+            # v2.4: 设备以 device_id（UUID）标识，名称仅展示
+            "device_id": uuid.uuid4().hex,
             "device_name": device_name or "Android",
             "created_at": now_ts,
             "last_active": now_ts,
         }
         logger.info(f"v1.6: device '{device_name}' paired to room {account_id}")
         self._save_state()  # v2.2.1-B: 新配对设备立即落盘
+        dev_entry = room["device_secrets"][secret_hash]
         return True, {
             "device_secret": device_secret,
+            "device_id": dev_entry.get("device_id", ""),
             "account_id": account_id,
             "desktop_name": ps["desktop_name"],
         }
 
-    def revoke_device(self, account_id: str, device_name: str) -> bool:
-        """撤销指定设备的配对授权。"""
+    def revoke_device(self, account_id: str, device_id: str = "", device_name: str = "") -> tuple:
+        """v2.4: 撤销指定设备的配对授权。
+        按 device_id 匹配（device_name 仅兼容旧 App）。
+        返回 (ok, kicked_sessions)：kicked_sessions 为该设备当前在线的 mobile 会话，
+        由调用方关闭其连接（被撤销设备不再能重连）。
+        """
         room = self.rooms.get(account_id)
         if not room:
-            return False
+            return False, []
         dev_secrets = room.get("device_secrets", {})
+        target_hash, target_info = None, None
         for h, info in list(dev_secrets.items()):
-            if info.get("device_name") == device_name:
-                del dev_secrets[h]
-                logger.info(f"v1.6: device '{device_name}' revoked from room {account_id}")
-                self._save_state()  # v2.2.1-B: 撤销后落盘
-                return True
-        return False
+            if device_id and info.get("device_id") == device_id:
+                target_hash, target_info = h, info
+                break
+        if target_hash is None and device_name:
+            for h, info in list(dev_secrets.items()):
+                if info.get("device_name") == device_name:
+                    target_hash, target_info = h, info
+                    break
+        if target_hash is None:
+            return False, []
+        del dev_secrets[target_hash]
+        logger.info(f"v2.4: device '{target_info.get('device_name')}' revoked from room {account_id}")
+        self._save_state()  # v2.2.1-B: 撤销后落盘
+        # v2.4: 主动断开该设备的在线连接
+        kicked = []
+        for m in list(room.get("mobiles", set())):
+            mid = getattr(m, "device_id", "")
+            mname = getattr(m, "device_name", "")
+            if (device_id and mid == device_id) or (not device_id and mname == device_name):
+                kicked.append(m)
+        return True, kicked
 
-    def rename_device(self, account_id: str, old_name: str, new_name: str) -> bool:
-        """重命名设备。"""
+    def rename_device(self, account_id: str, old_name: str, new_name: str, device_id: str = "") -> bool:
+        """重命名设备（v2.4: 优先按 device_id 匹配）。"""
         room = self.rooms.get(account_id)
         if not room or not new_name or len(new_name) > 64:
             return False
         for info in room.get("device_secrets", {}).values():
-            if info.get("device_name") == old_name:
+            if (device_id and info.get("device_id") == device_id) or \
+               (not device_id and info.get("device_name") == old_name):
                 info["device_name"] = new_name
-                logger.info(f"v1.6: device renamed '{old_name}' -> '{new_name}' in {account_id}")
+                logger.info(f"v2.4: device renamed '{old_name}' -> '{new_name}' in {account_id}")
                 self._save_state()  # v2.2.1-B: 重命名后落盘
                 return True
         return False
@@ -414,17 +470,23 @@ class ConnectionManager:
             return []
         # 当前在线的设备名集合
         online_names = set()
+        online_ids = set()
         for m in room.get("mobiles", set()):
             name = getattr(m, "device_name", None)
             if name:
                 online_names.add(name)
+            did = getattr(m, "device_id", None)
+            if did:
+                online_ids.add(did)
         result = []
         for info in room.get("device_secrets", {}).values():
             name = info.get("device_name", "?")
+            did = info.get("device_id", "")
             result.append({
+                "device_id": did,
                 "device_name": name,
                 "created_at": info.get("created_at", 0),
-                "is_online": name in online_names,
+                "is_online": (did and did in online_ids) or (name in online_names),
                 "last_active": info.get("last_active", info.get("created_at", 0)),
             })
         return result
@@ -562,13 +624,47 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # 后台心跳任务循环
+_heartbeat_rounds = 0
+
 async def heartbeat_background_task():
+    global _heartbeat_rounds
     while True:
         try:
             await asyncio.sleep(25)
             await manager.check_heartbeats()
+            _heartbeat_rounds += 1
+            # v2.4: 限流器定期清理（每轮）
+            rate_limiter.cleanup()
+            # v2.4: 每约 5 分钟检查一次代理配置提示
+            if _heartbeat_rounds % 12 == 0:
+                _check_proxy_hint()
         except Exception as e:
             logger.error(f"Error in heartbeat task: {e}")
+
+
+def _is_private_ip(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except Exception:
+        return False
+
+
+def _check_proxy_hint() -> None:
+    """v2.4: 若所有连接都来自同一私网地址，提示配置 TRUSTED_PROXIES。"""
+    now = time.time()
+    ips = [ip for ip, ts in manager.seen_ips.items() if now - ts < 600]
+    # 清理过期
+    for ip in list(manager.seen_ips.keys()):
+        if now - manager.seen_ips[ip] >= 600:
+            del manager.seen_ips[ip]
+    if len(ips) == 1 and _is_private_ip(ips[0]):
+        default_proxies = {"127.0.0.1", "::1"}
+        if TRUSTED_PROXIES == default_proxies:
+            logger.warning(
+                f"v2.4: 过去 10 分钟所有连接都来自同一私网地址 {ips[0]}，"
+                "relay 可能在 Docker/反代后面。限流按 IP 生效，一个人输错 5 次会封所有人 15 分钟，"
+                "建议在环境变量 TRUSTED_PROXIES 中配置反代出口 IP（见 docs/SECURITY.md）。"
+            )
 
 @app.on_event("startup")
 async def startup_event():
@@ -705,6 +801,8 @@ async def websocket_endpoint(
         return
 
     await websocket.accept()
+    # v2.4: 记录客户端 IP（10 分钟窗口）
+    manager.seen_ips[client_ip] = time.time()
 
     # 2. 等待首条认证消息（10 秒超时）
     session: Optional[ClientSession] = None
@@ -865,17 +963,39 @@ async def websocket_endpoint(
                     }))
                     continue
                 elif parsed.get("type") == "revoke_device":
-                    ok = manager.revoke_device(session.account_id, parsed.get("device_name", ""))
+                    # v2.4: 撤销完整化——按 device_id；非桌面设备只能撤销自己；撤销后踢掉在线连接
+                    target_id = parsed.get("device_id", "")
+                    target_name = parsed.get("device_name", "")
+                    if session.client_type != "desktop":
+                        own_id = getattr(session, "device_id", "")
+                        if not target_id or target_id != own_id:
+                            await websocket.send_text(json.dumps({
+                                "type": "device_revoke_failed",
+                                "device_id": target_id,
+                                "device_name": target_name,
+                                "message": "non-desktop can only revoke itself",
+                            }))
+                            continue
+                    ok, kicked = manager.revoke_device(
+                        session.account_id, device_id=target_id, device_name=target_name)
+                    for ks in kicked:
+                        try:
+                            await ks.websocket.close(code=4401, reason="Device revoked")
+                        except Exception:
+                            pass
+                        manager.disconnect(ks.websocket)
                     await websocket.send_text(json.dumps({
                         "type": "device_revoked" if ok else "device_revoke_failed",
-                        "device_name": parsed.get("device_name", "")
+                        "device_id": target_id,
+                        "device_name": target_name
                     }))
                     continue
                 elif parsed.get("type") == "rename_device" and session.client_type == "desktop":
                     ok = manager.rename_device(
                         session.account_id,
                         parsed.get("old_name", ""),
-                        parsed.get("new_name", ""))
+                        parsed.get("new_name", ""),
+                        device_id=parsed.get("device_id", ""))
                     await websocket.send_text(json.dumps({
                         "type": "device_renamed" if ok else "device_rename_failed",
                         "device_name": parsed.get("new_name", "")

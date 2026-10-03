@@ -41,7 +41,7 @@ android {
     compileSdk = 34
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000）
-    val appVersionName = "2.3.0"
+    val appVersionName = "2.4.0"
     val appVersionCode = appVersionName.split(".").let { p ->
         p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
     }
@@ -71,6 +71,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // v2.4: debug 与 release 分离，避免调试包覆盖正式包
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

@@ -944,12 +944,14 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun revokeDevice(deviceName: String) {
-        relayClient.revokeDevice(deviceName)
+    // v2.4: 按 deviceId 撤销
+    fun revokeDevice(deviceId: String, deviceName: String = "") {
+        relayClient.revokeDevice(deviceId, deviceName)
     }
 
-    fun renameDevice(oldName: String, newName: String) {
-        relayClient.renameDevice(oldName, newName)
+    // v2.4: 按 deviceId 重命名
+    fun renameDevice(deviceId: String, oldName: String, newName: String) {
+        relayClient.renameDeviceById(deviceId, oldName, newName)
     }
 
     override fun onDeviceListReceived(devices: List<DeviceInfo>) {

@@ -1,3 +1,23 @@
+# OpenCode Android Remote - Release v2.4.0（安全二期）
+
+## 内容
+
+- **撤销完整化**：设备改按 `device_id`（UUID）标识，名称仅展示；撤销时**主动断开该设备在线连接**（4401，被撤销设备不再自动重连）；非桌面设备只能撤销自己；两部同名手机撤销互不影响
+- **建房令牌**：`RELAY_ADMIN_TOKEN` 未设置时启动打印警告；`docs/SECURITY.md` 列为生产必设项（`relay_server/.env.example`）
+- **代理 IP**：`TRUSTED_PROXIES` 文档化；relay 在 Docker/反代后、所有连接来自同一私网 IP 时启动提示
+- **限流器清理**：定期清理过期 IP 记录（每 25s 心跳顺带执行）
+- **权限审计**：移除无使用点的 `WAKE_LOCK`；`docs/SECURITY.md` 列出全部权限及理由
+- **评估结论**（`docs/EVALUATIONS.md`）：security-crypto 已确认 deprecated，本版不动，v2.5+ 迁 Tink；R8 评估未完全通过（ACRA 无 keep rules、ML Kit 未证实），`minify` 保持关闭
+- **debug/release 分离**：debug 包加 `applicationIdSuffix ".debug"`（release 的 applicationId 不变）
+
+## 兼容性
+
+- 撤销/重命名协议改按 `device_id`，同时兼容旧 App 的 `device_name` 参数；`device_list` 新增 `device_id` 字段（旧 App 忽略）
+- `pair_success` 新增 `device_id`（旧 App 忽略）
+- 详见 `docs/COMPATIBILITY.md`
+
+---
+
 # OpenCode Android Remote - Release v2.3.0（稳定性/弱网）
 
 ## 内容

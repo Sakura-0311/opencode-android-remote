@@ -25,11 +25,11 @@ import java.util.*
 fun DeviceManagementDialog(
     devices: List<DeviceInfo>,
     onRefresh: () -> Unit,
-    onRevoke: (String) -> Unit,
-    onRename: (String, String) -> Unit,
+    onRevoke: (String, String) -> Unit,
+    onRename: (String, String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var revokeTarget by remember { mutableStateOf<String?>(null) }
+    var revokeTarget by remember { mutableStateOf<DeviceInfo?>(null) }
     var renameTarget by remember { mutableStateOf<DeviceInfo?>(null) }
     var newName by remember { mutableStateOf("") }
 
@@ -73,7 +73,7 @@ fun DeviceManagementDialog(
                         items(devices) { device ->
                             DeviceRow(
                                 device = device,
-                                onRevoke = { revokeTarget = device.deviceName },
+                                onRevoke = { revokeTarget = device },
                                 onRename = {
                                     renameTarget = device
                                     newName = device.deviceName
@@ -87,15 +87,15 @@ fun DeviceManagementDialog(
     }
 
     // 撤销确认
-    revokeTarget?.let { name ->
+    revokeTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { revokeTarget = null },
             title = { Text("撤销设备") },
-            text = { Text("确定撤销「$name」的配对授权吗？撤销后该设备将无法连接。") },
+            text = { Text("确定撤销「${target.deviceName}」的配对授权吗？撤销后该设备将立即断开且无法重连。") },
             confirmButton = {
                 Button(
                     onClick = {
-                        onRevoke(name)
+                        onRevoke(target.deviceId, target.deviceName)
                         revokeTarget = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
@@ -124,7 +124,7 @@ fun DeviceManagementDialog(
             confirmButton = {
                 Button(onClick = {
                     if (newName.isNotBlank() && newName != device.deviceName) {
-                        onRename(device.deviceName, newName.trim())
+                        onRename(device.deviceId, device.deviceName, newName.trim())
                     }
                     renameTarget = null
                 }) { Text("保存") }

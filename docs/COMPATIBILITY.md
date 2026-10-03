@@ -30,6 +30,7 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 | 2.2.0 | 20200 |
 | 2.2.1 | 20201 |
 | 2.3.0 | 20300 |
+| 2.4.0 | 20400 |
 
 ## 协议兼容（v2.2.1）
 
@@ -37,6 +38,7 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 - `file_list_result` 新增 `roots`（允许根目录列表）；旧 App 忽略。
 - 错误码新增 `PATH_NOT_ALLOWED`（文件沙盒拒绝）；旧 App 会显示为普通错误文案，不影响其他功能。
 - v2.3：`send_prompt` / `cancel` 信封新增可选 `client_msg_id`；agent 可能回复 `duplicate_ignored`（旧 App 忽略未知 type）。
+- v2.4：`revoke_device` / `rename_device` 改按 `device_id`（仍兼容 `device_name`）；`device_list` / `pair_success` 新增 `device_id`（旧 App 忽略）。
 
 ## 存储兼容
 

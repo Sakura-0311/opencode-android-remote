@@ -182,11 +182,11 @@ class MainActivity : ComponentActivity() {
                         onRequestDeviceList = {
                             viewModel.requestDeviceList()
                         },
-                        onRevokeDevice = { name ->
-                            viewModel.revokeDevice(name)
+                        onRevokeDevice = { id, name ->
+                            viewModel.revokeDevice(id, name)
                         },
-                        onRenameDevice = { old, new ->
-                            viewModel.renameDevice(old, new)
+                        onRenameDevice = { id, old, new ->
+                            viewModel.renameDevice(id, old, new)
                         },
                         onShowDeviceManager = {
                             showDeviceManager = true
@@ -263,8 +263,8 @@ class MainActivity : ComponentActivity() {
                     DeviceManagementDialog(
                         devices = uiState.pairedDevices,
                         onRefresh = { viewModel.requestDeviceList() },
-                        onRevoke = { name -> viewModel.revokeDevice(name) },
-                        onRename = { old, new -> viewModel.renameDevice(old, new) },
+                        onRevoke = { id, name -> viewModel.revokeDevice(id, name) },
+                        onRename = { id, old, new -> viewModel.renameDevice(id, old, new) },
                         onDismiss = { showDeviceManager = false }
                     )
                 }
