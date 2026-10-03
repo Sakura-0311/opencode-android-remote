@@ -122,7 +122,10 @@ dependencies {
     implementation("androidx.camera:camera-view:1.3.1")
 
     // 对外分发：ACRA 崩溃上报（HTTP Sender，自建 Relay 接收端）
-    implementation("ch.acra:acra-http:5.11.3")
+    // 注：排除 auto-service 传递的 Guava，避免与 CameraX 的 ListenableFuture 冲突
+    implementation("ch.acra:acra-http:5.11.3") {
+        exclude(group = "com.google.guava", module = "guava")
+    }
 
     // Debugging UI Tooling
     debugImplementation("androidx.compose.ui:ui-tooling")
