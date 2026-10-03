@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
+        android:name=".OpenCodeApp"
         android:allowBackup="false"
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="OpenCode"

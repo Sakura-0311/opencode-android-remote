@@ -27,6 +27,7 @@ class OpenCodeKeepAliveService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var taskStartTimeMs: Long = 0L
     private var currentStep: String = "正在执行任务..."
+    private var currentSessionId: String = ""
     private var isTaskRunning = false
 
     private val timerRunnable = object : Runnable {
@@ -52,11 +53,13 @@ class OpenCodeKeepAliveService : Service() {
 
         private const val EXTRA_STEP = "extra_step"
         private const val EXTRA_TOOL = "extra_tool"
+        private const val EXTRA_SESSION = "extra_session"
 
-        fun startTaskProgress(context: Context, stepDescription: String) {
+        fun startTaskProgress(context: Context, stepDescription: String, sessionId: String = "") {
             val intent = Intent(context, OpenCodeKeepAliveService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_STEP, stepDescription)
+                putExtra(EXTRA_SESSION, sessionId)
             }
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -152,6 +155,7 @@ class OpenCodeKeepAliveService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 currentStep = intent.getStringExtra(EXTRA_STEP) ?: "正在初始化任务..."
+                currentSessionId = intent.getStringExtra(EXTRA_SESSION) ?: ""
                 taskStartTimeMs = System.currentTimeMillis()
                 isTaskRunning = true
                 startForegroundWithServiceType()
@@ -222,9 +226,13 @@ class OpenCodeKeepAliveService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID_PROGRESS)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("OpenCode 云端任务执行中 [$durationFormatted]")
+            .setContentTitle("OpenCode 任务执行中 [$durationFormatted]")
             .setContentText(currentStep)
-            .setStyle(NotificationCompat.BigTextStyle().bigText("已运行: $durationFormatted\n当前进度: $currentStep"))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(
+                "已运行: $durationFormatted\n" +
+                (if (currentSessionId.isNotBlank()) "会话: ${currentSessionId.take(8)}…\n" else "") +
+                "当前进度: $currentStep"
+            ))
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)

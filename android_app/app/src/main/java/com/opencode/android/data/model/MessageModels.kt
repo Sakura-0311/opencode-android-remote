@@ -11,6 +11,20 @@ enum class AppMode {
     CLOUD_HOSTED   // 模式 2: 云端工作区直连 (无需开电脑，直接使用云端 OpenCode 实例)
 }
 
+/**
+ * v1.6 P0 后台保活：任务状态机
+ * 异常情况下明确显示：运行中、等待输入、权限审批、失败、已完成、已断开
+ */
+enum class TaskStatus(val label: String) {
+    IDLE("空闲"),
+    RUNNING("运行中"),
+    WAITING_INPUT("等待输入"),
+    APPROVAL_REQUIRED("权限审批"),
+    FAILED("失败"),
+    COMPLETED("已完成"),
+    DISCONNECTED("已断开")
+}
+
 data class ChatMessage(
     val id: String,
     val role: MessageRole,
@@ -75,6 +89,10 @@ data class AppError(
 data class OpenCodeUiState(
     val appMode: AppMode = AppMode.DESKTOP_RELAY,
     val isPaired: Boolean = false,
+
+    // v1.6 P0 后台保活：明确的任务状态（锁屏/后台/重连后可恢复显示）
+    val taskStatus: TaskStatus = TaskStatus.IDLE,
+    val taskStatusDetail: String = "",
     
     // 电脑中继模式参数
     val accountId: String = "",

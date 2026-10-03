@@ -3,6 +3,7 @@ package com.opencode.android.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.opencode.android.OpenCodeApp
 import com.opencode.android.data.local.PreferencesManager
 import com.opencode.android.data.model.AppError
 import com.opencode.android.data.model.AppMode
@@ -13,6 +14,7 @@ import com.opencode.android.data.model.DiffLineType
 import com.opencode.android.data.model.MessageRole
 import com.opencode.android.data.model.OpenCodeUiState
 import com.opencode.android.data.model.SessionItem
+import com.opencode.android.data.model.TaskStatus
 import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.CloudStreamListener
@@ -33,22 +35,52 @@ import java.util.UUID
 class OpenCodeViewModel(application: Application) : AndroidViewModel(application), RelayListener, CloudStreamListener {
 
     private val prefsManager = PreferencesManager(application.applicationContext)
-    private val relayClient = RelayWebSocketClient()
-    private val cloudClient = CloudApiClient()
+    // v1.6 P0 后台保活：连接由 Application 持有，与 ViewModel 生命周期解耦
+    private val app = application as OpenCodeApp
+    private val relayClient: RelayWebSocketClient = app.relayClient
+    private val cloudClient: CloudApiClient = app.cloudClient
 
     private val _uiState: MutableStateFlow<OpenCodeUiState>
 
+    /**
+     * v1.6 P0 后台保活：统一任务状态流转（同步 UI + 持久化 + 通知栏）。
+     */
+    private fun setTaskStatus(status: TaskStatus, detail: String = "", sessionId: String = "") {
+        val sid = sessionId.ifBlank { _uiState.value.currentSessionId }
+        prefsManager.saveTaskStatus(status.name, detail, sid)
+        _uiState.update {
+            it.copy(
+                taskStatus = status,
+                taskStatusDetail = detail,
+                isGenerating = status == TaskStatus.RUNNING
+                        || status == TaskStatus.WAITING_INPUT
+                        || status == TaskStatus.APPROVAL_REQUIRED
+            )
+        }
+    }
+
     init {
-        // v1.6 P0 断线恢复：relay 消息序号持久化
-        relayClient.setSeqPersistence(
-            application.getSharedPreferences("relay_seq_store", android.content.Context.MODE_PRIVATE)
-        )
-        // v1.6 P0 断线恢复：云端 SSE 游标持久化
-        cloudClient.setEventIdPersistence(
-            application.getSharedPreferences("sse_event_store", android.content.Context.MODE_PRIVATE)
-        )
+        // v1.6: 序号持久化已在 OpenCodeApp.onCreate 中初始化
+        // v1.6 P0 后台保活：ViewModel 重建时重新挂载到应用级连接（不断连）
+        // CloudApiClient 每次调用时传入 listener，无需重新挂载
+        relayClient.setListener(this)
         // P1-1: 彻底移除虚假写死的 Demo 会话数据，以真实服务拉取为准
         val savedSessions = prefsManager.getSavedSessions()
+
+        // v1.6 P0 后台保活：恢复任务状态（App 重启后）
+        val (savedStatus, savedDetail, savedTaskSession) = prefsManager.getTaskStatus()
+        val restoredStatus = try {
+            TaskStatus.valueOf(savedStatus)
+        } catch (e: Exception) { TaskStatus.IDLE }
+        // 若上次退出时任务还在进行中，标记为已断开（需重连同步），而非假装仍在运行
+        val effectiveStatus = if (restoredStatus == TaskStatus.RUNNING
+            || restoredStatus == TaskStatus.WAITING_INPUT
+            || restoredStatus == TaskStatus.APPROVAL_REQUIRED) {
+            TaskStatus.DISCONNECTED
+        } else restoredStatus
+        val effectiveDetail = if (effectiveStatus == TaskStatus.DISCONNECTED && restoredStatus != TaskStatus.IDLE) {
+            "应用重启，连接已断开。${savedDetail}"
+        } else savedDetail
 
         _uiState = MutableStateFlow(
             OpenCodeUiState(
@@ -60,7 +92,9 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 cloudApiKey = prefsManager.getCloudApiKey(),
                 cloudWorkspacePath = prefsManager.getCloudWorkspacePath(),
                 availableSessions = savedSessions,
-                currentSessionId = savedSessions.firstOrNull()?.id ?: ""
+                currentSessionId = savedSessions.firstOrNull()?.id ?: "",
+                taskStatus = effectiveStatus,
+                taskStatusDetail = effectiveDetail
             )
         )
     }
@@ -423,8 +457,14 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 isAutoScrollPaused = false
             )
         }
+        // v1.6 P0: 任务开始，状态持久化
+        setTaskStatus(TaskStatus.RUNNING, "执行指令: ${trimmed.take(30)}...")
 
-        OpenCodeKeepAliveService.startTaskProgress(getApplication(), "执行指令: ${trimmed.take(30)}...")
+        OpenCodeKeepAliveService.startTaskProgress(
+            getApplication(),
+            "执行指令: ${trimmed.take(30)}...",
+            _uiState.value.currentSessionId
+        )
 
         if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
             relayClient.sendPrompt(trimmed, _uiState.value.currentSessionId)
@@ -552,6 +592,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onToolApprovalRequest(request: ToolApprovalRequest) {
         _uiState.update { it.copy(pendingApproval = request) }
+        // v1.6 P0: 明确进入"权限审批"状态
+        setTaskStatus(TaskStatus.APPROVAL_REQUIRED, "等待审批: ${request.toolName}")
         OpenCodeKeepAliveService.notifyApprovalRequired(
             getApplication(),
             "${request.toolName}: ${request.filePath ?: "代码修改"}"
@@ -608,6 +650,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onStreamEnd(sessionId: String) {
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
+        // v1.6 P0: 任务完成
+        setTaskStatus(TaskStatus.COMPLETED, "任务已完成")
         _uiState.update { state ->
             val updatedMessages = state.messages.map { msg ->
                 if (msg.id == activeAssistantMessageId) {
@@ -651,8 +695,18 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onCleared() {
         super.onCleared()
+        // v1.6 P0 后台保活：ViewModel 销毁（Activity 退出）不再断开连接。
+        // 连接由 Application 持有，前台服务保活进程，任务在后台继续。
+        // 用户主动断开请调用 disconnectAll()。
+    }
+
+    /**
+     * v1.6: 用户主动断开所有连接（退出登录/切换账号时调用）。
+     */
+    fun disconnectAll() {
         relayClient.disconnect()
         cloudClient.cancelCurrentStream()
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
+        _uiState.update { it.copy(isPaired = false, isAuthenticated = false) }
     }
 }

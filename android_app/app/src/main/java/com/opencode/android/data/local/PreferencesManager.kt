@@ -35,6 +35,10 @@ class PreferencesManager(context: Context) {
         private const val KEY_CLOUD_WORKSPACE_PATH = "cloud_workspace_path"
         private const val KEY_SAVED_SESSIONS = "saved_sessions_json"
         private const val KEY_SAVED_TAGS = "saved_tags_json"
+        // v1.6 P0 后台保活：任务状态持久化
+        private const val KEY_TASK_STATUS = "task_status"
+        private const val KEY_TASK_DETAIL = "task_status_detail"
+        private const val KEY_TASK_SESSION = "task_session_id"
 
         private const val DEFAULT_RELAY_URL = ""
         private const val DEFAULT_CLOUD_URL = ""
@@ -160,5 +164,30 @@ class PreferencesManager(context: Context) {
         } catch (e: Exception) {
             // ignore
         }
+    }
+
+    // v1.6 P0 后台保活：任务状态持久化（App 重启后恢复显示）
+    fun saveTaskStatus(status: String, detail: String, sessionId: String) {
+        prefs.edit()
+            .putString(KEY_TASK_STATUS, status)
+            .putString(KEY_TASK_DETAIL, detail)
+            .putString(KEY_TASK_SESSION, sessionId)
+            .apply()
+    }
+
+    fun getTaskStatus(): Triple<String, String, String> {
+        return Triple(
+            prefs.getString(KEY_TASK_STATUS, "IDLE") ?: "IDLE",
+            prefs.getString(KEY_TASK_DETAIL, "") ?: "",
+            prefs.getString(KEY_TASK_SESSION, "") ?: ""
+        )
+    }
+
+    fun clearTaskStatus() {
+        prefs.edit()
+            .putString(KEY_TASK_STATUS, "IDLE")
+            .putString(KEY_TASK_DETAIL, "")
+            .putString(KEY_TASK_SESSION, "")
+            .apply()
     }
 }

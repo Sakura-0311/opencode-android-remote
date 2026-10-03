@@ -65,6 +65,15 @@ class RelayWebSocketClient {
         seqPrefs = prefs
     }
 
+    /**
+     * v1.6 P0 后台保活：ViewModel 重建时重新挂载监听器，不重建连接。
+     */
+    fun setListener(listener: RelayListener) {
+        this.listener = listener
+    }
+
+    fun isConnected(): Boolean = webSocket != null
+
     private fun seqKey() = "last_relay_seq_$currentAccountId"
 
     private fun loadPersistedSeq() {
