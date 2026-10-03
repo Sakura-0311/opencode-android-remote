@@ -579,6 +579,7 @@ fun MessageBubbleWithHighlight(message: ChatMessage, appMode: AppMode, highlight
                 }
             }
         }
+    }
 
     // v1.6 P0 多设备管理对话框
     if (showDeviceManager) {
