@@ -18,6 +18,21 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.min
 import kotlin.random.Random
 
+/**
+ * P0-4: Relay WebSocket 连接状态机。
+ * UI 必须能区分网络、鉴权、Desktop、OpenCode 的不同故障，不再用 webSocket != null 粗判。
+ */
+enum class RelayConnectionState {
+    DISCONNECTED,    // 未连接
+    CONNECTING,      // WS TCP 连接建立中
+    CONNECTED,       // WS 已建立，待鉴权
+    AUTHENTICATING,  // 已发送 auth 包，等待 auth_ok
+    AUTHENTICATED,   // 鉴权通过，待 Desktop 上线
+    DESKTOP_ONLINE,  // Desktop Agent 在线，可正常使用
+    RECONNECTING,    // 断线退避等待中
+    AUTH_FAILED      // 鉴权失败（Secret 错误等，不自动重连）
+}
+
 interface RelayListener {
     fun onConnected()
     fun onAuthenticated()
@@ -25,6 +40,8 @@ interface RelayListener {
     fun onDisconnected(reason: String)
     fun onReconnecting(delayMs: Long)
     fun onDesktopStatusChanged(isOnline: Boolean)
+    // P0-4: 连接状态变化（UI 据此区分网络/鉴权/Desktop 故障）
+    fun onConnectionStateChanged(state: RelayConnectionState) {}
     fun onStreamStart(sessionId: String)
     fun onStreamChunk(sessionId: String, chunk: String)
     fun onStreamEnd(sessionId: String)
@@ -103,6 +120,25 @@ class RelayWebSocketClient {
     private var currentSecret: String = ""
     private var isExplicitDisconnect: Boolean = false
 
+    // P0-4: 连接状态机当前状态
+    var connectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED
+        private set
+
+    private fun setState(state: RelayConnectionState) {
+        if (connectionState == state) return
+        connectionState = state
+        listener?.onConnectionStateChanged(state)
+    }
+
+    /** P0-4: 是否处于可用连接（取代 webSocket != null 的粗判） */
+    fun isConnected(): Boolean = when (connectionState) {
+        RelayConnectionState.CONNECTED,
+        RelayConnectionState.AUTHENTICATING,
+        RelayConnectionState.AUTHENTICATED,
+        RelayConnectionState.DESKTOP_ONLINE -> true
+        else -> false
+    }
+
     // P2-10: 指数退避重连机制
     private var backoffMs = 3000L
     private val maxBackoffMs = 60000L
@@ -122,9 +158,9 @@ class RelayWebSocketClient {
      */
     fun setListener(listener: RelayListener) {
         this.listener = listener
+        // 新挂载的监听器立即同步当前状态
+        listener.onConnectionStateChanged(connectionState)
     }
-
-    fun isConnected(): Boolean = webSocket != null
 
     private fun seqKey() = "last_relay_seq_$currentAccountId"
 
@@ -149,6 +185,7 @@ class RelayWebSocketClient {
         // v1.6: 恢复该房间的已确认序号
         loadPersistedSeq()
 
+        setState(RelayConnectionState.CONNECTING)
         initiateConnection()
     }
 
@@ -163,11 +200,13 @@ class RelayWebSocketClient {
             .url(wsEndpoint)
             .build()
 
+        setState(RelayConnectionState.CONNECTING)
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 mainHandler.post {
                     // 重置退避
                     backoffMs = 3000L
+                    setState(RelayConnectionState.CONNECTED)
                     listener?.onConnected()
 
                     // P0-1: 连接建立后第一包必须发送认证帧
@@ -180,6 +219,7 @@ class RelayWebSocketClient {
                         put("last_relay_seq", lastRelaySeq)
                     }
                     webSocket.send(authPacket.toString())
+                    setState(RelayConnectionState.AUTHENTICATING)
                 }
             }
 
@@ -197,7 +237,11 @@ class RelayWebSocketClient {
                 mainHandler.post {
                     listener?.onDisconnected("连接已断开: $reason ($code)")
                     if (!isExplicitDisconnect && code != 4401 && code != 4429) {
+                        setState(RelayConnectionState.RECONNECTING)
                         scheduleReconnect()
+                    } else if (connectionState != RelayConnectionState.AUTH_FAILED) {
+                        // P0-4: 鉴权失败时保持 AUTH_FAILED，不被覆盖
+                        setState(RelayConnectionState.DISCONNECTED)
                     }
                 }
             }
@@ -208,7 +252,10 @@ class RelayWebSocketClient {
                     listener?.onError(errMsg)
                     listener?.onDisconnected("连接失败: $errMsg")
                     if (!isExplicitDisconnect) {
+                        setState(RelayConnectionState.RECONNECTING)
                         scheduleReconnect()
+                    } else if (connectionState != RelayConnectionState.AUTH_FAILED) {
+                        setState(RelayConnectionState.DISCONNECTED)
                     }
                 }
             }
@@ -259,6 +306,7 @@ class RelayWebSocketClient {
                 }
                 // P0-1: 认证反馈
                 "auth_ok" -> {
+                    setState(RelayConnectionState.AUTHENTICATED)
                     listener?.onAuthenticated()
                 }
                 "auth_error" -> {
@@ -266,6 +314,8 @@ class RelayWebSocketClient {
                     isExplicitDisconnect = true
                     listener?.onAuthError(msg)
                     disconnect()
+                    // P0-4: disconnect 会置 DISCONNECTED，这里明确覆盖为 AUTH_FAILED
+                    setState(RelayConnectionState.AUTH_FAILED)
                 }
 
                 // P1-7: 应用层心跳
@@ -283,6 +333,12 @@ class RelayWebSocketClient {
                 // 桌面状态与系统消息
                 "system_status" -> {
                     val desktopOnline = json.optBoolean("desktop_online", false)
+                    // P0-4: Desktop 上线/下线驱动状态机
+                    if (desktopOnline) {
+                        setState(RelayConnectionState.DESKTOP_ONLINE)
+                    } else if (connectionState == RelayConnectionState.DESKTOP_ONLINE) {
+                        setState(RelayConnectionState.AUTHENTICATED)
+                    }
                     listener?.onDesktopStatusChanged(desktopOnline)
                 }
                 // v1.6 P0 多设备管理
@@ -598,5 +654,9 @@ class RelayWebSocketClient {
         cancelPendingReconnect()
         webSocket?.close(1000, "User initiated disconnect")
         webSocket = null
+        // P0-4: 鉴权失败时保持 AUTH_FAILED
+        if (connectionState != RelayConnectionState.AUTH_FAILED) {
+            setState(RelayConnectionState.DISCONNECTED)
+        }
     }
 }

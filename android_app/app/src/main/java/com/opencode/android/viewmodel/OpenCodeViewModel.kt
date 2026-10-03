@@ -25,6 +25,7 @@ import com.opencode.android.network.ProjectInfo
 import com.opencode.android.network.PairClaimResult
 import com.opencode.android.network.PairingClient
 import com.opencode.android.network.RelayListener
+import com.opencode.android.network.RelayConnectionState
 import com.opencode.android.network.RelayWebSocketClient
 import com.opencode.android.network.TunnelDiagnosticsHelper
 import com.opencode.android.service.OpenCodeKeepAliveService
@@ -312,12 +313,22 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 PairClaimResult(success = false, error = e.message ?: "配对异常")
             }
             if (result.success && result.deviceSecret.isNotBlank()) {
-                // v1.6: 设备密钥保存到加密存储
-                prefsManager.savePairingInfo(
+                // v1.6: 设备密钥保存到加密存储；P0-3: 加密不可用时拒绝保存并报错
+                val saved = prefsManager.savePairingInfo(
                     result.accountId.ifBlank { accountId },
                     result.deviceSecret,
                     relayUrl
                 )
+                if (!saved) {
+                    _uiState.update {
+                        it.copy(
+                            appError = AppError("SECURE_STORAGE_UNAVAILABLE", "安全存储不可用，配对凭据未保存，请重启应用后重试"),
+                            statusBanner = null
+                        )
+                    }
+                    onDone(false, "安全存储不可用")
+                    return@launch
+                }
                 _uiState.update {
                     it.copy(
                         appMode = AppMode.DESKTOP_RELAY,
@@ -353,7 +364,13 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             return
         }
 
-        prefsManager.savePairingInfo(trimmedAccount, trimmedSecret, trimmedRelay)
+        // P0-3: 加密存储不可用时拒绝保存敏感凭据
+        if (!prefsManager.savePairingInfo(trimmedAccount, trimmedSecret, trimmedRelay)) {
+            _uiState.update {
+                it.copy(appError = AppError("SECURE_STORAGE_UNAVAILABLE", "安全存储不可用，配对凭据未保存，请重启应用后重试"))
+            }
+            return
+        }
 
         _uiState.update {
             it.copy(
@@ -388,7 +405,16 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
         cloudClient.checkHealth(trimmedUrl, trimmedKey) { isSuccess, message ->
             if (isSuccess) {
-                prefsManager.saveCloudConfig(trimmedUrl, trimmedKey, trimmedWorkspace)
+                // P0-3: 加密存储不可用时拒绝保存敏感凭据
+                if (!prefsManager.saveCloudConfig(trimmedUrl, trimmedKey, trimmedWorkspace)) {
+                    _uiState.update {
+                        it.copy(
+                            appError = AppError("SECURE_STORAGE_UNAVAILABLE", "安全存储不可用，云端凭据未保存，请重启应用后重试"),
+                            statusBanner = null
+                        )
+                    }
+                    return@checkHealth
+                }
                 _uiState.update {
                     it.copy(
                         appMode = AppMode.CLOUD_HOSTED,
@@ -605,6 +631,32 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(isDesktopOnline = isOnline) }
         if (isOnline && _uiState.value.isAuthenticated) {
             relayClient.sendListSessions()
+        }
+    }
+
+    // P0-4: 连接状态机——UI 据此区分网络、鉴权、Desktop 的不同故障
+    override fun onConnectionStateChanged(state: RelayConnectionState) {
+        _uiState.update { s ->
+            s.copy(
+                relayConnectionState = state,
+                isRelayConnected = when (state) {
+                    RelayConnectionState.CONNECTED,
+                    RelayConnectionState.AUTHENTICATING,
+                    RelayConnectionState.AUTHENTICATED,
+                    RelayConnectionState.DESKTOP_ONLINE -> true
+                    else -> false
+                },
+                isReconnecting = state == RelayConnectionState.RECONNECTING,
+                statusBanner = when (state) {
+                    RelayConnectionState.CONNECTING -> "正在连接中继服务器..."
+                    RelayConnectionState.CONNECTED -> "中继已连通，正在验证 Secret..."
+                    RelayConnectionState.AUTHENTICATING -> "正在验证身份..."
+                    RelayConnectionState.RECONNECTING -> s.statusBanner // 保持重连倒计时文案
+                    RelayConnectionState.AUTH_FAILED -> null
+                    RelayConnectionState.DISCONNECTED -> null
+                    else -> s.statusBanner
+                }
+            )
         }
     }
 

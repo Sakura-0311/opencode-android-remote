@@ -4,6 +4,7 @@ import com.opencode.android.network.AgentInfo
 import com.opencode.android.network.DeviceInfo
 import com.opencode.android.network.ModelInfo
 import com.opencode.android.network.ProjectInfo
+import com.opencode.android.network.RelayConnectionState
 
 enum class MessageRole {
     USER,
@@ -127,6 +128,8 @@ data class OpenCodeUiState(
     val isDesktopOnline: Boolean = false,
     val isGenerating: Boolean = false,
     val isReconnecting: Boolean = false,
+    // P0-4: Relay 连接状态机（UI 据此区分网络/鉴权/Desktop 故障）
+    val relayConnectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED,
     
     // 会话与分组管理
     // B-13: 默认空会话列表，无会话时走空状态提示，不再显示假数据

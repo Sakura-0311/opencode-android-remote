@@ -9,7 +9,10 @@ import org.json.JSONObject
 
 class PreferencesManager(context: Context) {
 
-    private val prefs: SharedPreferences = try {
+    // P0-3: 加密存储失败时禁止静默降级（fail-closed）。
+    // securePrefs 为 null 表示加密不可用：敏感凭据（Secret / API Key / AccountId）
+    // 拒绝读写；非敏感偏好仍可用普通存储。
+    private val securePrefs: SharedPreferences? = try {
         val masterKey = androidx.security.crypto.MasterKey.Builder(context)
             .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
             .build()
@@ -21,8 +24,16 @@ class PreferencesManager(context: Context) {
             androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
     } catch (e: Exception) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        android.util.Log.e("PrefsManager", "P0-3: EncryptedSharedPreferences 初始化失败，敏感凭据将被拒绝保存", e)
+        null
     }
+
+    /** 加密存储是否可用；为 false 时禁止保存任何敏感凭据 */
+    val isSecureStorageAvailable: Boolean get() = securePrefs != null
+
+    // 非敏感偏好：加密可用时走加密存储，否则走普通存储（不含敏感数据）
+    private val prefs: SharedPreferences =
+        securePrefs ?: context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     companion object {
         private const val PREFS_NAME = "opencode_remote_prefs"
@@ -59,23 +70,32 @@ class PreferencesManager(context: Context) {
     }
 
     fun getAccountId(): String {
-        return prefs.getString(KEY_ACCOUNT_ID, "") ?: ""
+        return securePrefs?.getString(KEY_ACCOUNT_ID, "") ?: ""
     }
 
     fun getSecret(): String {
-        return prefs.getString(KEY_SECRET, "") ?: ""
+        return securePrefs?.getString(KEY_SECRET, "") ?: ""
     }
 
     fun getRelayUrl(): String {
         return prefs.getString(KEY_RELAY_URL, DEFAULT_RELAY_URL) ?: DEFAULT_RELAY_URL
     }
 
-    fun savePairingInfo(accountId: String, secret: String, relayUrl: String) {
-        prefs.edit()
+    /**
+     * P0-3: 保存配对敏感凭据。加密存储不可用时返回 false，调用方必须提示用户且不得继续。
+     */
+    fun savePairingInfo(accountId: String, secret: String, relayUrl: String): Boolean {
+        val sp = securePrefs ?: run {
+            android.util.Log.e("PrefsManager", "P0-3: 拒绝保存配对凭据——加密存储不可用")
+            return false
+        }
+        sp.edit()
             .putString(KEY_ACCOUNT_ID, accountId)
             .putString(KEY_SECRET, secret)
-            .putString(KEY_RELAY_URL, relayUrl)
             .apply()
+        // relayUrl 非敏感，可走普通偏好
+        prefs.edit().putString(KEY_RELAY_URL, relayUrl).apply()
+        return true
     }
 
     fun getCloudServerUrl(): String {
@@ -83,19 +103,30 @@ class PreferencesManager(context: Context) {
     }
 
     fun getCloudApiKey(): String {
-        return prefs.getString(KEY_CLOUD_API_KEY, "") ?: ""
+        return securePrefs?.getString(KEY_CLOUD_API_KEY, "") ?: ""
     }
 
     fun getCloudWorkspacePath(): String {
         return prefs.getString(KEY_CLOUD_WORKSPACE_PATH, DEFAULT_CLOUD_WORKSPACE) ?: DEFAULT_CLOUD_WORKSPACE
     }
 
-    fun saveCloudConfig(cloudUrl: String, apiKey: String, workspacePath: String) {
+    /**
+     * P0-3: 保存云端敏感凭据。加密存储不可用时返回 false，调用方必须提示用户且不得继续。
+     */
+    fun saveCloudConfig(cloudUrl: String, apiKey: String, workspacePath: String): Boolean {
+        val sp = securePrefs ?: run {
+            android.util.Log.e("PrefsManager", "P0-3: 拒绝保存云端凭据——加密存储不可用")
+            return false
+        }
+        sp.edit()
+            .putString(KEY_CLOUD_API_KEY, apiKey)
+            .apply()
+        // URL 与工作区路径非敏感，可走普通偏好
         prefs.edit()
             .putString(KEY_CLOUD_SERVER_URL, cloudUrl)
-            .putString(KEY_CLOUD_API_KEY, apiKey)
             .putString(KEY_CLOUD_WORKSPACE_PATH, workspacePath)
             .apply()
+        return true
     }
 
     fun getSavedSessions(): List<SessionItem> {

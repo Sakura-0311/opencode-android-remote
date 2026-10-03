@@ -19,9 +19,10 @@
    ```bash
    cd desktop_agent
    pip install -r requirements.txt
-   python agent.py user_dev_001 ws://your-relay-domain.com:8765
+   python agent.py user_dev_001 wss://your-relay-domain.com:8765
    ```
    *终端将打印 32 字节高熵随机 Secret 密钥及配对二维码。*
+   *P0-2：生产环境请使用 wss://（TLS）；仅本地开发调试可用 ws://localhost/ws://127.0.0.1。*
 3. **手机端连接**：
    打开 App，输入房间名 `user_dev_001`，点击 Secret 输入框右侧的 **【粘贴】** 按钮或手动填入密钥，点击连接即可开始远程编程。
 
