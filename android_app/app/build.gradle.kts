@@ -5,6 +5,12 @@ plugins {
     id("org.cyclonedx.bom") version "2.3.1"
 }
 
+// v2.6: SBOM 输出固定为 build/reports/cyclonedx/cyclonedx-bom.json
+cyclonedxBom {
+    outputFormat.set("json")
+    outputName.set("cyclonedx-bom")
+}
+
 import java.util.Properties
 
 // N-1: 签名密钥永不进仓库。按优先级读取：
