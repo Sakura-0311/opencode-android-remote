@@ -3,6 +3,9 @@ package com.opencode.android.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import com.opencode.android.data.model.AppMode
+import com.opencode.android.data.model.SessionItem
+import org.json.JSONArray
+import org.json.JSONObject
 
 class PreferencesManager(context: Context) {
 
@@ -10,27 +13,25 @@ class PreferencesManager(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "opencode_remote_prefs"
-        private const val KEY_APP_MODE = "pref_app_mode"
-        
-        // 电脑中继模式键
-        private const val KEY_ACCOUNT_ID = "pref_account_id"
-        private const val KEY_SECRET = "pref_secret"
-        private const val KEY_RELAY_URL = "pref_relay_url"
-        private const val DEFAULT_ACCOUNT = "user_dev_001"
-        private const val DEFAULT_RELAY = "ws://10.0.2.2:8765"
+        private const val KEY_APP_MODE = "app_mode"
+        private const val KEY_ACCOUNT_ID = "account_id"
+        private const val KEY_SECRET = "secret"
+        private const val KEY_RELAY_URL = "relay_url"
+        private const val KEY_CLOUD_SERVER_URL = "cloud_server_url"
+        private const val KEY_CLOUD_API_KEY = "cloud_api_key"
+        private const val KEY_CLOUD_WORKSPACE_PATH = "cloud_workspace_path"
+        private const val KEY_SAVED_SESSIONS = "saved_sessions_json"
+        private const val KEY_SAVED_TAGS = "saved_tags_json"
 
-        // 云端模式键
-        private const val KEY_CLOUD_URL = "pref_cloud_url"
-        private const val KEY_CLOUD_KEY = "pref_cloud_key"
-        private const val KEY_CLOUD_WORKSPACE = "pref_cloud_workspace"
+        private const val DEFAULT_RELAY_URL = "ws://10.0.2.2:8765"
         private const val DEFAULT_CLOUD_URL = "https://opencode.yourdomain.com:4096"
         private const val DEFAULT_CLOUD_WORKSPACE = "/workspace"
     }
 
     fun getAppMode(): AppMode {
-        val modeStr = prefs.getString(KEY_APP_MODE, AppMode.DESKTOP_RELAY.name)
+        val modeStr = prefs.getString(KEY_APP_MODE, AppMode.DESKTOP_RELAY.name) ?: AppMode.DESKTOP_RELAY.name
         return try {
-            AppMode.valueOf(modeStr ?: AppMode.DESKTOP_RELAY.name)
+            AppMode.valueOf(modeStr)
         } catch (e: Exception) {
             AppMode.DESKTOP_RELAY
         }
@@ -41,7 +42,7 @@ class PreferencesManager(context: Context) {
     }
 
     fun getAccountId(): String {
-        return prefs.getString(KEY_ACCOUNT_ID, DEFAULT_ACCOUNT) ?: DEFAULT_ACCOUNT
+        return prefs.getString(KEY_ACCOUNT_ID, "") ?: ""
     }
 
     fun getSecret(): String {
@@ -49,35 +50,102 @@ class PreferencesManager(context: Context) {
     }
 
     fun getRelayUrl(): String {
-        return prefs.getString(KEY_RELAY_URL, DEFAULT_RELAY) ?: DEFAULT_RELAY
+        return prefs.getString(KEY_RELAY_URL, DEFAULT_RELAY_URL) ?: DEFAULT_RELAY_URL
     }
 
     fun savePairingInfo(accountId: String, secret: String, relayUrl: String) {
         prefs.edit()
-            .putString(KEY_ACCOUNT_ID, accountId.trim())
-            .putString(KEY_SECRET, secret.trim())
-            .putString(KEY_RELAY_URL, relayUrl.trim())
+            .putString(KEY_ACCOUNT_ID, accountId)
+            .putString(KEY_SECRET, secret)
+            .putString(KEY_RELAY_URL, relayUrl)
             .apply()
     }
 
-    // 云端配置存取
     fun getCloudServerUrl(): String {
-        return prefs.getString(KEY_CLOUD_URL, DEFAULT_CLOUD_URL) ?: DEFAULT_CLOUD_URL
+        return prefs.getString(KEY_CLOUD_SERVER_URL, DEFAULT_CLOUD_URL) ?: DEFAULT_CLOUD_URL
     }
 
     fun getCloudApiKey(): String {
-        return prefs.getString(KEY_CLOUD_KEY, "") ?: ""
+        return prefs.getString(KEY_CLOUD_API_KEY, "") ?: ""
     }
 
     fun getCloudWorkspacePath(): String {
-        return prefs.getString(KEY_CLOUD_WORKSPACE, DEFAULT_CLOUD_WORKSPACE) ?: DEFAULT_CLOUD_WORKSPACE
+        return prefs.getString(KEY_CLOUD_WORKSPACE_PATH, DEFAULT_CLOUD_WORKSPACE) ?: DEFAULT_CLOUD_WORKSPACE
     }
 
-    fun saveCloudConfig(url: String, apiKey: String, workspace: String) {
+    fun saveCloudConfig(cloudUrl: String, apiKey: String, workspacePath: String) {
         prefs.edit()
-            .putString(KEY_CLOUD_URL, url.trim())
-            .putString(KEY_CLOUD_KEY, apiKey.trim())
-            .putString(KEY_CLOUD_WORKSPACE, workspace.trim())
+            .putString(KEY_CLOUD_SERVER_URL, cloudUrl)
+            .putString(KEY_CLOUD_API_KEY, apiKey)
+            .putString(KEY_CLOUD_WORKSPACE_PATH, workspacePath)
             .apply()
+    }
+
+    fun getSavedSessions(): List<SessionItem> {
+        val jsonStr = prefs.getString(KEY_SAVED_SESSIONS, null) ?: return emptyList()
+        val list = mutableListOf<SessionItem>()
+        try {
+            val jsonArray = JSONArray(jsonStr)
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                list.add(
+                    SessionItem(
+                        id = obj.optString("id", "default"),
+                        title = obj.optString("title", "Main Workspace"),
+                        tag = obj.optString("tag", "默认"),
+                        isPinned = obj.optBoolean("isPinned", false),
+                        isArchived = obj.optBoolean("isArchived", false),
+                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            // fallback to empty on parse error
+        }
+        return list
+    }
+
+    fun saveSessions(sessions: List<SessionItem>) {
+        try {
+            val jsonArray = JSONArray()
+            for (item in sessions) {
+                val obj = JSONObject().apply {
+                    put("id", item.id)
+                    put("title", item.title)
+                    put("tag", item.tag)
+                    put("isPinned", item.isPinned)
+                    put("isArchived", item.isArchived)
+                    put("updatedAt", item.updatedAt)
+                }
+                jsonArray.put(obj)
+            }
+            prefs.edit().putString(KEY_SAVED_SESSIONS, jsonArray.toString()).apply()
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    fun getSavedTags(): List<String> {
+        val jsonStr = prefs.getString(KEY_SAVED_TAGS, null) ?: return emptyList()
+        val list = mutableListOf<String>()
+        try {
+            val jsonArray = JSONArray(jsonStr)
+            for (i in 0 until jsonArray.length()) {
+                list.add(jsonArray.getString(i))
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        return list
+    }
+
+    fun saveTags(tags: List<String>) {
+        try {
+            val jsonArray = JSONArray()
+            tags.forEach { jsonArray.put(it) }
+            prefs.edit().putString(KEY_SAVED_TAGS, jsonArray.toString()).apply()
+        } catch (e: Exception) {
+            // ignore
+        }
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -23,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.android.data.model.AppError
 import com.opencode.android.data.model.AppMode
+import com.opencode.android.data.model.DiagnosticsResult
+import com.opencode.android.service.OpenCodeKeepAliveService
 
 @Composable
 fun PairingScreen(
@@ -34,11 +37,14 @@ fun PairingScreen(
     initialCloudKey: String,
     initialCloudWorkspace: String,
     appError: AppError?,
+    diagnostics: DiagnosticsResult?,
     statusBanner: String?,
     onSwitchMode: (AppMode) -> Unit,
+    onTestConnectivity: () -> Unit,
     onConnectDesktop: (accountId: String, secret: String, relayUrl: String) -> Unit,
     onConnectCloud: (cloudUrl: String, apiKey: String, workspace: String) -> Unit
 ) {
+    val context = LocalContext.current
     var selectedTab by remember(currentMode) {
         mutableStateOf(if (currentMode == AppMode.DESKTOP_RELAY) 0 else 1)
     }
@@ -127,7 +133,7 @@ fun PairingScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // 状态提示
         if (!statusBanner.isNullOrBlank()) {
@@ -147,8 +153,66 @@ fun PairingScreen(
             }
         }
 
+        // 连通性与隧道排查诊断卡片
+        if (diagnostics != null) {
+            val isSuccess = diagnostics.isSuccess
+            val cardBg = if (isSuccess) Color(0xFF0F3823) else MaterialTheme.colorScheme.errorContainer
+            val contentColor = if (isSuccess) Color(0xFF4ADE80) else MaterialTheme.colorScheme.onErrorContainer
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = cardBg),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = contentColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = diagnostics.statusTitle,
+                            fontWeight = FontWeight.Bold,
+                            color = contentColor,
+                            fontSize = 13.sp
+                        )
+                    }
+                    if (diagnostics.detailMessage.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = diagnostics.detailMessage,
+                            color = contentColor.copy(alpha = 0.9f),
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                    if (!diagnostics.tunnelHint.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.25f),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = diagnostics.tunnelHint,
+                                color = contentColor,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // 错误提示卡片
-        if (appError != null) {
+        if (appError != null && diagnostics == null) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                 shape = RoundedCornerShape(12.dp),
@@ -231,23 +295,29 @@ fun PairingScreen(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
-                onClick = { onConnectDesktop(accountId, secret, relayUrl) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Icon(Icons.Default.Computer, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "连接到电脑端 OpenCode",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onTestConnectivity,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("连通性检测", fontSize = 13.sp)
+                }
+
+                Button(
+                    onClick = { onConnectDesktop(accountId, secret, relayUrl) },
+                    modifier = Modifier.weight(1.4f).height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("连接电脑端", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -332,23 +402,29 @@ fun PairingScreen(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
-                onClick = { onConnectCloud(cloudUrl, cloudKey, cloudWorkspace) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Icon(Icons.Default.CloudDone, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "连入云端 OpenCode 工作区",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onTestConnectivity,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("连通性检测", fontSize = 13.sp)
+                }
+
+                Button(
+                    onClick = { onConnectCloud(cloudUrl, cloudKey, cloudWorkspace) },
+                    modifier = Modifier.weight(1.4f).height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Default.CloudDone, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("连入云工作区", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -377,6 +453,17 @@ fun PairingScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(36.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 电池优化忽略引导
+        TextButton(
+            onClick = { OpenCodeKeepAliveService.requestIgnoreBatteryOptimization(context) }
+        ) {
+            Icon(Icons.Default.BatteryAlert, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("设置后台忽略电池优化（防系统杀进程）", fontSize = 12.sp)
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
     }
 }

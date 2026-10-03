@@ -2,6 +2,9 @@ package com.opencode.android.network
 
 import android.os.Handler
 import android.os.Looper
+import com.opencode.android.data.model.DiffLine
+import com.opencode.android.data.model.DiffLineType
+import com.opencode.android.data.model.ToolApprovalRequest
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -25,6 +28,7 @@ interface RelayListener {
     fun onStreamEnd(sessionId: String)
     fun onAppError(code: String, message: String)
     fun onError(error: String)
+    fun onToolApprovalRequest(request: ToolApprovalRequest) {}
 }
 
 class RelayWebSocketClient {
@@ -198,6 +202,39 @@ class RelayWebSocketClient {
                     listener?.onStreamEnd(sessionId)
                 }
 
+                // 工具调用审批请求
+                "tool_approval_request", "approval_request" -> {
+                    val callId = json.optString("call_id", UUID.randomUUID().toString())
+                    val toolName = json.optString("tool_name", "edit_file")
+                    val filePath = json.optString("file_path", "")
+                    val summary = json.optString("summary", "")
+                    val rawContent = json.optString("raw_content", "")
+                    val diffArray = json.optJSONArray("diff_lines")
+                    val diffLines = mutableListOf<DiffLine>()
+                    if (diffArray != null) {
+                        for (i in 0 until diffArray.length()) {
+                            val dObj = diffArray.getJSONObject(i)
+                            val typeStr = dObj.optString("type", "UNCHANGED")
+                            val diffType = try {
+                                DiffLineType.valueOf(typeStr.uppercase())
+                            } catch (e: Exception) {
+                                DiffLineType.UNCHANGED
+                            }
+                            val content = dObj.optString("content", "")
+                            diffLines.add(DiffLine(diffType, content))
+                        }
+                    }
+                    val req = ToolApprovalRequest(
+                        callId = callId,
+                        toolName = toolName,
+                        filePath = filePath.ifEmpty { null },
+                        summary = summary.ifEmpty { null },
+                        diffLines = diffLines,
+                        rawContent = rawContent.ifEmpty { null }
+                    )
+                    listener?.onToolApprovalRequest(req)
+                }
+
                 // P1-4: 错误协议处理
                 "error" -> {
                     val code = json.optString("code", "UNKNOWN_ERROR")
@@ -220,6 +257,20 @@ class RelayWebSocketClient {
         val envelope = JSONObject().apply {
             put("action", "send_prompt")
             put("session_id", sessionId)
+            put("req_id", UUID.randomUUID().toString())
+            put("payload", payload)
+        }
+        webSocket?.send(envelope.toString())
+    }
+
+    fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "") {
+        val payload = JSONObject().apply {
+            put("call_id", callId)
+            put("approved", isApproved)
+            put("reason", reason)
+        }
+        val envelope = JSONObject().apply {
+            put("action", "tool_approval_response")
             put("req_id", UUID.randomUUID().toString())
             put("payload", payload)
         }

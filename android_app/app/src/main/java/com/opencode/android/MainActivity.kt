@@ -31,9 +31,13 @@ class MainActivity : ComponentActivity() {
                         initialCloudKey = uiState.cloudApiKey,
                         initialCloudWorkspace = uiState.cloudWorkspacePath,
                         appError = uiState.appError,
+                        diagnostics = uiState.diagnostics,
                         statusBanner = uiState.statusBanner,
                         onSwitchMode = { mode ->
                             viewModel.switchMode(mode)
+                        },
+                        onTestConnectivity = {
+                            viewModel.testConnectivity()
                         },
                         onConnectDesktop = { accountId, secret, relayUrl ->
                             viewModel.pairDesktop(accountId, secret, relayUrl)
@@ -59,6 +63,39 @@ class MainActivity : ComponentActivity() {
                         },
                         onDismissError = {
                             viewModel.dismissError()
+                        },
+                        onSelectTagFilter = { tag ->
+                            viewModel.setTagFilter(tag)
+                        },
+                        onSwitchSession = { id ->
+                            viewModel.switchSession(id)
+                        },
+                        onTogglePinSession = { id ->
+                            viewModel.togglePinSession(id)
+                        },
+                        onArchiveSession = { id ->
+                            viewModel.archiveSession(id)
+                        },
+                        onBatchArchive = {
+                            viewModel.batchArchiveOldSessions()
+                        },
+                        onApproveTool = { callId ->
+                            viewModel.approveTool(callId)
+                        },
+                        onRejectTool = { callId ->
+                            viewModel.rejectTool(callId)
+                        },
+                        onTriggerTestApproval = {
+                            viewModel.triggerMockToolApprovalForTest()
+                        },
+                        onSearchLog = { query ->
+                            viewModel.setLogSearchQuery(query)
+                        },
+                        onSetAutoScrollPaused = { isPaused ->
+                            viewModel.setAutoScrollPaused(isPaused)
+                        },
+                        onExportMarkdown = {
+                            viewModel.exportCurrentSession()
                         }
                     )
                 }

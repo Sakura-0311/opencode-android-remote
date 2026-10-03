@@ -6,12 +6,20 @@ import com.opencode.android.data.local.PreferencesManager
 import com.opencode.android.data.model.AppError
 import com.opencode.android.data.model.AppMode
 import com.opencode.android.data.model.ChatMessage
+import com.opencode.android.data.model.DiagnosticsResult
+import com.opencode.android.data.model.DiffLine
+import com.opencode.android.data.model.DiffLineType
 import com.opencode.android.data.model.MessageRole
 import com.opencode.android.data.model.OpenCodeUiState
+import com.opencode.android.data.model.SessionItem
+import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.CloudStreamListener
 import com.opencode.android.network.RelayListener
 import com.opencode.android.network.RelayWebSocketClient
+import com.opencode.android.network.TunnelDiagnosticsHelper
+import com.opencode.android.service.OpenCodeKeepAliveService
+import com.opencode.android.util.MarkdownExporter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,17 +32,31 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     private val relayClient = RelayWebSocketClient()
     private val cloudClient = CloudApiClient()
 
-    private val _uiState = MutableStateFlow(
-        OpenCodeUiState(
-            appMode = prefsManager.getAppMode(),
-            accountId = prefsManager.getAccountId(),
-            secret = prefsManager.getSecret(),
-            relayUrl = prefsManager.getRelayUrl(),
-            cloudServerUrl = prefsManager.getCloudServerUrl(),
-            cloudApiKey = prefsManager.getCloudApiKey(),
-            cloudWorkspacePath = prefsManager.getCloudWorkspacePath()
+    private val _uiState: MutableStateFlow<OpenCodeUiState>
+
+    init {
+        val savedSessions = prefsManager.getSavedSessions().ifEmpty {
+            listOf(
+                SessionItem("default", "Main Workspace", tag = "默认", isPinned = true),
+                SessionItem("debug_session", "API 认证异常排查", tag = "代码调试"),
+                SessionItem("auto_deploy", "云端 Docker 自动化脚本", tag = "自动化任务")
+            )
+        }
+
+        _uiState = MutableStateFlow(
+            OpenCodeUiState(
+                appMode = prefsManager.getAppMode(),
+                accountId = prefsManager.getAccountId(),
+                secret = prefsManager.getSecret(),
+                relayUrl = prefsManager.getRelayUrl(),
+                cloudServerUrl = prefsManager.getCloudServerUrl(),
+                cloudApiKey = prefsManager.getCloudApiKey(),
+                cloudWorkspacePath = prefsManager.getCloudWorkspacePath(),
+                availableSessions = savedSessions
+            )
         )
-    )
+    }
+
     val uiState: StateFlow<OpenCodeUiState> = _uiState.asStateFlow()
 
     private var activeAssistantMessageId: String? = null
@@ -46,10 +68,161 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     fun switchMode(mode: AppMode) {
         prefsManager.saveAppMode(mode)
-        _uiState.update { it.copy(appMode = mode, appError = null) }
+        _uiState.update { it.copy(appMode = mode, appError = null, diagnostics = null) }
     }
 
-    // --- 模式 1: 电脑中继连接 ---
+    // =========================================================================
+    // 1. 会话分组、标签管理、置顶与归档
+    // =========================================================================
+
+    fun setTagFilter(tag: String?) {
+        val finalTag = if (tag == "全部") null else tag
+        _uiState.update { it.copy(selectedTagFilter = finalTag) }
+    }
+
+    fun togglePinSession(sessionId: String) {
+        _uiState.update { state ->
+            val updated = state.availableSessions.map { s ->
+                if (s.id == sessionId) s.copy(isPinned = !s.isPinned, updatedAt = System.currentTimeMillis()) else s
+            }
+            prefsManager.saveSessions(updated)
+            state.copy(availableSessions = sortSessions(updated))
+        }
+    }
+
+    fun archiveSession(sessionId: String) {
+        _uiState.update { state ->
+            val updated = state.availableSessions.map { s ->
+                if (s.id == sessionId) s.copy(isArchived = true, updatedAt = System.currentTimeMillis()) else s
+            }
+            prefsManager.saveSessions(updated)
+            state.copy(availableSessions = sortSessions(updated))
+        }
+    }
+
+    fun batchArchiveOldSessions() {
+        // 一键归档非置顶的旧会话
+        _uiState.update { state ->
+            val updated = state.availableSessions.map { s ->
+                if (!s.isPinned && s.id != state.currentSessionId) s.copy(isArchived = true) else s
+            }
+            prefsManager.saveSessions(updated)
+            state.copy(availableSessions = sortSessions(updated))
+        }
+    }
+
+    fun setSessionTag(sessionId: String, newTag: String) {
+        _uiState.update { state ->
+            val updated = state.availableSessions.map { s ->
+                if (s.id == sessionId) s.copy(tag = newTag, updatedAt = System.currentTimeMillis()) else s
+            }
+            val tags = (state.availableTags + newTag).distinct()
+            prefsManager.saveSessions(updated)
+            state.copy(availableSessions = sortSessions(updated), availableTags = tags)
+        }
+    }
+
+    fun switchSession(sessionId: String) {
+        _uiState.update { it.copy(currentSessionId = sessionId, messages = emptyList()) }
+    }
+
+    private fun sortSessions(sessions: List<SessionItem>): List<SessionItem> {
+        return sessions.sortedWith(
+            compareByDescending<SessionItem> { it.isPinned }
+                .thenBy { it.isArchived }
+                .thenByDescending { it.updatedAt }
+        )
+    }
+
+    // =========================================================================
+    // 2. 工具审批与代码 Diff 预览
+    // =========================================================================
+
+    fun triggerMockToolApprovalForTest() {
+        val sampleDiff = listOf(
+            DiffLine(DiffLineType.HEADER, "@@ -12,6 +12,8 @@ class AuthService"),
+            DiffLine(DiffLineType.UNCHANGED, "    fun validateToken(token: String): Boolean {"),
+            DiffLine(DiffLineType.UNCHANGED, "        if (token.isEmpty()) return false"),
+            DiffLine(DiffLineType.REMOVED, "        // return legacyTokenCheck(token)"),
+            DiffLine(DiffLineType.ADDED, "        val claims = jwtVerifier.verify(token)"),
+            DiffLine(DiffLineType.ADDED, "        return claims.isValid && !claims.isExpired"),
+            DiffLine(DiffLineType.UNCHANGED, "    }")
+        )
+        val approval = ToolApprovalRequest(
+            callId = UUID.randomUUID().toString(),
+            toolName = "edit_file",
+            filePath = "src/auth/AuthService.kt",
+            summary = "重构 Token 校验逻辑，引入高可靠性 JWT 签名算法",
+            diffLines = sampleDiff
+        )
+        _uiState.update { it.copy(pendingApproval = approval) }
+        OpenCodeKeepAliveService.notifyApprovalRequired(getApplication(), "edit_file: AuthService.kt")
+    }
+
+    fun approveTool(callId: String) {
+        _uiState.update { it.copy(pendingApproval = null) }
+        relayClient.sendApprovalResponse(callId, true)
+        sendMessage("/approve $callId")
+    }
+
+    fun rejectTool(callId: String) {
+        _uiState.update { it.copy(pendingApproval = null) }
+        relayClient.sendApprovalResponse(callId, false, "用户拒绝了本次文件修改")
+        sendMessage("/reject $callId - 用户拒绝了本次文件修改")
+    }
+
+    // =========================================================================
+    // 3. 连通性测试与隧道适配排查
+    // =========================================================================
+
+    fun testConnectivity() {
+        val targetUrl = if (_uiState.value.appMode == AppMode.CLOUD_HOSTED) {
+            _uiState.value.cloudServerUrl
+        } else {
+            _uiState.value.relayUrl
+        }
+        val key = if (_uiState.value.appMode == AppMode.CLOUD_HOSTED) _uiState.value.cloudApiKey else _uiState.value.secret
+
+        _uiState.update {
+            it.copy(
+                diagnostics = DiagnosticsResult(isChecking = true, statusTitle = "正在诊断连通性...")
+            )
+        }
+
+        TunnelDiagnosticsHelper.diagnoseEndpoint(targetUrl, key) { result ->
+            _uiState.update { it.copy(diagnostics = result) }
+        }
+    }
+
+    fun clearDiagnostics() {
+        _uiState.update { it.copy(diagnostics = null) }
+    }
+
+    // =========================================================================
+    // 4. 日志搜索与触摸暂停滚动
+    // =========================================================================
+
+    fun setLogSearchQuery(query: String) {
+        _uiState.update { it.copy(logSearchQuery = query) }
+    }
+
+    fun setAutoScrollPaused(isPaused: Boolean) {
+        _uiState.update { it.copy(isAutoScrollPaused = isPaused) }
+    }
+
+    // =========================================================================
+    // 5. 会话导出为 Markdown
+    // =========================================================================
+
+    fun exportCurrentSession(): String {
+        val currentTitle = _uiState.value.availableSessions.find { it.id == _uiState.value.currentSessionId }?.title ?: "OpenCode 会话"
+        return MarkdownExporter.generateMarkdown(currentTitle, _uiState.value.messages)
+    }
+
+    // =========================================================================
+    // 6. 连接与收发消息核心调度
+    // =========================================================================
+
     fun pairDesktop(accountId: String, secret: String, relayUrl: String) {
         val trimmedAccount = accountId.trim()
         val trimmedSecret = secret.trim()
@@ -75,6 +248,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 isPaired = true,
                 isAuthenticated = false,
                 appError = null,
+                diagnostics = null,
                 statusBanner = "正在连接中继服务器..."
             )
         }
@@ -82,7 +256,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         relayClient.connect(trimmedRelay, trimmedAccount, trimmedSecret, this)
     }
 
-    // --- 模式 2: 云端工作区直连 ---
     fun pairCloud(cloudUrl: String, apiKey: String, workspacePath: String) {
         val trimmedUrl = cloudUrl.trim()
         val trimmedKey = apiKey.trim()
@@ -108,9 +281,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                         cloudWorkspacePath = trimmedWorkspace,
                         isPaired = true,
                         isAuthenticated = true,
-                        isDesktopOnline = true, // 云端模式下即表示云端主机在线
+                        isDesktopOnline = true,
                         isRelayConnected = true,
                         appError = null,
+                        diagnostics = null,
                         statusBanner = null
                     )
                 }
@@ -129,6 +303,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     fun unpair() {
         relayClient.disconnect()
         cloudClient.cancelCurrentStream()
+        OpenCodeKeepAliveService.stopTaskProgress(getApplication())
         _uiState.update {
             it.copy(
                 isPaired = false,
@@ -161,14 +336,17 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             state.copy(
                 messages = updated,
                 isGenerating = true,
-                appError = null
+                appError = null,
+                isAutoScrollPaused = false
             )
         }
+
+        // 启动后台前台保活服务与常驻进度
+        OpenCodeKeepAliveService.startTaskProgress(getApplication(), "执行指令: ${trimmed.take(30)}...")
 
         if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
             relayClient.sendPrompt(trimmed, _uiState.value.currentSessionId)
         } else {
-            // 云端模式直接通过 HTTP/SSE 调度
             cloudClient.sendPromptStream(
                 baseUrl = _uiState.value.cloudServerUrl,
                 apiKey = _uiState.value.cloudApiKey,
@@ -185,6 +363,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         } else {
             cloudClient.cancelCurrentStream()
         }
+        OpenCodeKeepAliveService.stopTaskProgress(getApplication())
         _uiState.update { it.copy(isGenerating = false) }
     }
 
@@ -252,6 +431,14 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(isDesktopOnline = isOnline) }
     }
 
+    override fun onToolApprovalRequest(request: ToolApprovalRequest) {
+        _uiState.update { it.copy(pendingApproval = request) }
+        OpenCodeKeepAliveService.notifyApprovalRequired(
+            getApplication(),
+            "${request.toolName}: ${request.filePath ?: "代码修改"}"
+        )
+    }
+
     override fun onStreamStart(sessionId: String) {
         val newMsgId = UUID.randomUUID().toString()
         activeAssistantMessageId = newMsgId
@@ -277,6 +464,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             onStreamStart(sessionId)
         }
 
+        OpenCodeKeepAliveService.updateProgress(getApplication(), "AI 正在生成/执行: ${chunk.take(30)}...")
+
         _uiState.update { state ->
             val updatedMessages = state.messages.map { msg ->
                 if (msg.id == activeAssistantMessageId) {
@@ -299,6 +488,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onStreamEnd(sessionId: String) {
+        OpenCodeKeepAliveService.stopTaskProgress(getApplication())
         _uiState.update { state ->
             val updatedMessages = state.messages.map { msg ->
                 if (msg.id == activeAssistantMessageId) {
@@ -316,6 +506,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onAppError(code: String, message: String) {
+        OpenCodeKeepAliveService.stopTaskProgress(getApplication())
         _uiState.update { state ->
             val errorMsg = ChatMessage(
                 id = UUID.randomUUID().toString(),
@@ -335,7 +526,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(appError = AppError("NETWORK_ERROR", error)) }
     }
 
-    // --- CloudStreamListener (云端直接调用错误回调) ---
     override fun onError(code: String, message: String) {
         onAppError(code, message)
     }
@@ -344,5 +534,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         super.onCleared()
         relayClient.disconnect()
         cloudClient.cancelCurrentStream()
+        OpenCodeKeepAliveService.stopTaskProgress(getApplication())
     }
 }

@@ -12,10 +12,10 @@
 # 1. 创建并进入目录
 mkdir -p opencode-cloud && cd opencode-cloud
 
-# 2. 下载或编写 docker-compose.yml
-# 设置你的大模型 API Key 与自定义访问 Token
-export OPENCODE_AUTH_TOKEN="your_custom_secret_token"
-export OPENAI_API_KEY="sk-..."       # 或 ANTHROPIC_API_KEY / DEEPSEEK_API_KEY
+# 2. 设置你的大模型 API Key 与自定义访问 Token（强制要求显式指定，严禁使用弱口令）
+export OPENCODE_AUTH_TOKEN="your_custom_secure_token_min_16_chars"
+export GEMINI_API_KEY="AIzaSy..."          # Google Gemini 官方 API Key
+export OPENAI_API_KEY="sk-..."            # 或 ANTHROPIC_API_KEY / DEEPSEEK_API_KEY
 
 # 3. 后台一键启动
 docker compose up -d

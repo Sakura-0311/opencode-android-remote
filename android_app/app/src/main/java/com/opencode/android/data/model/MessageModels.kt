@@ -23,7 +23,44 @@ data class ChatMessage(
 
 data class SessionItem(
     val id: String,
-    val title: String
+    val title: String,
+    val tag: String = "默认",          // 自定义标签（如 "自动化任务", "代码调试", "脚本生成"）
+    val isPinned: Boolean = false,     // 会话置顶
+    val isArchived: Boolean = false,   // 旧会话归档
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+enum class DiffLineType {
+    ADDED,
+    REMOVED,
+    UNCHANGED,
+    HEADER
+}
+
+data class DiffLine(
+    val type: DiffLineType,
+    val content: String,
+    val lineNumberOld: Int? = null,
+    val lineNumberNew: Int? = null
+)
+
+data class ToolApprovalRequest(
+    val callId: String,
+    val toolName: String,
+    val filePath: String? = null,
+    val summary: String? = null,
+    val diffLines: List<DiffLine> = emptyList(),
+    val rawContent: String? = null,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class DiagnosticsResult(
+    val isChecking: Boolean = false,
+    val isSuccess: Boolean = false,
+    val latencyMs: Long? = null,
+    val statusTitle: String = "",
+    val detailMessage: String = "",
+    val tunnelHint: String? = null // 针对 Cloudflare Tunnel、SakuraFrp、证书等的排查提示
 )
 
 data class AppError(
@@ -51,8 +88,26 @@ data class OpenCodeUiState(
     val isDesktopOnline: Boolean = false,
     val isGenerating: Boolean = false,
     val isReconnecting: Boolean = false,
+    
+    // 会话与分组管理
     val currentSessionId: String = "default",
-    val availableSessions: List<SessionItem> = listOf(SessionItem("default", "Main Workspace")),
+    val availableSessions: List<SessionItem> = listOf(
+        SessionItem("default", "Main Workspace", tag = "默认", isPinned = true)
+    ),
+    val selectedTagFilter: String? = null, // null 表示查看全部，支持按标签过滤
+    val availableTags: List<String> = listOf("全部", "默认", "代码调试", "自动化任务", "脚本生成"),
+    val showArchivedSessions: Boolean = false,
+
+    // 工具审批与 Diff 预览
+    val pendingApproval: ToolApprovalRequest? = null,
+
+    // 连通性测试与隧道诊断结果
+    val diagnostics: DiagnosticsResult? = null,
+
+    // 日志搜索与触摸暂停滚动
+    val logSearchQuery: String = "",
+    val isAutoScrollPaused: Boolean = false,
+
     val messages: List<ChatMessage> = emptyList(),
     val appError: AppError? = null,
     val statusBanner: String? = null
