@@ -21,6 +21,7 @@ import com.opencode.android.network.CloudStreamListener
 import com.opencode.android.network.DeviceInfo
 import com.opencode.android.network.AgentInfo
 import com.opencode.android.network.ModelInfo
+import com.opencode.android.network.ProjectInfo
 import com.opencode.android.network.PairClaimResult
 import com.opencode.android.network.PairingClient
 import com.opencode.android.network.RelayListener
@@ -767,6 +768,32 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onDeviceRenamed(deviceName: String) {
         requestDeviceList()
+    }
+
+    // =========================================================================
+    // v1.6 P1 项目管理中心
+    // =========================================================================
+
+    fun requestProjects() {
+        if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
+            relayClient.requestProjects()
+        }
+    }
+
+    fun toggleFavoriteProject(projectId: String) {
+        val current = _uiState.value.favoriteProjectIds.toMutableSet()
+        if (current.contains(projectId)) current.remove(projectId) else current.add(projectId)
+        prefsManager.saveFavoriteProjects(current.toList())
+        _uiState.update { it.copy(favoriteProjectIds = current) }
+    }
+
+    override fun onProjectsDataReceived(projects: List<ProjectInfo>) {
+        _uiState.update {
+            it.copy(
+                projects = projects,
+                favoriteProjectIds = prefsManager.getFavoriteProjects().toSet()
+            )
+        }
     }
 
     // =========================================================================

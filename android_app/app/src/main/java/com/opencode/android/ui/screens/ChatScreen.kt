@@ -63,7 +63,9 @@ fun ChatScreen(
     onRenameDevice: (String, String) -> Unit = { _, _ -> },
     onShowDeviceManager: () -> Unit = {},
     // v1.6 P1 Model/Agent
-    onShowModelAgent: () -> Unit = {}
+    onShowModelAgent: () -> Unit = {},
+    // v1.6 P1 项目管理中心
+    onShowProjectCenter: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -231,6 +233,15 @@ fun ChatScreen(
                                     onShowModelAgent()
                                 },
                                 leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) }
+                            )
+                            // v1.6 P1 项目管理中心
+                            DropdownMenuItem(
+                                text = { Text("项目中心") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowProjectCenter()
+                                },
+                                leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) }
                             )
                             DropdownMenuItem(
                                 text = { Text("断开连接", color = MaterialTheme.colorScheme.error) },

@@ -213,4 +213,13 @@ class PreferencesManager(context: Context) {
             prefs.getString("selected_model_id", "") ?: ""
         )
     }
+
+    // v1.6 P1 项目管理中心：收藏项目
+    fun saveFavoriteProjects(ids: List<String>) {
+        prefs.edit().putStringSet("favorite_projects", ids.toSet()).apply()
+    }
+
+    fun getFavoriteProjects(): List<String> {
+        return prefs.getStringSet("favorite_projects", emptySet())?.toList() ?: emptyList()
+    }
 }

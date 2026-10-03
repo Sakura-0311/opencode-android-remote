@@ -22,6 +22,9 @@ from opencode_api import (
     subscribe_events_stream,
     get_agents,
     get_providers,
+    get_projects,
+    get_current_project,
+    get_vcs_info,
 )
 
 logging.basicConfig(
@@ -376,6 +379,31 @@ async def handle_mobile_message(
                 "req_id": req_id,
                 "agents": [],
                 "providers": {},
+                "error": str(e),
+            }))
+
+    # v1.6 P1: 项目管理中心——获取项目列表（含 Git 分支、工作区状态）
+    elif action == "get_projects":
+        try:
+            projects = await get_projects(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            current = await get_current_project(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            vcs = await get_vcs_info(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            await ws_relay.send(json.dumps({
+                "type": "projects_data",
+                "req_id": req_id,
+                "projects": projects,
+                "current": current,
+                "vcs": vcs,
+            }))
+            logger.info(f"v1.6: sent {len(projects)} projects to mobile")
+        except Exception as e:
+            logger.error(f"Error fetching projects: {e}")
+            await ws_relay.send(json.dumps({
+                "type": "projects_data",
+                "req_id": req_id,
+                "projects": [],
+                "current": {},
+                "vcs": {},
                 "error": str(e),
             }))
 

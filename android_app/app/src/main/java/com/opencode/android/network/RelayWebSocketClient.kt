@@ -42,6 +42,9 @@ interface RelayListener {
 
     // v1.6 P1 Model/Agent 管理
     fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>) {}
+
+    // v1.6 P1 项目管理中心
+    fun onProjectsDataReceived(projects: List<ProjectInfo>) {}
 }
 
 /**
@@ -60,6 +63,17 @@ data class ModelInfo(
     val providerId: String,
     val modelId: String,
     val displayName: String = ""
+)
+
+/**
+ * v1.6 P1 项目管理中心：项目信息
+ */
+data class ProjectInfo(
+    val id: String,
+    val name: String,
+    val path: String = "",
+    val branch: String = "",
+    val isCurrent: Boolean = false
 )
 
 /**
@@ -359,6 +373,32 @@ class RelayWebSocketClient {
                     listener?.onConfigDataReceived(agents, models)
                 }
 
+                // v1.6 P1 项目管理中心
+                "projects_data" -> {
+                    val projects = mutableListOf<ProjectInfo>()
+                    val arr = json.optJSONArray("projects")
+                    val currentObj = json.optJSONObject("current")
+                    val currentId = currentObj?.optString("id", "") ?: ""
+                    val vcsObj = json.optJSONObject("vcs")
+                    val branch = vcsObj?.optString("branch", "") ?: ""
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            val id = o.optString("id", "")
+                            if (id.isNotEmpty()) {
+                                projects.add(ProjectInfo(
+                                    id = id,
+                                    name = o.optString("name", id),
+                                    path = o.optString("path", o.optString("worktree", "")),
+                                    branch = branch,
+                                    isCurrent = id == currentId
+                                ))
+                            }
+                        }
+                    }
+                    listener?.onProjectsDataReceived(projects)
+                }
+
                 // 流式交互
                 "stream_start" -> {
                     val sessionId = json.optString("session_id", "default")
@@ -479,6 +519,17 @@ class RelayWebSocketClient {
     fun requestConfig() {
         val envelope = JSONObject().apply {
             put("action", "get_config")
+            put("req_id", UUID.randomUUID().toString())
+        }
+        webSocket?.send(envelope.toString())
+    }
+
+    /**
+     * v1.6 P1 项目管理中心：请求项目列表
+     */
+    fun requestProjects() {
+        val envelope = JSONObject().apply {
+            put("action", "get_projects")
             put("req_id", UUID.randomUUID().toString())
         }
         webSocket?.send(envelope.toString())

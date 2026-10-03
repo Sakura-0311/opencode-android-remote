@@ -26,6 +26,7 @@ import com.opencode.android.viewmodel.OpenCodeViewModel
 import com.opencode.android.service.OpenCodeKeepAliveService
 import com.opencode.android.ui.screens.DeviceManagementDialog
 import com.opencode.android.ui.screens.ModelAgentDialog
+import com.opencode.android.ui.screens.ProjectCenterDialog
 
 class MainActivity : ComponentActivity() {
 
@@ -70,6 +71,8 @@ class MainActivity : ComponentActivity() {
                 var showDeviceManager by remember { mutableStateOf(false) }
                 // v1.6 P1 Model/Agent
                 var showModelAgent by remember { mutableStateOf(false) }
+                // v1.6 P1 项目管理中心
+                var showProjectCenter by remember { mutableStateOf(false) }
 
                 if (!uiState.isPaired) {
                     PairingScreen(
@@ -175,6 +178,10 @@ class MainActivity : ComponentActivity() {
                         // v1.6 P1 Model/Agent
                         onShowModelAgent = {
                             showModelAgent = true
+                        },
+                        // v1.6 P1 项目管理中心
+                        onShowProjectCenter = {
+                            showProjectCenter = true
                         }
                     )
                 }
@@ -229,6 +236,22 @@ class MainActivity : ComponentActivity() {
                         onSelectAgent = { viewModel.selectAgent(it) },
                         onSelectModel = { viewModel.selectModel(it) },
                         onDismiss = { showModelAgent = false }
+                    )
+                }
+
+                // v1.6 P1 项目管理中心
+                if (showProjectCenter) {
+                    ProjectCenterDialog(
+                        projects = uiState.projects,
+                        favoriteIds = uiState.favoriteProjectIds,
+                        deviceName = uiState.accountId,
+                        onRefresh = { viewModel.requestProjects() },
+                        onToggleFavorite = { viewModel.toggleFavoriteProject(it) },
+                        onOpenProject = {
+                            // 进入项目：关闭对话框（会话列表已按项目过滤，后续版本增强）
+                            showProjectCenter = false
+                        },
+                        onDismiss = { showProjectCenter = false }
                     )
                 }
             }

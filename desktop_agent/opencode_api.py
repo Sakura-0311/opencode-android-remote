@@ -281,3 +281,52 @@ async def get_providers(
         if resp.status == 200:
             return await resp.json()
         return {}
+
+
+# ============================================================================
+# v1.6 P1 项目管理中心
+# ============================================================================
+async def get_projects(
+    session: aiohttp.ClientSession,
+    base_url: str = "http://127.0.0.1:4096",
+    password: Optional[str] = None,
+) -> list:
+    """GET /project — 获取项目列表。"""
+    clean_url = base_url.rstrip("/")
+    url = f"{clean_url}/project"
+    headers = get_auth_headers(password)
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+        if resp.status == 200:
+            data = await resp.json()
+            return data if isinstance(data, list) else data.get("data", [])
+        return []
+
+
+async def get_current_project(
+    session: aiohttp.ClientSession,
+    base_url: str = "http://127.0.0.1:4096",
+    password: Optional[str] = None,
+) -> dict:
+    """GET /project/current — 获取当前项目。"""
+    clean_url = base_url.rstrip("/")
+    url = f"{clean_url}/project/current"
+    headers = get_auth_headers(password)
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+        if resp.status == 200:
+            return await resp.json()
+        return {}
+
+
+async def get_vcs_info(
+    session: aiohttp.ClientSession,
+    base_url: str = "http://127.0.0.1:4096",
+    password: Optional[str] = None,
+) -> dict:
+    """GET /vcs — 获取当前项目的 Git 分支与工作区状态（项目管理中心用）。"""
+    clean_url = base_url.rstrip("/")
+    url = f"{clean_url}/vcs"
+    headers = get_auth_headers(password)
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+        if resp.status == 200:
+            return await resp.json()
+        return {}

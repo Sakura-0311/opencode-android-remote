@@ -3,6 +3,7 @@ package com.opencode.android.data.model
 import com.opencode.android.network.AgentInfo
 import com.opencode.android.network.DeviceInfo
 import com.opencode.android.network.ModelInfo
+import com.opencode.android.network.ProjectInfo
 
 enum class MessageRole {
     USER,
@@ -104,6 +105,9 @@ data class OpenCodeUiState(
     val availableModels: List<ModelInfo> = emptyList(),
     val selectedAgent: AgentInfo? = null,
     val selectedModel: ModelInfo? = null,
+    // v1.6 P1 项目管理中心
+    val projects: List<ProjectInfo> = emptyList(),
+    val favoriteProjectIds: Set<String> = emptySet(),
     
     // 电脑中继模式参数
     val accountId: String = "",
