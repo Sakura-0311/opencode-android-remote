@@ -29,6 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger("DesktopAgent")
 
 RELAY_SERVER_URL = os.getenv("RELAY_SERVER_URL", "ws://127.0.0.1:8765")
+RELAY_ADMIN_TOKEN = os.getenv("RELAY_ADMIN_TOKEN", "")  # B-8: 建房管理令牌（relay 侧配置了才需要）
 OPENCODE_API_URL = os.getenv("OPENCODE_API_URL", DEFAULT_OPENCODE_BASE_URL)
 OPENCODE_PASSWORD = os.getenv("OPENCODE_SERVER_PASSWORD", None)
 DEFAULT_ACCOUNT_ID = os.getenv("OPENCODE_ACCOUNT_ID", "user_dev_001")
@@ -143,6 +144,20 @@ class ToolApprovalManager:
             return None
         del self._pending[permission_id]
         return record
+
+    def validate_approval(self, permission_id: str, nonce: str) -> Optional[Dict[str, Any]]:
+        """B-7: 只校验 nonce，不删除；调用成功后再删，失败可重试"""
+        self.clean_expired()
+        record = self._pending.get(permission_id)
+        if not record:
+            return None
+        if not secrets.compare_digest(record["nonce"], nonce):
+            return None
+        return record
+
+    def remove_approval(self, permission_id: str):
+        """B-7: 审批成功送达后删除记录"""
+        self._pending.pop(permission_id, None)
 
     def clean_expired(self):
         now = time.time()
@@ -406,21 +421,30 @@ async def handle_mobile_message(
         is_approved = payload.get("approved", True)
         reason = payload.get("reason", "")
         logger.info(f"Handling approval decision for permission {call_id}: approved={is_approved}")
-        if call_id:
-            if nonce:
-                record = tool_guard.consume_approval(call_id, nonce)
-                if not record:
-                    logger.warning(f"Rejected tool approval response for {call_id}: Nonce invalid or expired (SEC-04 guard)")
-                    return
-            await respond_to_permission(
-                http_session,
-                session_id,
-                call_id,
-                is_approved,
-                reason,
-                OPENCODE_API_URL,
-                OPENCODE_PASSWORD
-            )
+        if not call_id:
+            return
+        # B-5: 空 nonce 直接拒绝，不再放行（防重放守卫）
+        if not nonce:
+            logger.warning(f"Rejected tool approval response for {call_id}: missing nonce (SEC-04 guard)")
+            return
+        record = tool_guard.validate_approval(call_id, nonce)
+        if not record:
+            logger.warning(f"Rejected tool approval response for {call_id}: Nonce invalid or expired (SEC-04 guard)")
+            return
+        # B-7: 用记录里的 session_id（而非信封里的），调用成功后再删记录以便重试
+        ok = await respond_to_permission(
+            http_session,
+            record["session_id"],
+            call_id,
+            is_approved,
+            reason,
+            OPENCODE_API_URL,
+            OPENCODE_PASSWORD
+        )
+        if ok:
+            tool_guard.remove_approval(call_id)
+        else:
+            logger.warning(f"respond_to_permission failed for {call_id}, keeping record for retry")
 
 # ==============================================================================
 # Agent 主运行循环与自动重连
@@ -462,6 +486,9 @@ async def run_desktop_agent(account_id: str, secret: str, relay_url: str):
                         "secret": secret,
                         "client_type": "desktop"
                     }
+                    # B-8: 若配置了建房管理令牌则一并上报
+                    if RELAY_ADMIN_TOKEN:
+                        auth_message["admin_token"] = RELAY_ADMIN_TOKEN
                     await ws.send(json.dumps(auth_message))
 
                     auth_resp_raw = await asyncio.wait_for(ws.recv(), timeout=10.0)

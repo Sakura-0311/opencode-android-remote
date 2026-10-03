@@ -19,6 +19,17 @@ logger = logging.getLogger("OpenCodeRelay")
 app = FastAPI(title="OpenCode Cloud Relay Server", version="1.1.0")
 
 # ==============================================================================
+# B-8: 建房管理令牌（防房间抢注）
+# 若设置 RELAY_ADMIN_TOKEN，则 desktop 首次建房必须在 auth 消息中携带相符的
+# admin_token；未设置时保持旧行为（仅打警告日志），保证向后兼容。
+# ==============================================================================
+RELAY_ADMIN_TOKEN = os.getenv("RELAY_ADMIN_TOKEN", "")
+if RELAY_ADMIN_TOKEN:
+    logger.info("B-8: RELAY_ADMIN_TOKEN 已启用，建房需携带管理令牌")
+else:
+    logger.warning("B-8: 未设置 RELAY_ADMIN_TOKEN，任何 desktop 均可建房（有被抢注风险），建议生产环境配置")
+
+# ==============================================================================
 # P0-3: 内存滑动窗口防爆破与限流器
 # ==============================================================================
 TRUSTED_PROXIES = set(filter(None, os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1").split(",")))
@@ -114,11 +125,12 @@ class ConnectionManager:
     def get_session(self, ws: WebSocket) -> Optional[ClientSession]:
         return self.sessions.get(ws)
 
-    def register_authenticated(self, session: ClientSession, secret: str) -> Tuple[bool, str]:
+    def register_authenticated(self, session: ClientSession, secret: str, admin_token: str = "") -> Tuple[bool, str]:
         """
         认证并注册进入指定房间。
         - Desktop 注册：初始化房间 secret_hash 或校验现有 secret_hash；
         - Mobile 注册：必须核对已存 room 的 secret_hash。
+        - B-8: 若配置了 RELAY_ADMIN_TOKEN，首次建房必须携带相符的 admin_token。
         """
         account_id = session.account_id
         secret_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
@@ -127,6 +139,11 @@ class ConnectionManager:
             # 只有 Desktop 才能首次创建并绑定房间密码
             if session.client_type != "desktop":
                 return False, "Room does not exist yet. Please start desktop agent first."
+            # B-8: 建房管理令牌校验
+            if RELAY_ADMIN_TOKEN:
+                if not admin_token or not hmac.compare_digest(admin_token, RELAY_ADMIN_TOKEN):
+                    logger.warning(f"B-8: Room creation denied for {account_id}: invalid/missing admin token")
+                    return False, "ROOM_CREATE_DENIED: admin token required to create room."
             self.rooms[account_id] = {
                 "secret_hash": secret_hash,
                 "desktop": None,
@@ -335,7 +352,8 @@ async def websocket_endpoint(
         return
 
     session = ClientSession(websocket, client_type, account_id, client_ip)
-    success, reason = manager.register_authenticated(session, secret)
+    # B-8: 透传 admin_token 供建房校验
+    success, reason = manager.register_authenticated(session, secret, auth_data.get("admin_token", ""))
     if not success:
         rate_limiter.record_auth_failure(client_ip)
         try:

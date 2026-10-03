@@ -221,13 +221,15 @@ class RelayWebSocketClient {
                     listener?.onStreamEnd(sessionId)
                 }
 
-                // 工具调用审批请求 (P0-3)
+                // 工具调用审批请求 (P0-3, B-5: 解析 nonce/expires_at)
                 "tool_approval_request", "approval_request" -> {
                     val callId = json.optString("call_id", UUID.randomUUID().toString())
                     val toolName = json.optString("tool_name", "edit_file")
                     val filePath = json.optString("file_path", "")
                     val summary = json.optString("summary", "")
                     val rawContent = json.optString("raw_content", "")
+                    val nonce = json.optString("nonce", "").takeIf { it.isNotEmpty() }
+                    val expiresAt = json.optLong("expires_at", 0L).takeIf { it > 0 }
                     val diffArray = json.optJSONArray("diff_lines")
                     val diffLines = mutableListOf<DiffLine>()
                     if (diffArray != null) {
@@ -249,7 +251,9 @@ class RelayWebSocketClient {
                         filePath = filePath.ifEmpty { null },
                         summary = summary.ifEmpty { null },
                         diffLines = diffLines,
-                        rawContent = rawContent.ifEmpty { null }
+                        rawContent = rawContent.ifEmpty { null },
+                        nonce = nonce,
+                        expiresAt = expiresAt
                     )
                     listener?.onToolApprovalRequest(req)
                 }
@@ -297,11 +301,13 @@ class RelayWebSocketClient {
         webSocket?.send(envelope.toString())
     }
 
-    fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "") {
+    fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "", nonce: String? = null) {
         val payload = JSONObject().apply {
             put("call_id", callId)
             put("approved", isApproved)
             put("reason", reason)
+            // B-5: nonce 原样回传，供 agent 防重放校验
+            if (!nonce.isNullOrEmpty()) put("nonce", nonce)
         }
         val envelope = JSONObject().apply {
             put("action", "tool_approval_response")

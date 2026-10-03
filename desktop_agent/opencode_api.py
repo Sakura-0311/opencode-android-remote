@@ -166,6 +166,8 @@ async def send_session_message_async(
     """
     向 OpenCode 真实端点 POST /session/:id/message 发送用户提示词
     按照标准契约使用 parts: [{type: 'text', text: prompt}]
+    B-6: 该端点为同步阻塞语义（等待模型回复完成才返回），超时放宽到 300 秒；
+    装依赖、跑测试等长任务不再误报 EXECUTION_ERROR。输出仍全量走 /event 事件流。
     """
     clean_url = base_url.rstrip("/")
     url = f"{clean_url}/session/{session_id}/message"
@@ -179,7 +181,7 @@ async def send_session_message_async(
         ]
     }
 
-    async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15.0)) as resp:
+    async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=300.0)) as resp:
         if resp.status in (200, 201, 202):
             try:
                 return await resp.json()

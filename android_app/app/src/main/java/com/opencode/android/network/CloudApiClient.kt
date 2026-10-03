@@ -282,6 +282,48 @@ class CloudApiClient {
         })
     }
 
+    /**
+     * B-9: 云端模式工具审批应答 — 直调 OpenCode 真实端点
+     * POST /session/:id/permissions/:permID
+     */
+    fun respondToPermission(
+        baseUrl: String,
+        apiKey: String,
+        sessionId: String,
+        permissionId: String,
+        approved: Boolean,
+        reason: String = "",
+        callback: ((Boolean) -> Unit)? = null
+    ) {
+        val cleanUrl = baseUrl.trim().removeSuffix("/")
+        val permUrl = "$cleanUrl/session/$sessionId/permissions/$permissionId"
+        val auth = buildAuthHeader(apiKey)
+        val action = if (approved) "allow" else "deny"
+        val payload = JSONObject().apply {
+            put("action", action)
+            put("response", action)
+            put("reason", reason)
+        }.toString()
+
+        val requestBuilder = Request.Builder()
+            .url(permUrl)
+            .post(payload.toRequestBody("application/json".toMediaType()))
+        if (auth.isNotBlank()) {
+            requestBuilder.header("Authorization", auth)
+        }
+
+        client.newCall(requestBuilder.build()).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                callback?.let { mainHandler.post { it(false) } }
+            }
+            override fun onResponse(call: Call, response: Response) {
+                val ok = response.isSuccessful
+                response.close()
+                callback?.let { mainHandler.post { it(ok) } }
+            }
+        })
+    }
+
         fun getSessions(baseUrl: String, apiKey: String, callback: (List<com.opencode.android.data.model.SessionItem>) -> Unit) {
         val cleanUrl = baseUrl.trim().removeSuffix("/")
         val sessionUrl = "$cleanUrl/session"

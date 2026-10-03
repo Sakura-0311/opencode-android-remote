@@ -155,18 +155,33 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun approveTool(callId: String) {
+        val state = _uiState.value
+        val nonce = state.pendingApproval?.nonce
         _uiState.update { it.copy(pendingApproval = null) }
         // P0-3 修复：直接回传真实权限审批决定，绝不再把 "/approve" 作为普通 prompt 发给大模型！
-        if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
-            relayClient.sendApprovalResponse(callId, true)
+        // B-5: nonce 原样回传；B-9: 云端模式直调 OpenCode 权限端点
+        if (state.appMode == AppMode.DESKTOP_RELAY) {
+            relayClient.sendApprovalResponse(callId, true, nonce = nonce)
+        } else if (state.appMode == AppMode.CLOUD_HOSTED) {
+            cloudClient.respondToPermission(
+                state.cloudServerUrl, state.cloudApiKey,
+                state.currentSessionId, callId, true, ""
+            )
         }
     }
 
     fun rejectTool(callId: String) {
+        val state = _uiState.value
+        val nonce = state.pendingApproval?.nonce
         _uiState.update { it.copy(pendingApproval = null) }
-        // P0-3 修复：回传真实拒绝决定
-        if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
-            relayClient.sendApprovalResponse(callId, false, "用户在手机端拒绝了修改")
+        // P0-3 修复：回传真实拒绝决定；B-9: 云端模式同上
+        if (state.appMode == AppMode.DESKTOP_RELAY) {
+            relayClient.sendApprovalResponse(callId, false, "用户在手机端拒绝了修改", nonce)
+        } else if (state.appMode == AppMode.CLOUD_HOSTED) {
+            cloudClient.respondToPermission(
+                state.cloudServerUrl, state.cloudApiKey,
+                state.currentSessionId, callId, false, "用户在手机端拒绝了修改"
+            )
         }
     }
 

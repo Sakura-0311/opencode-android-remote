@@ -51,7 +51,10 @@ data class ToolApprovalRequest(
     val summary: String? = null,
     val diffLines: List<DiffLine> = emptyList(),
     val rawContent: String? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    // B-5: 防重放 Nonce，由 desktop agent 下发，原样回传
+    val nonce: String? = null,
+    val expiresAt: Long? = null
 )
 
 data class DiagnosticsResult(
