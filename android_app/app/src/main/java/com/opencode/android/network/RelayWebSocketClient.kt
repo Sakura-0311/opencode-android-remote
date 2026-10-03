@@ -265,11 +265,6 @@ class RelayWebSocketClient {
         }
     }
 
-    private fun persistSeq(seq: Long) {
-        trackSeq(seq)
-        flushSeq()
-    }
-
     fun connect(relayUrl: String, accountId: String, secret: String, listener: RelayListener) {
         cancelPendingReconnect()
         // v2.3: 先关闭旧连接，避免重复调用留下旧 socket 及其回调
