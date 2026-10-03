@@ -1,6 +1,7 @@
 package com.opencode.android
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -22,13 +23,33 @@ import com.opencode.android.ui.screens.PairingScreen
 import com.opencode.android.ui.theme.OpenCodeTheme
 import com.opencode.android.util.UpdateChecker
 import com.opencode.android.viewmodel.OpenCodeViewModel
+import com.opencode.android.service.OpenCodeKeepAliveService
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: OpenCodeViewModel by viewModels()
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // v1.6 P0: 应用已在前台时，点击通知同样跳转到对应会话
+        handleNotificationDeepLink(intent)
+    }
+
+    /**
+     * v1.6 P0 任务通知：通知点击后直接进入对应会话，而不是只打开首页。
+     */
+    private fun handleNotificationDeepLink(intent: Intent?) {
+        val sessionId = intent?.getStringExtra(
+            OpenCodeKeepAliveService.EXTRA_OPEN_SESSION
+        )?.takeIf { it.isNotBlank() } ?: return
+        viewModel.switchSession(sessionId)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // v1.6 P0 任务通知：处理通知深链（点击通知直达对应会话）
+        handleNotificationDeepLink(intent)
 
         // P1-5: 运行时申请通知权限 (Android 13+ / API 33+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

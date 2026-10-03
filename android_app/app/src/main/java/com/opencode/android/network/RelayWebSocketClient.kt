@@ -32,6 +32,8 @@ interface RelayListener {
     fun onError(error: String)
     fun onToolApprovalRequest(request: ToolApprovalRequest) {}
     fun onSessionsListReceived(sessions: List<SessionItem>) {}
+    // v1.6 P0: AI 等待用户输入
+    fun onWaitingInput(sessionId: String, prompt: String) {}
 }
 
 class RelayWebSocketClient {
@@ -268,6 +270,12 @@ class RelayWebSocketClient {
                 "stream_end" -> {
                     val sessionId = json.optString("session_id", "default")
                     listener?.onStreamEnd(sessionId)
+                }
+                // v1.6 P0: AI 等待用户输入（桌面端显式上报）
+                "waiting_input" -> {
+                    val sessionId = json.optString("session_id", "default")
+                    val prompt = json.optString("prompt", "")
+                    listener?.onWaitingInput(sessionId, prompt)
                 }
                 "cancelled" -> {
                     val sessionId = json.optString("session_id", "default")

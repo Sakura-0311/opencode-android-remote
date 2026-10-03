@@ -45,6 +45,9 @@ class OpenCodeKeepAliveService : Service() {
         const val NOTIFICATION_ID_PROGRESS = 1001
         const val NOTIFICATION_ID_APPROVAL = 1002
         const val NOTIFICATION_ID_COMPLETED = 1003
+        // v1.6 P0 任务通知
+        const val NOTIFICATION_ID_TASK_FAILED = 1004
+        const val NOTIFICATION_ID_WAITING_INPUT = 1005
 
         private const val ACTION_START = "com.opencode.android.action.START_TASK"
         private const val ACTION_UPDATE = "com.opencode.android.action.UPDATE_TASK"
@@ -54,6 +57,121 @@ class OpenCodeKeepAliveService : Service() {
         private const val EXTRA_STEP = "extra_step"
         private const val EXTRA_TOOL = "extra_tool"
         private const val EXTRA_SESSION = "extra_session"
+        // v1.6 P0 任务通知：深链跳转用
+        const val EXTRA_OPEN_SESSION = "extra_open_session"
+
+        /**
+         * v1.6 P0: 通知内容脱敏——避免泄露代码、Token、Secret。
+         */
+        fun sanitizeForNotification(text: String, maxLen: Int = 80): String {
+            var s = text
+            // 脱敏常见密钥模式
+            s = s.replace(Regex("(?i)(api[_-]?key|token|secret|password|passwd|sk-)\\s*[:=]\\s*\\S+"), "$1=***")
+            s = s.replace(Regex("sk-[A-Za-z0-9-_]{8,}"), "sk-***")
+            s = s.replace(Regex("ghp_[A-Za-z0-9]{8,}"), "ghp_***")
+            return s.take(maxLen).trim().ifBlank { "（无）" }
+        }
+
+        private fun sessionDeepLinkIntent(context: Context, sessionId: String): PendingIntent {
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                if (sessionId.isNotBlank()) putExtra(EXTRA_OPEN_SESSION, sessionId)
+            }
+            return PendingIntent.getActivity(
+                context, sessionId.hashCode(),
+                intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        /**
+         * v1.6 P0 任务通知：任务完成（任务名、耗时、修改文件数，点击直达会话）
+         */
+        fun notifyTaskCompleted(
+            context: Context,
+            taskName: String,
+            durationMs: Long,
+            fileCount: Int,
+            sessionId: String
+        ) {
+            vibrateStatic(context, longArrayOf(0, 120, 80, 120))
+            val mins = durationMs / 60000
+            val secs = (durationMs % 60000) / 1000
+            val duration = if (mins > 0) "${mins} 分 ${secs} 秒" else "${secs} 秒"
+            val safeName = sanitizeForNotification(taskName, 40)
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val n = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
+                .setSmallIcon(android.R.drawable.checkbox_on_background)
+                .setContentTitle("OpenCode「$safeName」任务已完成")
+                .setContentText("耗时 $duration｜修改 $fileCount 个文件｜查看结果")
+                .setStyle(NotificationCompat.BigTextStyle().bigText(
+                    "任务「$safeName」已完成\n耗时：$duration\n修改文件：$fileCount 个\n点击进入会话查看结果。"
+                ))
+                .setAutoCancel(true)
+                .setContentIntent(sessionDeepLinkIntent(context, sessionId))
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .build()
+            nm.notify(NOTIFICATION_ID_COMPLETED, n)
+        }
+
+        /**
+         * v1.6 P0 任务通知：任务失败（错误摘要 + 进入会话按钮）
+         */
+        fun notifyTaskFailed(context: Context, errorSummary: String, sessionId: String) {
+            vibrateStatic(context, longArrayOf(0, 200, 100, 200))
+            val safeErr = sanitizeForNotification(errorSummary, 100)
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val n = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle("OpenCode 任务失败")
+                .setContentText(safeErr)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(
+                    "任务执行失败：\n$safeErr\n点击进入会话查看详情。"
+                ))
+                .setAutoCancel(true)
+                .setContentIntent(sessionDeepLinkIntent(context, sessionId))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
+            nm.notify(NOTIFICATION_ID_TASK_FAILED, n)
+        }
+
+        /**
+         * v1.6 P0 任务通知：AI 等待用户输入（高优先级）
+         */
+        fun notifyWaitingInput(context: Context, promptSummary: String, sessionId: String) {
+            vibrateStatic(context, longArrayOf(0, 250, 100, 250, 100, 250))
+            val safePrompt = sanitizeForNotification(promptSummary, 100)
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val n = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("OpenCode 等待你的输入")
+                .setContentText(safePrompt)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(
+                    "AI 需要你确认或补充信息：\n$safePrompt\n点击进入会话回复。"
+                ))
+                .setAutoCancel(true)
+                .setContentIntent(sessionDeepLinkIntent(context, sessionId))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
+            nm.notify(NOTIFICATION_ID_WAITING_INPUT, n)
+        }
+
+        private fun vibrateStatic(context: Context, pattern: LongArray) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                    vm?.defaultVibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                } else {
+                    @Suppress("DEPRECATION")
+                    val v = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        v?.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        v?.vibrate(pattern, -1)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
 
         fun startTaskProgress(context: Context, stepDescription: String, sessionId: String = "") {
             val intent = Intent(context, OpenCodeKeepAliveService::class.java).apply {

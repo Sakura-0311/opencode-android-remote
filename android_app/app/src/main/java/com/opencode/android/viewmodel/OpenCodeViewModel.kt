@@ -102,6 +102,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     val uiState: StateFlow<OpenCodeUiState> = _uiState.asStateFlow()
 
     private var activeAssistantMessageId: String? = null
+    // v1.6 P0 任务通知：任务计时与文件统计
+    private var taskStartTimeMs: Long = 0L
+    private var taskName: String = ""
+    private val taskModifiedFiles = mutableSetOf<String>()
 
     companion object {
         private const val MAX_MESSAGES_COUNT = 500
@@ -459,6 +463,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
         // v1.6 P0: 任务开始，状态持久化
         setTaskStatus(TaskStatus.RUNNING, "执行指令: ${trimmed.take(30)}...")
+        // v1.6 P0 任务通知：记录任务信息用于完成通知
+        taskStartTimeMs = System.currentTimeMillis()
+        taskName = trimmed.take(40)
+        taskModifiedFiles.clear()
 
         OpenCodeKeepAliveService.startTaskProgress(
             getApplication(),
@@ -592,7 +600,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onToolApprovalRequest(request: ToolApprovalRequest) {
         _uiState.update { it.copy(pendingApproval = request) }
-        // v1.6 P0: 明确进入"权限审批"状态
+        // v1.6 P0: 统计修改文件 + 明确进入"权限审批"状态
+        request.filePath?.takeIf { it.isNotBlank() }?.let { taskModifiedFiles.add(it) }
         setTaskStatus(TaskStatus.APPROVAL_REQUIRED, "等待审批: ${request.toolName}")
         OpenCodeKeepAliveService.notifyApprovalRequired(
             getApplication(),
@@ -652,6 +661,15 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
         // v1.6 P0: 任务完成
         setTaskStatus(TaskStatus.COMPLETED, "任务已完成")
+        // v1.6 P0 任务通知：完成通知（任务名、耗时、修改文件数，点击直达会话）
+        val durationMs = if (taskStartTimeMs > 0) System.currentTimeMillis() - taskStartTimeMs else 0L
+        OpenCodeKeepAliveService.notifyTaskCompleted(
+            getApplication(),
+            taskName.ifBlank { "OpenCode" },
+            durationMs,
+            taskModifiedFiles.size,
+            sessionId
+        )
         _uiState.update { state ->
             val updatedMessages = state.messages.map { msg ->
                 if (msg.id == activeAssistantMessageId) {
@@ -670,6 +688,13 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onAppError(code: String, message: String) {
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
+        // v1.6 P0: 任务失败状态 + 失败通知
+        setTaskStatus(TaskStatus.FAILED, "任务失败: $message")
+        OpenCodeKeepAliveService.notifyTaskFailed(
+            getApplication(),
+            message,
+            _uiState.value.currentSessionId
+        )
         _uiState.update { state ->
             val errorMsg = ChatMessage(
                 id = UUID.randomUUID().toString(),
@@ -687,6 +712,18 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onError(error: String) {
         _uiState.update { it.copy(appError = AppError("NETWORK_ERROR", error)) }
+    }
+
+    /**
+     * v1.6 P0 任务通知：AI 等待用户输入（高优先级通知 + 状态）
+     */
+    override fun onWaitingInput(sessionId: String, prompt: String) {
+        setTaskStatus(TaskStatus.WAITING_INPUT, "等待输入: ${prompt.take(40)}")
+        OpenCodeKeepAliveService.notifyWaitingInput(
+            getApplication(),
+            prompt,
+            sessionId
+        )
     }
 
     override fun onError(code: String, message: String) {
