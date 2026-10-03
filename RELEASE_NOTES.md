@@ -1,3 +1,21 @@
+# OpenCode Android Remote - Release v2.6.0（工程化）
+
+## 内容
+
+- **agent.py 模块化**：拆为 `modules/{config,secrets,state,fileops,protocol}`，`agent.py` 为兼容入口；冒烟测试全过
+- **CLI 参数**：agent.py（`--account-id/--secret/--relay-url/--workspace`）、relay server.py（`--port/--admin-token/--trusted-proxies`），默认从环境变量读取
+- **供应链安全**：CI 加 gitleaks（扫 `docs/`）、OSV-Scanner（Python 依赖 + SBOM）
+- **SBOM**：每次发布自动生成 `cyclonedx-bom.json`，随 release 产物附带
+- **依赖校验和锁定**：`gradle/verification-metadata.xml`，构建时自动校验依赖完整性
+- **checksums.txt**：release 产物附 SHA-256 校验文件
+
+## 兼容性
+
+- agent.py 调用方式不变（`python agent.py [pair]` 仍可用）
+- 详见 `docs/COMPATIBILITY.md`
+
+---
+
 # OpenCode Android Remote - Release v2.5.0（体验）
 
 ## 内容
