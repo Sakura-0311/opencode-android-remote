@@ -25,9 +25,11 @@ object AppLog {
     private val dateFmt = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
 
     // ---- 脱敏规则 ----
+    // "Bearer <token>" 两段式先处理（kv 规则只会盖住 Bearer 这个词本身）
+    private val bearerPattern = Regex("""(?i)bearer\s+[A-Za-z0-9\\-._~+/=]+""")
     // key= value / key: value / key "value" 形式，key 命中敏感词则掩盖值
     private val kvPattern =
-        Regex("""(?i)(secret|password|passwd|api[_-]?key|authorization|bearer|token|private[_-]?key)\s*["':=]+\s*["']?([^"'{},\s]+)""")
+        Regex("""(?i)(secret|password|passwd|api[_-]?key|authorization|token|private[_-]?key)\s*["':=]+\s*["']?([^"'{},\s]+)""")
     // URL query 一律掩盖（可能含 token）
     private val urlQueryPattern = Regex("""(https?://[^\s"'?]+)\?[^\s"']*""")
     // JSON 字符串里的敏感键
@@ -49,7 +51,8 @@ object AppLog {
 
     /** 文本脱敏：掩盖敏感 kv 与 URL query */
     fun redact(text: String): String {
-        var s = kvPattern.replace(text) { m -> "${m.groupValues[1]}=***" }
+        var s = bearerPattern.replace(text, "Bearer ***")
+        s = kvPattern.replace(s) { m -> "${m.groupValues[1]}=***" }
         s = urlQueryPattern.replace(s) { m -> "${m.groupValues[1]}?***" }
         return s
     }
