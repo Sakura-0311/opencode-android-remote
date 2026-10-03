@@ -27,6 +27,8 @@ fun ModelAgentDialog(
     models: List<ModelInfo>,
     selectedAgent: AgentInfo?,
     selectedModel: ModelInfo?,
+    // N-6: 拉取失败时的错误信息（非空则显示错误而非空白列表）
+    configError: String? = null,
     onRefresh: () -> Unit,
     onSelectAgent: (AgentInfo?) -> Unit,
     onSelectModel: (ModelInfo?) -> Unit,
@@ -154,7 +156,22 @@ fun ModelAgentDialog(
                     }
                 }
 
-                if ((tab == 0 && agents.isEmpty()) || (tab == 1 && models.isEmpty())) {
+                if (configError != null) {
+                    // N-6: 取不到时显示明确错误 + 重试，不显示空白列表
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "拉取失败：$configError",
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(onClick = onRefresh) {
+                                Text("重试")
+                            }
+                        }
+                    }
+                } else if ((tab == 0 && agents.isEmpty()) || (tab == 1 && models.isEmpty())) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             "暂无数据，点击右上角刷新",

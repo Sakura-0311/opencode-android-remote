@@ -40,8 +40,25 @@ jobs:
         working-directory: android_app
         run: gradle assembleDebug --no-daemon --console=plain --stacktrace
       # B-12: 同时构建正式签名 release 包
+      # N-1: keystore 不再进仓库；CI 从 Secrets 恢复（无 Secret 时 gradle 自动降级为 debug 签名）
+      - name: Restore release keystore from Secrets
+        working-directory: android_app
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > app/release.keystore
+            echo "keystore restored from secrets"
+          else
+            echo "no keystore secret; release build will fall back to debug signing"
+          fi
       - name: Build Release APK
         working-directory: android_app
+        env:
+          RELEASE_KEYSTORE_FILE: app/release.keystore
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: gradle assembleRelease --no-daemon --console=plain --stacktrace
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4

@@ -363,13 +363,16 @@ async def handle_mobile_message(
     # v1.6 P1: 获取 Model/Agent 配置（动态，非硬编码）
     elif action == "get_config":
         try:
-            agents = await get_agents(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
-            providers = await get_providers(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            agents, agents_err = await get_agents(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            providers, providers_err = await get_providers(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
             await ws_relay.send(json.dumps({
                 "type": "config_data",
                 "req_id": req_id,
                 "agents": agents,
                 "providers": providers,
+                # N-6: 取不到时带上错误，App 侧显示错误而非空白列表
+                "agents_error": agents_err,
+                "providers_error": providers_err,
             }))
             logger.info(f"v1.6: sent config to mobile ({len(agents)} agents)")
         except Exception as e:
@@ -385,15 +388,18 @@ async def handle_mobile_message(
     # v1.6 P1: 项目管理中心——获取项目列表（含 Git 分支、工作区状态）
     elif action == "get_projects":
         try:
-            projects = await get_projects(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
-            current = await get_current_project(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
-            vcs = await get_vcs_info(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            projects, projects_err = await get_projects(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            current, current_err = await get_current_project(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
+            vcs, vcs_err = await get_vcs_info(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD)
             await ws_relay.send(json.dumps({
                 "type": "projects_data",
                 "req_id": req_id,
                 "projects": projects,
                 "current": current,
                 "vcs": vcs,
+                # N-6: 取不到时带上错误，App 侧显示错误而非空白列表
+                "projects_error": projects_err,
+                "vcs_error": vcs_err or current_err,
             }))
             logger.info(f"v1.6: sent {len(projects)} projects to mobile")
         except Exception as e:

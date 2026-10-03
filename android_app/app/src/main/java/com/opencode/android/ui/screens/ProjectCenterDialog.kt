@@ -26,6 +26,8 @@ fun ProjectCenterDialog(
     projects: List<ProjectInfo>,
     favoriteIds: Set<String>,
     deviceName: String,
+    // N-6: 拉取失败时的错误信息（非空则显示错误而非空白列表）
+    projectsError: String? = null,
     onRefresh: () -> Unit,
     onToggleFavorite: (String) -> Unit,
     onOpenProject: (ProjectInfo) -> Unit,
@@ -78,7 +80,22 @@ fun ProjectCenterDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                if (projects.isEmpty()) {
+                if (projectsError != null) {
+                    // N-6: 取不到时显示明确错误 + 重试，不显示空白列表
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "拉取失败：$projectsError",
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(onClick = onRefresh) {
+                                Text("重试")
+                            }
+                        }
+                    }
+                } else if (projects.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(

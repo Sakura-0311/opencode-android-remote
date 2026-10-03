@@ -41,10 +41,10 @@ interface RelayListener {
     fun onDeviceRenamed(deviceName: String) {}
 
     // v1.6 P1 Model/Agent 管理
-    fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>) {}
+    fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>, configError: String? = null) {}
 
     // v1.6 P1 项目管理中心
-    fun onProjectsDataReceived(projects: List<ProjectInfo>) {}
+    fun onProjectsDataReceived(projects: List<ProjectInfo>, projectsError: String? = null) {}
 }
 
 /**
@@ -370,7 +370,11 @@ class RelayWebSocketClient {
                             }
                         }
                     }
-                    listener?.onConfigDataReceived(agents, models)
+                    // N-6: 取不到时带错误，App 侧显示错误而非空白列表
+                    val agentsErr = json.optString("agents_error", "").ifEmpty { null }
+                    val providersErr = json.optString("providers_error", "").ifEmpty { null }
+                    val configErr = agentsErr ?: providersErr
+                    listener?.onConfigDataReceived(agents, models, configErr)
                 }
 
                 // v1.6 P1 项目管理中心
@@ -396,7 +400,10 @@ class RelayWebSocketClient {
                             }
                         }
                     }
-                    listener?.onProjectsDataReceived(projects)
+                    // N-6: 取不到时带错误，App 侧显示错误而非空白列表
+                    val projectsErr = json.optString("projects_error", "").ifEmpty { null }
+                        ?: json.optString("vcs_error", "").ifEmpty { null }
+                    listener?.onProjectsDataReceived(projects, projectsErr)
                 }
 
                 // 流式交互

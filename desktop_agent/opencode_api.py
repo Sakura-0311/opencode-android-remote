@@ -137,15 +137,18 @@ async def respond_to_permission(
 ) -> bool:
     """
     调用真实端点 POST /session/:id/permissions/:permID 回传用户授权决定
+
+    N-2: 按官方 OpenAPI 契约（opencode 1.18.34 /doc 实测），请求体只能是
+    {"response": "once"|"always"|"reject"} 且 additionalProperties=false。
+    旧代码多发的 action/reason 字段会被严格服务端 400 拒绝。
+    映射：同意 -> "once"，拒绝 -> "reject"；reason 仅记本地日志，不发送。
     """
     clean_url = base_url.rstrip("/")
     url = f"{clean_url}/session/{session_id}/permissions/{permission_id}"
     headers = get_auth_headers(password)
-    payload = {
-        "action": "allow" if allow else "deny",
-        "response": "allow" if allow else "deny",
-        "reason": reason
-    }
+    payload = {"response": "once" if allow else "reject"}
+    if reason:
+        logger.info(f"Permission {permission_id} decision allow={allow}, reason: {reason}")
 
     try:
         async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
@@ -166,14 +169,15 @@ async def send_session_message_async(
     agent: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    向 OpenCode 真实端点 POST /session/:id/message 发送用户提示词
+    向 OpenCode 真实端点 POST /session/:id/prompt_async 发送用户提示词
     按照标准契约使用 parts: [{type: 'text', text: prompt}]
-    B-6: 该端点为同步阻塞语义（等待模型回复完成才返回），超时放宽到 300 秒；
-    装依赖、跑测试等长任务不再误报 EXECUTION_ERROR。输出仍全量走 /event 事件流。
-    v1.6 P1: 支持按消息指定 model {providerID, modelID} 与 agent。
+    N-5: 改用异步接口（opencode 1.18.34 /doc 实测存在，立即返回 204），
+    彻底解决长任务超时误报问题：旧同步 /message 接口阻塞到模型回复完成，
+    超过 300 秒的长任务会被误报 EXECUTION_ERROR。输出全量走 /event 事件流。
+    v1.6 P1: 支持按消息指定 model {providerID, modelID} 与 agent（prompt_async 原生支持）。
     """
     clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/session/{session_id}/message"
+    url = f"{clean_url}/session/{session_id}/prompt_async"
     headers = get_auth_headers(password)
     payload = {
         "parts": [
@@ -192,14 +196,46 @@ async def send_session_message_async(
     if agent:
         payload["agent"] = agent
 
-    async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=300.0)) as resp:
-        if resp.status in (200, 201, 202):
-            try:
-                return await resp.json()
-            except Exception:
-                return {"status": "ok"}
+    # N-5: 异步接口立即返回 204，无需长超时
+    async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30.0)) as resp:
+        if resp.status in (200, 201, 202, 204):
+            return {"status": "accepted"}
         err_text = await resp.text()
-        raise RuntimeError(f"OpenCode POST /session/{session_id}/message returned HTTP {resp.status}: {err_text}")
+        raise RuntimeError(f"OpenCode POST /session/{session_id}/prompt_async returned HTTP {resp.status}: {err_text}")
+
+
+# N-3: SSE 端点路径缓存。不同 opencode 版本的事件流端点为 /event 或 /global/event，
+# 首次订阅时探测一次并记住，避免每次重连都探测。
+_resolved_event_path: Optional[str] = None
+
+
+async def _resolve_event_url(
+    session: aiohttp.ClientSession,
+    base_url: str,
+    password: Optional[str] = None,
+) -> str:
+    """N-3: 探测 SSE 端点路径（/event 或 /global/event），返回可用的 path 并缓存。"""
+    global _resolved_event_path
+    if _resolved_event_path:
+        return _resolved_event_path
+    clean = base_url.rstrip("/")
+    headers = get_auth_headers(password)
+    headers["Accept"] = "text/event-stream"
+    for path in ("/event", "/global/event"):
+        try:
+            async with session.get(
+                f"{clean}{path}", headers=headers,
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            ) as resp:
+                # 200 即视为可用（SSE 长连接会保持打开；读到 headers 即够）
+                if resp.status == 200:
+                    logger.info(f"SSE endpoint resolved: {path}")
+                    _resolved_event_path = path
+                    return path
+                logger.debug(f"SSE probe {path} -> HTTP {resp.status}")
+        except Exception as e:
+            logger.debug(f"SSE probe {path} failed: {e}")
+    raise RuntimeError("无法找到 SSE 事件端点（已尝试 /event 与 /global/event）")
 
 
 async def subscribe_events_stream(
@@ -210,12 +246,14 @@ async def subscribe_events_stream(
     event_id_sink: Optional[Dict[str, str]] = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
-    订阅真实端点 GET /event (SSE 事件流)
+    订阅 SSE 事件流（GET /event 或 /global/event，自动探测）
     监听 message.part.delta (增量Token)、permission.asked (工具授权请求) 与 session.idle
     B-10: 解析 SSE id: 行并写入 event_id_sink，供断线重连时作为 Last-Event-ID 续传
+    N-3: 先探测 /event 与 /global/event，取可用者订阅（不同版本路径不同）
     """
     clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/event"
+    event_path = await _resolve_event_url(session, clean_url, password)
+    url = f"{clean_url}{event_path}"
     headers = get_auth_headers(password)
     headers["Accept"] = "text/event-stream"
     if last_event_id:
@@ -224,7 +262,10 @@ async def subscribe_events_stream(
     async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=None)) as resp:
         if resp.status != 200:
             err_text = await resp.text()
-            raise RuntimeError(f"Failed to subscribe to /event stream (HTTP {resp.status}): {err_text}")
+            # N-3: 探测时可用、订阅时失败 -> 清缓存，下次重探
+            global _resolved_event_path
+            _resolved_event_path = None
+            raise RuntimeError(f"Failed to subscribe to {event_path} stream (HTTP {resp.status}): {err_text}")
 
         async for line_bytes in resp.content:
             line = line_bytes.decode("utf-8", errors="replace").strip()
@@ -252,35 +293,47 @@ async def subscribe_events_stream(
 # ============================================================================
 # v1.6 P1 Model/Agent 管理
 # ============================================================================
+# N-6: 元信息类函数统一返回 (data, error) 二元组；非 200 时打 warning（带状态码与路径），
+# 调用方据此区分「真的没有」与「取不到」，不在 App 侧显示空白列表掩盖故障。
 async def get_agents(
     session: aiohttp.ClientSession,
     base_url: str = "http://127.0.0.1:4096",
     password: Optional[str] = None,
-) -> list:
-    """GET /agent — 获取可用 Agent 列表（含自定义 Agent）。"""
+) -> tuple:
+    """GET /agent — 获取可用 Agent 列表（含自定义 Agent）。返回 (agents, error)。"""
     clean_url = base_url.rstrip("/")
     url = f"{clean_url}/agent"
     headers = get_auth_headers(password)
-    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
-        if resp.status == 200:
-            data = await resp.json()
-            return data if isinstance(data, list) else data.get("data", [])
-        return []
+    try:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return (data if isinstance(data, list) else data.get("data", [])), None
+            logger.warning(f"N-6: GET {url} -> HTTP {resp.status}，Agent 列表取不到")
+            return [], f"HTTP {resp.status}"
+    except Exception as e:
+        logger.warning(f"N-6: GET {url} 异常: {e}")
+        return [], str(e)
 
 
 async def get_providers(
     session: aiohttp.ClientSession,
     base_url: str = "http://127.0.0.1:4096",
     password: Optional[str] = None,
-) -> dict:
-    """GET /config/providers — 获取 Provider 与 Model 列表（动态，非硬编码）。"""
+) -> tuple:
+    """GET /config/providers — 获取 Provider 与 Model 列表（动态，非硬编码）。返回 (providers, error)。"""
     clean_url = base_url.rstrip("/")
     url = f"{clean_url}/config/providers"
     headers = get_auth_headers(password)
-    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
-        if resp.status == 200:
-            return await resp.json()
-        return {}
+    try:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+            if resp.status == 200:
+                return await resp.json(), None
+            logger.warning(f"N-6: GET {url} -> HTTP {resp.status}，Provider 列表取不到")
+            return {}, f"HTTP {resp.status}"
+    except Exception as e:
+        logger.warning(f"N-6: GET {url} 异常: {e}")
+        return {}, str(e)
 
 
 # ============================================================================
@@ -290,43 +343,58 @@ async def get_projects(
     session: aiohttp.ClientSession,
     base_url: str = "http://127.0.0.1:4096",
     password: Optional[str] = None,
-) -> list:
-    """GET /project — 获取项目列表。"""
+) -> tuple:
+    """GET /project — 获取项目列表。返回 (projects, error)。"""
     clean_url = base_url.rstrip("/")
     url = f"{clean_url}/project"
     headers = get_auth_headers(password)
-    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
-        if resp.status == 200:
-            data = await resp.json()
-            return data if isinstance(data, list) else data.get("data", [])
-        return []
+    try:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return (data if isinstance(data, list) else data.get("data", [])), None
+            logger.warning(f"N-6: GET {url} -> HTTP {resp.status}，项目列表取不到")
+            return [], f"HTTP {resp.status}"
+    except Exception as e:
+        logger.warning(f"N-6: GET {url} 异常: {e}")
+        return [], str(e)
 
 
 async def get_current_project(
     session: aiohttp.ClientSession,
     base_url: str = "http://127.0.0.1:4096",
     password: Optional[str] = None,
-) -> dict:
-    """GET /project/current — 获取当前项目。"""
+) -> tuple:
+    """GET /project/current — 获取当前项目。返回 (project, error)。"""
     clean_url = base_url.rstrip("/")
     url = f"{clean_url}/project/current"
     headers = get_auth_headers(password)
-    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
-        if resp.status == 200:
-            return await resp.json()
-        return {}
+    try:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+            if resp.status == 200:
+                return await resp.json(), None
+            logger.warning(f"N-6: GET {url} -> HTTP {resp.status}，当前项目取不到")
+            return {}, f"HTTP {resp.status}"
+    except Exception as e:
+        logger.warning(f"N-6: GET {url} 异常: {e}")
+        return {}, str(e)
 
 
 async def get_vcs_info(
     session: aiohttp.ClientSession,
     base_url: str = "http://127.0.0.1:4096",
     password: Optional[str] = None,
-) -> dict:
-    """GET /vcs — 获取当前项目的 Git 分支与工作区状态（项目管理中心用）。"""
+) -> tuple:
+    """GET /vcs — 获取当前项目的 Git 分支与工作区状态（项目管理中心用）。返回 (vcs, error)。"""
     clean_url = base_url.rstrip("/")
     url = f"{clean_url}/vcs"
     headers = get_auth_headers(password)
-    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
-        if resp.status == 200:
-            return await resp.json()
-        return {}
+    try:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+            if resp.status == 200:
+                return await resp.json(), None
+            logger.warning(f"N-6: GET {url} -> HTTP {resp.status}，VCS 信息取不到")
+            return {}, f"HTTP {resp.status}"
+    except Exception as e:
+        logger.warning(f"N-6: GET {url} 异常: {e}")
+        return {}, str(e)

@@ -232,6 +232,7 @@ class MainActivity : ComponentActivity() {
                         models = uiState.availableModels,
                         selectedAgent = uiState.selectedAgent,
                         selectedModel = uiState.selectedModel,
+                        configError = uiState.configError,
                         onRefresh = { viewModel.requestModelConfig() },
                         onSelectAgent = { viewModel.selectAgent(it) },
                         onSelectModel = { viewModel.selectModel(it) },
@@ -245,6 +246,7 @@ class MainActivity : ComponentActivity() {
                         projects = uiState.projects,
                         favoriteIds = uiState.favoriteProjectIds,
                         deviceName = uiState.accountId,
+                        projectsError = uiState.projectsError,
                         onRefresh = { viewModel.requestProjects() },
                         onToggleFavorite = { viewModel.toggleFavoriteProject(it) },
                         onOpenProject = {

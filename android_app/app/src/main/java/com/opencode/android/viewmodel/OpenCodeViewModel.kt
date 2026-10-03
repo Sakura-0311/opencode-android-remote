@@ -787,10 +787,11 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(favoriteProjectIds = current) }
     }
 
-    override fun onProjectsDataReceived(projects: List<ProjectInfo>) {
+    override fun onProjectsDataReceived(projects: List<ProjectInfo>, projectsError: String?) {
         _uiState.update {
             it.copy(
                 projects = projects,
+                projectsError = projectsError,
                 favoriteProjectIds = prefsManager.getFavoriteProjects().toSet()
             )
         }
@@ -818,7 +819,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    override fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>) {
+    override fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>, configError: String?) {
         // 恢复上次选择
         val savedAgentId = prefsManager.getSelectedAgent()
         val (savedProvider, savedModel) = prefsManager.getSelectedModel()
@@ -828,6 +829,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 availableAgents = agents,
                 availableModels = models,
+                configError = configError,
                 selectedAgent = agent ?: it.selectedAgent,
                 selectedModel = model ?: it.selectedModel
             )

@@ -105,9 +105,12 @@ data class OpenCodeUiState(
     val availableModels: List<ModelInfo> = emptyList(),
     val selectedAgent: AgentInfo? = null,
     val selectedModel: ModelInfo? = null,
+    // N-6: 元信息拉取失败时的错误（非空则对话框显示错误而非空白列表）
+    val configError: String? = null,
     // v1.6 P1 项目管理中心
     val projects: List<ProjectInfo> = emptyList(),
     val favoriteProjectIds: Set<String> = emptySet(),
+    val projectsError: String? = null,
     
     // 电脑中继模式参数
     val accountId: String = "",

@@ -1,3 +1,8 @@
+# Secrets / signing (N-1: 签名密钥永不进仓库)
+*.jks
+*.keystore
+keystore.properties
+
 # Android
 *.apk
 *.aab

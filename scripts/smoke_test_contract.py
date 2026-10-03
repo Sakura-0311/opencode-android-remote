@@ -37,23 +37,39 @@ class MockOpenCodeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/global/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "version": "1.0.4"}).encode("utf-8"))
+            # N-4: mock 返回官方形状 {"healthy": true, "version": ...}，与真实一致
+            self._json(200, {"healthy": True, "version": "1.0.4"})
         elif self.path == "/session":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(self.sessions).encode("utf-8"))
+            self._json(200, self.sessions)
+        elif self.path == "/agent":
+            # N-4: Agent 列表 mock（官方契约：数组）
+            self._json(200, [{"name": "build", "mode": "primary"},
+                             {"name": "plan", "mode": "primary"}])
+        elif self.path == "/config/providers":
+            # N-4: Provider 列表 mock（官方契约：{providers: [...], default: {...}}）
+            self._json(200, {"providers": [{"id": "anthropic",
+                                            "models": {"claude-x": {}}}],
+                             "default": {"anthropic": "claude-x"}})
+        elif self.path == "/project":
+            # N-4: 项目列表 mock（官方契约：Project[]）
+            self._json(200, [{"id": "p1", "worktree": "/home/u/proj", "vcs": "git"}])
+        elif self.path == "/project/current":
+            # N-4: 当前项目 mock
+            self._json(200, {"id": "p1", "worktree": "/home/u/proj", "vcs": "git"})
+        elif self.path == "/vcs":
+            # N-4: VCS 信息 mock
+            self._json(200, {"type": "git", "root": "/home/u/proj"})
         elif self.path in ("/api/sessions", "/api/chat", "/health"):
-            self.send_response(404)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"detail": "Not Found"}).encode("utf-8"))
+            self._json(404, {"detail": "Not Found"})
         else:
             self.send_response(404)
             self.end_headers()
+
+    def _json(self, code, obj):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(obj).encode("utf-8"))
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -69,6 +85,15 @@ class MockOpenCodeHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(new_item).encode("utf-8"))
+        elif self.path.startswith("/session/") and self.path.endswith("/prompt_async"):
+            # N-5: 异步发消息接口 mock——立即返回 204，输出走 /event
+            sid = self.path.split("/")[2]
+            parts = body.get("parts", [])
+            # 真实契约断言：必须按 parts: [{type:'text', text:...}] 发送
+            assert len(parts) > 0 and parts[0].get("type") == "text", f"Invalid parts contract: {body}"
+            self.messages_received.append({"session_id": sid, "body": body})
+            self.send_response(204)
+            self.end_headers()
         elif self.path.startswith("/session/") and self.path.endswith("/message"):
             sid = self.path.split("/")[2]
             parts = body.get("parts", [])
@@ -138,25 +163,57 @@ async def run_smoke_tests():
             assert new_sess["id"].startswith("ses_")
             print(f"✔ 3. create_session via real code passed: {new_sess['id']}")
 
-            # 4. 真实 send_session_message_async，mock 断言 parts 契约
+            # 4. 真实 send_session_message_async（N-5: 已改用 prompt_async，204 立即返回）
             res = await opencode_api.send_session_message_async(
                 http_session, new_sess["id"], "Run verification", base_url, None)
             assert res.get("status") == "accepted"
             sent = MockOpenCodeHandler.messages_received[-1]
             assert sent["body"]["parts"][0] == {"type": "text", "text": "Run verification"}
-            print(f"✔ 4. send_session_message_async via real code passed, parts contract verified")
+            print(f"✔ 4. send_session_message_async via real code passed (prompt_async 204), parts contract verified")
 
             # 5. 真实 abort_session
             assert await opencode_api.abort_session(http_session, new_sess["id"], base_url, None)
             assert new_sess["id"] in MockOpenCodeHandler.aborted_sessions
             print(f"✔ 5. abort_session via real code passed")
 
-            # 6. 真实 respond_to_permission
+            # 6. 真实 respond_to_permission（N-2: 官方契约 body 只能是 {"response": "once"/"reject"}）
             assert await opencode_api.respond_to_permission(
                 http_session, new_sess["id"], "perm_smoke_99", True, "User allowed", base_url, None)
             recorded = MockOpenCodeHandler.permissions_recorded.get("perm_smoke_99", {})
-            assert recorded.get("action") == "allow" and recorded.get("response") == "allow"
-            print(f"✔ 6. respond_to_permission via real code passed")
+            assert recorded == {"response": "once"}, f"N-2 contract violated: {recorded}"
+            print(f"✔ 6. respond_to_permission via real code passed (body={recorded})")
+
+            # 7. N-4: 5 个新端点的真实函数断言
+            agents, agents_err = await opencode_api.get_agents(http_session, base_url, None)
+            assert agents_err is None, f"get_agents error: {agents_err}"
+            assert len(agents) > 0 and "build" in str(agents), "get_agents 解析失败"
+            print(f"✔ 7. get_agents via real code passed: {[a.get('name') for a in agents]}")
+
+            providers, providers_err = await opencode_api.get_providers(http_session, base_url, None)
+            assert providers_err is None, f"get_providers error: {providers_err}"
+            assert "providers" in providers, f"get_providers 结构不符: {providers}"
+            print(f"✔ 8. get_providers via real code passed")
+
+            projects, projects_err = await opencode_api.get_projects(http_session, base_url, None)
+            assert projects_err is None, f"get_projects error: {projects_err}"
+            assert len(projects) > 0, "get_projects 返回空"
+            print(f"✔ 9. get_projects via real code passed: {[p.get('id') for p in projects]}")
+
+            current, current_err = await opencode_api.get_current_project(http_session, base_url, None)
+            assert current_err is None, f"get_current_project error: {current_err}"
+            assert current.get("id") == "p1", f"get_current_project 结构不符: {current}"
+            print(f"✔ 10. get_current_project via real code passed")
+
+            vcs, vcs_err = await opencode_api.get_vcs_info(http_session, base_url, None)
+            assert vcs_err is None, f"get_vcs_info error: {vcs_err}"
+            assert vcs.get("type") == "git", f"get_vcs_info 结构不符: {vcs}"
+            print(f"✔ 11. get_vcs_info via real code passed")
+
+            # 12. N-6: 非 200 时函数必须返回 error 而非静默空值
+            bad_agents, bad_err = await opencode_api.get_agents(
+                http_session, base_url + "/nonexistent", None)
+            assert bad_agents == [] and bad_err is not None, "N-6: 404 时应返回 error"
+            print(f"✔ 12. N-6 error visibility passed (error={bad_err})")
     finally:
         server.shutdown()
 
