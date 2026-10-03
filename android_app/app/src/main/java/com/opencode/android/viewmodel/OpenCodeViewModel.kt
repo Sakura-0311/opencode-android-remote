@@ -18,6 +18,7 @@ import com.opencode.android.data.model.TaskStatus
 import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.CloudStreamListener
+import com.opencode.android.network.DeviceInfo
 import com.opencode.android.network.PairClaimResult
 import com.opencode.android.network.PairingClient
 import com.opencode.android.network.RelayListener
@@ -724,6 +725,40 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             prompt,
             sessionId
         )
+    }
+
+    // =========================================================================
+    // v1.6 P0 多设备管理
+    // =========================================================================
+
+    fun requestDeviceList() {
+        if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
+            relayClient.requestDeviceList()
+        }
+    }
+
+    fun revokeDevice(deviceName: String) {
+        relayClient.revokeDevice(deviceName)
+    }
+
+    fun renameDevice(oldName: String, newName: String) {
+        relayClient.renameDevice(oldName, newName)
+    }
+
+    override fun onDeviceListReceived(devices: List<DeviceInfo>) {
+        _uiState.update { it.copy(pairedDevices = devices) }
+    }
+
+    override fun onDeviceRevoked(deviceName: String) {
+        // 撤销后刷新列表
+        requestDeviceList()
+        _uiState.update {
+            it.copy(statusBanner = if (deviceName.isNotBlank()) "已撤销设备：$deviceName" else null)
+        }
+    }
+
+    override fun onDeviceRenamed(deviceName: String) {
+        requestDeviceList()
     }
 
     override fun onError(code: String, message: String) {

@@ -1,5 +1,7 @@
 package com.opencode.android.data.model
 
+import com.opencode.android.network.DeviceInfo
+
 enum class MessageRole {
     USER,
     ASSISTANT,
@@ -93,6 +95,8 @@ data class OpenCodeUiState(
     // v1.6 P0 后台保活：明确的任务状态（锁屏/后台/重连后可恢复显示）
     val taskStatus: TaskStatus = TaskStatus.IDLE,
     val taskStatusDetail: String = "",
+    // v1.6 P0 多设备管理：已配对设备列表
+    val pairedDevices: List<DeviceInfo> = emptyList(),
     
     // 电脑中继模式参数
     val accountId: String = "",

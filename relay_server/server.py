@@ -252,9 +252,11 @@ class ConnectionManager:
         ps["claimed"] = True
         device_secret = secrets.token_urlsafe(32)
         secret_hash = hashlib.sha256(device_secret.encode("utf-8")).hexdigest()
+        now_ts = time.time()
         room.setdefault("device_secrets", {})[secret_hash] = {
             "device_name": device_name or "Android",
-            "created_at": time.time(),
+            "created_at": now_ts,
+            "last_active": now_ts,
         }
         logger.info(f"v1.6: device '{device_name}' paired to room {account_id}")
         return True, {
@@ -276,16 +278,51 @@ class ConnectionManager:
                 return True
         return False
 
+    def rename_device(self, account_id: str, old_name: str, new_name: str) -> bool:
+        """重命名设备。"""
+        room = self.rooms.get(account_id)
+        if not room or not new_name or len(new_name) > 64:
+            return False
+        for info in room.get("device_secrets", {}).values():
+            if info.get("device_name") == old_name:
+                info["device_name"] = new_name
+                logger.info(f"v1.6: device renamed '{old_name}' -> '{new_name}' in {account_id}")
+                return True
+        return False
+
     def list_devices(self, account_id: str) -> list:
-        """列出已配对设备（供多设备管理）。"""
+        """
+        v1.6 P0 多设备管理：列出已配对设备（含在线状态、最近活动）。
+        """
         room = self.rooms.get(account_id)
         if not room:
             return []
-        return [
-            {"device_name": info.get("device_name", "?"),
-             "created_at": info.get("created_at", 0)}
-            for info in room.get("device_secrets", {}).values()
-        ]
+        # 当前在线的设备名集合
+        online_names = set()
+        for m in room.get("mobiles", set()):
+            name = getattr(m, "device_name", None)
+            if name:
+                online_names.add(name)
+        result = []
+        for info in room.get("device_secrets", {}).values():
+            name = info.get("device_name", "?")
+            result.append({
+                "device_name": name,
+                "created_at": info.get("created_at", 0),
+                "is_online": name in online_names,
+                "last_active": info.get("last_active", info.get("created_at", 0)),
+            })
+        return result
+
+    def mark_device_active(self, account_id: str, device_name: str):
+        """更新设备最近活动时间。"""
+        room = self.rooms.get(account_id)
+        if not room or not device_name:
+            return
+        for info in room.get("device_secrets", {}).values():
+            if info.get("device_name") == device_name:
+                info["last_active"] = time.time()
+                break
 
     def _cleanup_expired_pairings(self):
         now = time.time()
@@ -335,6 +372,11 @@ class ConnectionManager:
         account_id = sender_session.account_id
         if account_id not in self.rooms:
             return
+
+        # v1.6 P0 多设备管理：更新设备活跃时间
+        device_name = getattr(sender_session, "device_name", None)
+        if device_name:
+            self.mark_device_active(account_id, device_name)
 
         room = self.rooms[account_id]
         if sender_session.client_type == "mobile":
@@ -590,17 +632,28 @@ async def websocket_endpoint(
                         **result
                     }))
                     continue
-                elif parsed.get("type") == "revoke_device" and session.client_type == "desktop":
+                # v1.6 P0 多设备管理：桌面端和移动端均可管理设备
+                elif parsed.get("type") == "list_devices":
+                    await websocket.send_text(json.dumps({
+                        "type": "device_list",
+                        "devices": manager.list_devices(session.account_id)
+                    }))
+                    continue
+                elif parsed.get("type") == "revoke_device":
                     ok = manager.revoke_device(session.account_id, parsed.get("device_name", ""))
                     await websocket.send_text(json.dumps({
                         "type": "device_revoked" if ok else "device_revoke_failed",
                         "device_name": parsed.get("device_name", "")
                     }))
                     continue
-                elif parsed.get("type") == "list_devices" and session.client_type == "desktop":
+                elif parsed.get("type") == "rename_device" and session.client_type == "desktop":
+                    ok = manager.rename_device(
+                        session.account_id,
+                        parsed.get("old_name", ""),
+                        parsed.get("new_name", ""))
                     await websocket.send_text(json.dumps({
-                        "type": "device_list",
-                        "devices": manager.list_devices(session.account_id)
+                        "type": "device_renamed" if ok else "device_rename_failed",
+                        "device_name": parsed.get("new_name", "")
                     }))
                     continue
             except Exception:

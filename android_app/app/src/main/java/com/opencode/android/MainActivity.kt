@@ -152,6 +152,16 @@ class MainActivity : ComponentActivity() {
                                 checkingUpdate = false
                                 updateInfo = info
                             }
+                        },
+                        // v1.6 P0 多设备管理
+                        onRequestDeviceList = {
+                            viewModel.requestDeviceList()
+                        },
+                        onRevokeDevice = { name ->
+                            viewModel.revokeDevice(name)
+                        },
+                        onRenameDevice = { old, new ->
+                            viewModel.renameDevice(old, new)
                         }
                     )
                 }

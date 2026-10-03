@@ -34,7 +34,22 @@ interface RelayListener {
     fun onSessionsListReceived(sessions: List<SessionItem>) {}
     // v1.6 P0: AI 等待用户输入
     fun onWaitingInput(sessionId: String, prompt: String) {}
+
+    // v1.6 P0 多设备管理
+    fun onDeviceListReceived(devices: List<DeviceInfo>) {}
+    fun onDeviceRevoked(deviceName: String) {}
+    fun onDeviceRenamed(deviceName: String) {}
 }
+
+/**
+ * v1.6 P0 多设备管理：设备信息
+ */
+data class DeviceInfo(
+    val deviceName: String,
+    val createdAt: Long = 0L,
+    val isOnline: Boolean = false,
+    val lastActive: Long = 0L
+)
 
 class RelayWebSocketClient {
 
@@ -235,6 +250,29 @@ class RelayWebSocketClient {
                     val desktopOnline = json.optBoolean("desktop_online", false)
                     listener?.onDesktopStatusChanged(desktopOnline)
                 }
+                // v1.6 P0 多设备管理
+                "device_list" -> {
+                    val arr = json.optJSONArray("devices")
+                    val devices = mutableListOf<DeviceInfo>()
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            devices.add(DeviceInfo(
+                                deviceName = o.optString("device_name", "?"),
+                                createdAt = (o.optDouble("created_at", 0.0) * 1000).toLong(),
+                                isOnline = o.optBoolean("is_online", false),
+                                lastActive = (o.optDouble("last_active", 0.0) * 1000).toLong()
+                            ))
+                        }
+                    }
+                    listener?.onDeviceListReceived(devices)
+                }
+                "device_revoked", "device_revoke_failed" -> {
+                    listener?.onDeviceRevoked(json.optString("device_name", ""))
+                }
+                "device_renamed" -> {
+                    listener?.onDeviceRenamed(json.optString("device_name", ""))
+                }
                 "desktop_status" -> {
                     val desktopOnline = json.optBoolean("online", false)
                     listener?.onDesktopStatusChanged(desktopOnline)
@@ -360,6 +398,28 @@ class RelayWebSocketClient {
             put("payload", payload)
         }
         webSocket?.send(envelope.toString())
+    }
+
+    /**
+     * v1.6 P0 多设备管理：请求设备列表 / 撤销设备 / 重命名设备
+     */
+    fun requestDeviceList() {
+        webSocket?.send(JSONObject().apply { put("type", "list_devices") }.toString())
+    }
+
+    fun revokeDevice(deviceName: String) {
+        webSocket?.send(JSONObject().apply {
+            put("type", "revoke_device")
+            put("device_name", deviceName)
+        }.toString())
+    }
+
+    fun renameDevice(oldName: String, newName: String) {
+        webSocket?.send(JSONObject().apply {
+            put("type", "rename_device")
+            put("old_name", oldName)
+            put("new_name", newName)
+        }.toString())
     }
 
     fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "", nonce: String? = null) {
