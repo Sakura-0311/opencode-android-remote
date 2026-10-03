@@ -24,6 +24,7 @@ import com.opencode.android.ui.theme.OpenCodeTheme
 import com.opencode.android.util.UpdateChecker
 import com.opencode.android.viewmodel.OpenCodeViewModel
 import com.opencode.android.service.OpenCodeKeepAliveService
+import com.opencode.android.ui.screens.DeviceManagementDialog
 
 class MainActivity : ComponentActivity() {
 
@@ -64,6 +65,8 @@ class MainActivity : ComponentActivity() {
                 // B-12: 更新检查对话框状态
                 var updateInfo by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
                 var checkingUpdate by remember { mutableStateOf(false) }
+                // v1.6 P0 多设备管理
+                var showDeviceManager by remember { mutableStateOf(false) }
 
                 if (!uiState.isPaired) {
                     PairingScreen(
@@ -162,6 +165,9 @@ class MainActivity : ComponentActivity() {
                         },
                         onRenameDevice = { old, new ->
                             viewModel.renameDevice(old, new)
+                        },
+                        onShowDeviceManager = {
+                            showDeviceManager = true
                         }
                     )
                 }
@@ -191,6 +197,17 @@ class MainActivity : ComponentActivity() {
                         confirmButton = {
                             TextButton(onClick = { updateInfo = null }) { Text("知道了") }
                         }
+                    )
+                }
+
+                // v1.6 P0 多设备管理对话框
+                if (showDeviceManager) {
+                    DeviceManagementDialog(
+                        devices = uiState.pairedDevices,
+                        onRefresh = { viewModel.requestDeviceList() },
+                        onRevoke = { name -> viewModel.revokeDevice(name) },
+                        onRename = { old, new -> viewModel.renameDevice(old, new) },
+                        onDismiss = { showDeviceManager = false }
                     )
                 }
             }

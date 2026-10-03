@@ -60,7 +60,8 @@ fun ChatScreen(
     // v1.6 P0 多设备管理
     onRequestDeviceList: () -> Unit = {},
     onRevokeDevice: (String) -> Unit = {},
-    onRenameDevice: (String, String) -> Unit = { _, _ -> }
+    onRenameDevice: (String, String) -> Unit = { _, _ -> },
+    onShowDeviceManager: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -70,8 +71,6 @@ fun ChatScreen(
     var showSessionsModal by remember { mutableStateOf(false) }
     var isSearchActive by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
-    // v1.6 P0 多设备管理
-    var showDeviceManager by remember { mutableStateOf(false) }
 
     // 触摸/手动滑动检测：当用户向上滑动浏览历史时，暂停自动滚底
     val isUserScrolling = listState.isScrollInProgress
@@ -218,7 +217,7 @@ fun ChatScreen(
                                 text = { Text("设备管理") },
                                 onClick = {
                                     showMoreMenu = false
-                                    showDeviceManager = true
+                                    onShowDeviceManager()
                                 },
                                 leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) }
                             )
@@ -579,17 +578,6 @@ fun MessageBubbleWithHighlight(message: ChatMessage, appMode: AppMode, highlight
                 }
             }
         }
-    }
-
-    // v1.6 P0 多设备管理对话框
-    if (showDeviceManager) {
-        DeviceManagementDialog(
-            devices = uiState.pairedDevices,
-            onRefresh = onRequestDeviceList,
-            onRevoke = onRevokeDevice,
-            onRename = onRenameDevice,
-            onDismiss = { showDeviceManager = false }
-        )
     }
 }
 
