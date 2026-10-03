@@ -33,6 +33,8 @@ import com.opencode.android.util.MarkdownExporter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
 import java.util.UUID
@@ -111,10 +113,17 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     private var taskStartTimeMs: Long = 0L
     private var taskName: String = ""
     private val taskModifiedFiles = mutableSetOf<String>()
+    // P1-5: 流式 chunk 批处理缓冲（50ms 聚合一次刷新 UI）
+    private val streamBuffer = StringBuilder()
+    private var streamFlushJob: Job? = null
+    private var streamFlushSessionId: String? = null
+    private var lastProgressNotifyMs: Long = 0L
 
     companion object {
         private const val MAX_MESSAGES_COUNT = 500
         private const val MAX_STREAM_LINES = 2000
+        // P1-5: chunk 批处理间隔（文档建议 30–80ms）
+        private const val STREAM_FLUSH_MS = 50L
     }
 
     fun switchMode(mode: AppMode) {
@@ -674,6 +683,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     override fun onStreamStart(sessionId: String) {
         val newMsgId = UUID.randomUUID().toString()
         activeAssistantMessageId = newMsgId
+        // P1-5: 新一轮流式输出，清空上一轮缓冲
+        streamBuffer.clear()
+        streamFlushJob?.cancel()
+        streamFlushSessionId = sessionId
 
         val placeholderMsg = ChatMessage(
             id = newMsgId,
@@ -696,21 +709,35 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             onStreamStart(sessionId)
         }
 
-        OpenCodeKeepAliveService.updateProgress(getApplication(), "AI 正在生成/执行: ${chunk.take(30)}...")
+        // P1-5: chunk 先进缓冲，50ms 批量刷新一次，避免每个 chunk 重建消息列表
+        streamBuffer.append(chunk)
+        streamFlushSessionId = sessionId
+        // 通知栏进度也节流（最多 1 秒一次）
+        val now = System.currentTimeMillis()
+        if (now - lastProgressNotifyMs > 1000) {
+            lastProgressNotifyMs = now
+            OpenCodeKeepAliveService.updateProgress(getApplication(), "AI 正在生成/执行...")
+        }
+        if (streamFlushJob?.isActive != true) {
+            streamFlushJob = viewModelScope.launch {
+                delay(STREAM_FLUSH_MS)
+                flushStreamBuffer()
+            }
+        }
+    }
 
+    /**
+     * P1-5: 将缓冲的 chunk 一次性追加到流式消息，保证顺序、不丢失、不重复。
+     */
+    private fun flushStreamBuffer() {
+        val text = streamBuffer.toString()
+        if (text.isEmpty()) return
+        streamBuffer.clear()
+        val msgId = activeAssistantMessageId ?: return
         _uiState.update { state ->
             val updatedMessages = state.messages.map { msg ->
-                if (msg.id == activeAssistantMessageId) {
-                    val combined = msg.content + chunk
-                    val lines = combined.split("\n")
-                    val guardedContent = if (lines.size > MAX_STREAM_LINES) {
-                        val header = lines.take(50).joinToString("\n")
-                        val tail = lines.takeLast(MAX_STREAM_LINES - 50).joinToString("\n")
-                        "$header\n\n... [已自动折叠中间超长日志 (${lines.size - MAX_STREAM_LINES} 行)] ...\n\n$tail"
-                    } else {
-                        combined
-                    }
-                    msg.copy(content = guardedContent)
+                if (msg.id == msgId) {
+                    msg.copy(content = applyStreamGuard(msg.content + text))
                 } else {
                     msg
                 }
@@ -719,8 +746,23 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** P1-5: 超长输出折叠保护（原 onStreamChunk 内联逻辑抽取，行为不变） */
+    private fun applyStreamGuard(combined: String): String {
+        val lines = combined.split("\n")
+        return if (lines.size > MAX_STREAM_LINES) {
+            val header = lines.take(50).joinToString("\n")
+            val tail = lines.takeLast(MAX_STREAM_LINES - 50).joinToString("\n")
+            "$header\n\n... [已自动折叠中间超长日志 (${lines.size - MAX_STREAM_LINES} 行)] ...\n\n$tail"
+        } else {
+            combined
+        }
+    }
+
     override fun onStreamEnd(sessionId: String) {
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
+        // P1-5: 流结束前把缓冲剩余 chunk 全部刷入，保证不丢失
+        streamFlushJob?.cancel()
+        flushStreamBuffer()
         // v1.6 P0: 任务完成
         setTaskStatus(TaskStatus.COMPLETED, "任务已完成")
         // v1.6 P0 任务通知：完成通知（任务名、耗时、修改文件数，点击直达会话）

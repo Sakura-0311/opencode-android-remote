@@ -33,6 +33,26 @@ class CloudApiClient {
     private var eventIdPrefs: SharedPreferences? = null
     @Volatile private var lastEventId: String? = null
     @Volatile private var currentEventKey: String = ""
+    // P1-8: SSE 指数退避重连状态
+    private var sseRetryCount: Int = 0
+    private var sseRetryRunnable: Runnable? = null
+    private var sseStreamActive: Boolean = false
+    private var sseLastParams: SseParams? = null
+
+    private data class SseParams(
+        val baseUrl: String,
+        val apiKey: String,
+        val sessionId: String,
+        val prompt: String,
+        val listener: CloudStreamListener
+    )
+
+    companion object {
+        // P1-8: 重连退避参数
+        private const val SSE_RETRY_BASE_MS = 1000L
+        private const val SSE_RETRY_MAX_MS = 30000L
+        private const val SSE_MAX_RETRIES = 8
+    }
 
     fun setEventIdPersistence(prefs: SharedPreferences) {
         eventIdPrefs = prefs
@@ -119,13 +139,28 @@ class CloudApiClient {
         cancelCurrentStream()
 
         val cleanUrl = baseUrl.trim().removeSuffix("/")
-        val messageUrl = "$cleanUrl/session/$sessionId/message"
-        val eventUrl = "$cleanUrl/event"
-        val auth = buildAuthHeader(apiKey)
 
         // v1.6 P0 断线恢复：按服务器+会话恢复游标
         currentEventKey = "sse_event_id_${cleanUrl.hashCode()}_${sessionId}"
         loadPersistedEventId()
+
+        // P1-8: 保存参数供重连使用；新一轮流重置退避
+        sseLastParams = SseParams(cleanUrl, apiKey, sessionId, prompt, listener)
+        sseRetryCount = 0
+        sseStreamActive = true
+
+        subscribeEventStream(sendPrompt = true)
+    }
+
+    /**
+     * P1-8: 订阅 SSE 事件流。sendPrompt=true 时为首次订阅（会发送 prompt）；
+     * 重连时 sendPrompt=false，仅用 Last-Event-ID 续订，避免重复发送指令。
+     */
+    private fun subscribeEventStream(sendPrompt: Boolean) {
+        val params = sseLastParams ?: return
+        val (cleanUrl, apiKey, sessionId, prompt, listener) = params
+        val eventUrl = "$cleanUrl/event"
+        val auth = buildAuthHeader(apiKey)
 
         // 1. 发起 SSE /event 长连接订阅
         val sseRequestBuilder = Request.Builder()
@@ -146,27 +181,37 @@ class CloudApiClient {
         sseCall.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 if (call.isCanceled()) return
-                mainHandler.post {
-                    listener.onError("STREAM_CONN_ERR", "云端 SSE 事件流连接中断: ${e.message ?: "未知网络错误"}")
-                }
+                // P1-8: 非主动取消的失败走指数退避重连，而非直接报错
+                scheduleSseRetry("云端 SSE 事件流连接中断: ${e.message ?: "未知网络错误"}")
             }
 
             override fun onResponse(call: Call, response: Response) {
                 if (!response.isSuccessful) {
                     val code = response.code
                     response.close()
-                    mainHandler.post {
-                        listener.onError("HTTP_$code", "无法订阅云端事件流 (HTTP $code)")
+                    // P1-8: 5xx/网络类错误可重连；4xx（鉴权/路径）直接报错
+                    if (code >= 500 && sseStreamActive) {
+                        scheduleSseRetry("无法订阅云端事件流 (HTTP $code)")
+                    } else {
+                        sseStreamActive = false
+                        mainHandler.post {
+                            listener.onError("HTTP_$code", "无法订阅云端事件流 (HTTP $code)")
+                        }
                     }
                     return
                 }
+
+                // 连接成功：重置退避计数
+                sseRetryCount = 0
 
                 mainHandler.post {
                     listener.onStreamStart(sessionId)
                 }
 
-                // 2. 发送 POST /session/:id/message 指令
-                sendPromptMessagePayload(cleanUrl, sessionId, prompt, auth, listener)
+                // 2. 首次订阅时发送 POST /session/:id/message 指令；重连时不重发
+                if (sendPrompt) {
+                    sendPromptMessagePayload(cleanUrl, sessionId, prompt, auth, listener)
+                }
 
                 val responseBody = response.body
                 if (responseBody == null) {
@@ -214,6 +259,8 @@ class CloudApiClient {
                                     }
                                 }
                             } else if (type == "session.idle" || type == "message.complete") {
+                                // P1-8: 正常结束标记流完成，不再重连
+                                sseStreamActive = false
                                 mainHandler.post {
                                     listener.onStreamEnd(sessionId)
                                 }
@@ -223,14 +270,16 @@ class CloudApiClient {
                         }
                     }
                 } catch (e: Exception) {
-                    if (!call.isCanceled()) {
-                        mainHandler.post {
-                            listener.onError("SSE_READ_ERROR", "读取云端事件流异常: ${e.message}")
-                        }
+                    if (!call.isCanceled() && sseStreamActive) {
+                        // P1-8: 读取异常走指数退避重连（Last-Event-ID 自动续传）
+                        scheduleSseRetry("读取云端事件流异常: ${e.message}")
                     }
                 } finally {
                     response.close()
-                    mainHandler.post { listener.onStreamEnd(sessionId) }
+                    // P1-8: 只有流仍标记为活跃且未安排重连时才发 onStreamEnd
+                    if (sseStreamActive && sseRetryRunnable == null) {
+                        mainHandler.post { listener.onStreamEnd(sessionId) }
+                    }
                 }
             }
         })
@@ -385,8 +434,38 @@ class CloudApiClient {
         })
     }
 
+    /**
+     * P1-8: SSE 指数退避重连（1s→2s→4s…上限 30s，最多 8 次），用 Last-Event-ID 续传。
+     * 达到上限后才向 UI 报错。
+     */
+    private fun scheduleSseRetry(reason: String) {
+        if (!sseStreamActive) return
+        val params = sseLastParams ?: return
+        if (sseRetryCount >= SSE_MAX_RETRIES) {
+            sseStreamActive = false
+            sseRetryRunnable = null
+            mainHandler.post {
+                params.listener.onError("SSE_RETRY_EXHAUSTED", "云端事件流多次重连失败，已停止重试: $reason")
+            }
+            return
+        }
+        val delayMs = (SSE_RETRY_BASE_MS shl sseRetryCount).coerceAtMost(SSE_RETRY_MAX_MS)
+        sseRetryCount++
+        val runnable = Runnable {
+            sseRetryRunnable = null
+            if (sseStreamActive) {
+                subscribeEventStream(sendPrompt = false)
+            }
+        }
+        sseRetryRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
     fun cancelCurrentStream() {
         try {
+            sseStreamActive = false
+            sseRetryRunnable?.let { mainHandler.removeCallbacks(it) }
+            sseRetryRunnable = null
             activeStreamCall?.cancel()
             activeStreamCall = null
         } catch (e: Exception) {

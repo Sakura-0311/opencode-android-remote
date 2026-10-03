@@ -113,21 +113,61 @@ class ClientSession:
         self.is_authenticated = False
 
 
+class RoomBuffer:
+    """
+    P1-6: 房间消息缓冲三重限制（数量 + 时间 + 总字节数），任一达到即从最旧开始淘汰。
+    - max_count: 最多保留条数（默认 1000）
+    - max_age_sec: 消息最长保留秒数（默认 300 = 5 分钟）
+    - max_bytes: 缓冲总字节上限（默认 4MB）
+    条目按 relay_seq 单调递增；淘汰旧消息不影响序号连续性，超窗口时由 resync_required 告知客户端。
+    """
+    def __init__(self, max_count: int = 1000, max_age_sec: int = 300, max_bytes: int = 4 * 1024 * 1024):
+        self.max_count = max_count
+        self.max_age_sec = max_age_sec
+        self.max_bytes = max_bytes
+        self._buf: deque = deque()
+        self._bytes: int = 0
+
+    def append(self, seq: int, msg: str) -> None:
+        now = time.time()
+        size = len(msg.encode("utf-8"))
+        self._buf.append({"seq": seq, "msg": msg, "ts": now, "size": size})
+        self._bytes += size
+        self._evict(now)
+
+    def _evict(self, now: float) -> None:
+        while self._buf and (
+            len(self._buf) > self.max_count
+            or self._bytes > self.max_bytes
+            or (now - self._buf[0]["ts"]) > self.max_age_sec
+        ):
+            old = self._buf.popleft()
+            self._bytes -= old["size"]
+
+    def __iter__(self):
+        return iter(self._buf)
+
+    def __len__(self):
+        return len(self._buf)
+
+
 class ConnectionManager:
     def __init__(self):
         # account_id -> {
         #   "secret_hash": str,
         #   "desktop": Optional[ClientSession],
         #   "mobiles": Set[ClientSession],
-        #   "msg_buffer": deque,  # v1.6 P0 断线恢复：房间消息环形缓冲
+        #   "msg_buffer": RoomBuffer,  # v1.6 P0 断线恢复 + P1-6 三重限制的房间消息缓冲
         #   "next_seq": int,      # v1.6: 下一条消息序号
         #   "device_secrets": Dict[str, dict],  # v1.6 P0 扫码配对：设备密钥
         # }
         self.rooms: Dict[str, dict] = {}
         # websocket -> ClientSession
         self.sessions: Dict[WebSocket, ClientSession] = {}
-        # v1.6: 每个房间保留最近 N 条下行消息，供移动端断线重连补发
-        self.room_buffer_size = int(os.getenv("RELAY_ROOM_BUFFER_SIZE", "200"))
+        # P1-6: 缓冲三重上限（数量/时间/字节），可用环境变量覆盖
+        self.room_buffer_max_count = int(os.getenv("RELAY_ROOM_BUFFER_MAX_COUNT", "1000"))
+        self.room_buffer_max_age = int(os.getenv("RELAY_ROOM_BUFFER_MAX_AGE_SEC", "300"))
+        self.room_buffer_max_bytes = int(os.getenv("RELAY_ROOM_BUFFER_MAX_BYTES", str(4 * 1024 * 1024)))
         # v1.6 P0 扫码配对：pairing_token -> 配对会话
         self.pairing_sessions: Dict[str, dict] = {}
         self.pairing_ttl = int(os.getenv("RELAY_PAIRING_TTL", "120"))
@@ -158,8 +198,12 @@ class ConnectionManager:
                 "secret_hash": secret_hash,
                 "desktop": None,
                 "mobiles": set(),
-                # v1.6 P0 断线恢复
-                "msg_buffer": deque(maxlen=self.room_buffer_size),
+                # v1.6 P0 断线恢复 + P1-6 三重限制缓冲
+                "msg_buffer": RoomBuffer(
+                    max_count=self.room_buffer_max_count,
+                    max_age_sec=self.room_buffer_max_age,
+                    max_bytes=self.room_buffer_max_bytes,
+                ),
                 "next_seq": 1,
                 # v1.6 P0 扫码配对：secret_hash -> {device_name, created_at}
                 "device_secrets": {},
@@ -411,7 +455,7 @@ class ConnectionManager:
                 sequenced_str = message_str
             buf = room.get("msg_buffer")
             if buf is not None:
-                buf.append({"seq": seq, "msg": sequenced_str})
+                buf.append(seq, sequenced_str)
             for m_session in list(room.get("mobiles", [])):
                 try:
                     await m_session.websocket.send_text(sequenced_str)

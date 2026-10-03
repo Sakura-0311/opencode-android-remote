@@ -162,7 +162,29 @@ class RelayWebSocketClient {
         listener.onConnectionStateChanged(connectionState)
     }
 
-    private fun seqKey() = "last_relay_seq_$currentAccountId"
+    private fun seqKey(): String {
+        // P1-7: seq 按 relay + account + device 三维隔离，避免多 Relay / 多设备序号混用
+        val urlHash = currentUrl.hashCode().toString(16)
+        return "last_relay_seq_${urlHash}_${currentAccountId}_${deviceUuid()}"
+    }
+
+    /**
+     * P1-7: 本机稳定设备标识（首次生成后持久化），用于 seq 持久化隔离。
+     * 非敏感，仅做命名空间隔离。
+     */
+    private fun deviceUuid(): String {
+        val prefs = seqPrefs ?: return "nodevice"
+        var uuid = prefs.getString(KEY_DEVICE_UUID, null)
+        if (uuid.isNullOrBlank()) {
+            uuid = UUID.randomUUID().toString()
+            prefs.edit().putString(KEY_DEVICE_UUID, uuid).apply()
+        }
+        return uuid
+    }
+
+    companion object {
+        private const val KEY_DEVICE_UUID = "device_uuid_v1"
+    }
 
     private fun loadPersistedSeq() {
         lastRelaySeq = seqPrefs?.getLong(seqKey(), 0L) ?: 0L

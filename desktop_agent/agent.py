@@ -177,7 +177,45 @@ tool_guard = ToolApprovalManager(timeout_seconds=120.0)
 #   data: {"type":"message.part.delta","properties":{"sessionID":"ses_xxx",...,"delta":"..."}}
 # 旧代码读顶层字段，永远拿到空值；B-3 要求不匹配手机端已知会话的事件直接丢弃
 # ==============================================================================
-known_session_ids: set = set()
+class KnownSessionRegistry:
+    """
+    P1-10: 已知会话注册表（B-3 防串台守卫用）。
+    每个条目带 last_seen；超过 ttl 未活跃即过期清理，防止集合无限增长。
+    本进程即单 account/device 的 agent 实例，隔离天然成立。
+    """
+    def __init__(self, ttl_sec: float = 3600.0):
+        self.ttl_sec = ttl_sec
+        self._seen: Dict[str, float] = {}
+
+    def add(self, session_id: str) -> None:
+        self._seen[session_id] = time.time()
+
+    def touch(self, session_id: str) -> None:
+        if session_id in self._seen:
+            self._seen[session_id] = time.time()
+
+    def cleanup(self) -> int:
+        now = time.time()
+        expired = [sid for sid, ts in self._seen.items() if now - ts > self.ttl_sec]
+        for sid in expired:
+            del self._seen[sid]
+        if expired:
+            logger.info(f"P1-10: cleaned {len(expired)} expired known sessions")
+        return len(expired)
+
+    def __contains__(self, session_id: object) -> bool:
+        return session_id in self._seen
+
+    def __bool__(self) -> bool:
+        return bool(self._seen)
+
+    def __len__(self) -> int:
+        return len(self._seen)
+
+
+known_session_ids = KnownSessionRegistry(
+    ttl_sec=float(os.getenv("AGENT_KNOWN_SESSION_TTL_SEC", "3600"))
+)
 
 def _extract_event_session(event: Dict[str, Any]) -> Optional[str]:
     """B-2: 优先从 properties 取会话 ID，顶层字段仅作兼容分支"""
@@ -244,6 +282,7 @@ async def listen_opencode_events_stream(
     last_id = load_sse_cursor()
     if last_id:
         logger.info(f"B-10: Resuming SSE stream from last-event-id: {last_id}")
+    last_cleanup = time.time()
     while True:
         try:
             async for event in subscribe_events_stream(
@@ -260,6 +299,12 @@ async def listen_opencode_events_stream(
                 session_id = _extract_event_session(event)
                 if not session_id or (known_session_ids and session_id not in known_session_ids):
                     continue
+                # P1-10: 活跃会话刷新 last_seen；每 5 分钟清理过期条目
+                known_session_ids.touch(session_id)
+                now_ts = time.time()
+                if now_ts - last_cleanup > 300:
+                    last_cleanup = now_ts
+                    known_session_ids.cleanup()
 
                 # 1. 增量 Token 输出 (message.part.delta)
                 if event_type in ("message.part.delta", "delta", "stream_chunk"):
@@ -476,17 +521,27 @@ async def handle_mobile_message(
             "session_id": target_session_id
         }))
 
+        # P1-9: TaskManager 接入任务生命周期——发送任务注册为可取消的 asyncio.Task
+        prompt_task = asyncio.create_task(send_session_message_async(
+            http_session,
+            target_session_id,
+            prompt_text,
+            OPENCODE_API_URL,
+            OPENCODE_PASSWORD,
+            model=req_model if isinstance(req_model, dict) else None,
+            agent=req_agent if isinstance(req_agent, str) else None,
+        ))
+        task_manager.register(target_session_id, prompt_task)
         try:
             logger.info(f"Posting message to session {target_session_id}...")
-            await send_session_message_async(
-                http_session,
-                target_session_id,
-                prompt_text,
-                OPENCODE_API_URL,
-                OPENCODE_PASSWORD,
-                model=req_model if isinstance(req_model, dict) else None,
-                agent=req_agent if isinstance(req_agent, str) else None,
-            )
+            await prompt_task
+        except asyncio.CancelledError:
+            logger.info(f"Prompt send task cancelled for session {target_session_id}")
+            await ws_relay.send(json.dumps({
+                "type": "cancelled",
+                "req_id": req_id,
+                "session_id": target_session_id
+            }))
         except Exception as e:
             logger.error(f"Error sending message to OpenCode: {e}")
             await ws_relay.send(json.dumps({
@@ -499,10 +554,15 @@ async def handle_mobile_message(
                 "type": "stream_end",
                 "session_id": target_session_id
             }))
+        finally:
+            # P1-9: 完成/异常/取消均移除注册，避免泄漏
+            task_manager.remove(target_session_id)
 
     # 5. 中断/取消会话执行 (POST /session/:id/abort)
     elif action == "cancel":
         logger.info(f"Cancelling execution for session: {session_id}")
+        # P1-9: 先取消本地尚未完成的发送任务，再调服务端 abort
+        task_manager.cancel(session_id)
         await abort_session(http_session, session_id, OPENCODE_API_URL, OPENCODE_PASSWORD)
         await ws_relay.send(json.dumps({
             "type": "cancelled",
