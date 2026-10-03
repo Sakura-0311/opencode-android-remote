@@ -93,10 +93,9 @@ data class OpenCodeUiState(
     val isReconnecting: Boolean = false,
     
     // 会话与分组管理
-    val currentSessionId: String = "default",
-    val availableSessions: List<SessionItem> = listOf(
-        SessionItem("default", "Main Workspace", tag = "默认", isPinned = true)
-    ),
+    // B-13: 默认空会话列表，无会话时走空状态提示，不再显示假数据
+    val currentSessionId: String = "",
+    val availableSessions: List<SessionItem> = emptyList(),
     val selectedTagFilter: String? = null, // null 表示查看全部，支持按标签过滤
     val availableTags: List<String> = listOf("全部", "默认", "代码调试", "自动化任务", "脚本生成"),
     val showArchivedSessions: Boolean = false,

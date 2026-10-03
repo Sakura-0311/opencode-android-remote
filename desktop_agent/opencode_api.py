@@ -195,11 +195,13 @@ async def subscribe_events_stream(
     session: aiohttp.ClientSession,
     base_url: str = DEFAULT_OPENCODE_BASE_URL,
     password: Optional[str] = None,
-    last_event_id: Optional[str] = None
+    last_event_id: Optional[str] = None,
+    event_id_sink: Optional[Dict[str, str]] = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     订阅真实端点 GET /event (SSE 事件流)
     监听 message.part.delta (增量Token)、permission.asked (工具授权请求) 与 session.idle
+    B-10: 解析 SSE id: 行并写入 event_id_sink，供断线重连时作为 Last-Event-ID 续传
     """
     clean_url = base_url.rstrip("/")
     url = f"{clean_url}/event"
@@ -216,6 +218,13 @@ async def subscribe_events_stream(
         async for line_bytes in resp.content:
             line = line_bytes.decode("utf-8", errors="replace").strip()
             if not line:
+                continue
+
+            # B-10: 记录 SSE 事件游标
+            if line.startswith("id:"):
+                eid = line[3:].strip()
+                if eid and event_id_sink is not None:
+                    event_id_sink["last_event_id"] = eid
                 continue
 
             if line.startswith("data:"):

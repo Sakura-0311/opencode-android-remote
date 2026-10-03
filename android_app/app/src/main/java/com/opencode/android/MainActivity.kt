@@ -11,9 +11,16 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import com.opencode.android.ui.screens.ChatScreen
 import com.opencode.android.ui.screens.PairingScreen
 import com.opencode.android.ui.theme.OpenCodeTheme
+import com.opencode.android.util.UpdateChecker
 import com.opencode.android.viewmodel.OpenCodeViewModel
 
 class MainActivity : ComponentActivity() {
@@ -33,6 +40,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             OpenCodeTheme {
                 val uiState by viewModel.uiState.collectAsState()
+                // B-12: 更新检查对话框状态
+                var updateInfo by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
+                var checkingUpdate by remember { mutableStateOf(false) }
 
                 if (!uiState.isPaired) {
                     PairingScreen(
@@ -109,6 +119,42 @@ class MainActivity : ComponentActivity() {
                         },
                         onExportMarkdown = {
                             viewModel.exportCurrentSession()
+                        },
+                        // B-12: 检查更新
+                        onCheckUpdate = {
+                            checkingUpdate = true
+                            UpdateChecker.checkForUpdate { info ->
+                                checkingUpdate = false
+                                updateInfo = info
+                            }
+                        }
+                    )
+                }
+
+                // B-12: 更新检查结果对话框
+                if (checkingUpdate) {
+                    AlertDialog(
+                        onDismissRequest = {},
+                        title = { Text("检查更新") },
+                        text = { Text("正在检查新版本…") },
+                        confirmButton = {}
+                    )
+                }
+                updateInfo?.let { info ->
+                    AlertDialog(
+                        onDismissRequest = { updateInfo = null },
+                        title = { Text(if (info.hasUpdate) "发现新版本" else "检查更新") },
+                        text = {
+                            Text(
+                                when {
+                                    info.error != null -> info.error!!
+                                    info.hasUpdate -> "当前版本 ${info.currentVersion}\n最新版本 ${info.latestVersion}\n\n${info.releaseNotes ?: ""}\n\n请前往 GitHub Releases 下载 APK 更新。"
+                                    else -> "当前已是最新版本 (${info.currentVersion})。"
+                                }
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { updateInfo = null }) { Text("知道了") }
                         }
                     )
                 }

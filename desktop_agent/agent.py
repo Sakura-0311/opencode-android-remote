@@ -204,6 +204,26 @@ def _extract_event_delta(event: Dict[str, Any]) -> str:
 
 
 # ==============================================================================
+# B-10: SSE 游标持久化（断线重连断点续传）
+# ==============================================================================
+SSE_CURSOR_FILE = os.getenv("OPENCODE_SSE_CURSOR_FILE", ".opencode_sse_cursor")
+
+def load_sse_cursor() -> Optional[str]:
+    try:
+        with open(SSE_CURSOR_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip() or None
+    except Exception:
+        return None
+
+def save_sse_cursor(event_id: str):
+    try:
+        with open(SSE_CURSOR_FILE, "w", encoding="utf-8") as f:
+            f.write(event_id)
+    except Exception as e:
+        logger.warning(f"Failed to persist SSE cursor: {e}")
+
+
+# ==============================================================================
 # OpenCode GET /event SSE 实时事件监听与透传
 # ==============================================================================
 async def listen_opencode_events_stream(
@@ -212,11 +232,24 @@ async def listen_opencode_events_stream(
 ):
     """
     持久订阅 OpenCode 官方 GET /event SSE 流，将增量 Chunk 与工具审批事件转发至手机端
+    B-10: 游标持久化，断线重连时携带 Last-Event-ID 续传
     """
     logger.info("Starting OpenCode SSE event listener on GET /event...")
+    cursor_sink: Dict[str, str] = {}
+    last_id = load_sse_cursor()
+    if last_id:
+        logger.info(f"B-10: Resuming SSE stream from last-event-id: {last_id}")
     while True:
         try:
-            async for event in subscribe_events_stream(http_session, OPENCODE_API_URL, OPENCODE_PASSWORD):
+            async for event in subscribe_events_stream(
+                http_session, OPENCODE_API_URL, OPENCODE_PASSWORD,
+                last_event_id=last_id, event_id_sink=cursor_sink
+            ):
+                # B-10: 收到新游标即持久化
+                new_id = cursor_sink.get("last_event_id")
+                if new_id and new_id != last_id:
+                    last_id = new_id
+                    save_sse_cursor(new_id)
                 event_type = event.get("type", "")
                 # B-2: 会话 ID 优先从 properties 取；B-3: 无归属或非已知会话的事件直接丢弃，防串台
                 session_id = _extract_event_session(event)

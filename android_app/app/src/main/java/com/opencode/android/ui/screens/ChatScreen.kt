@@ -54,7 +54,9 @@ fun ChatScreen(
     // 搜索与滚动
     onSearchLog: (String) -> Unit,
     onSetAutoScrollPaused: (Boolean) -> Unit,
-    onExportMarkdown: () -> String
+    onExportMarkdown: () -> String,
+    // B-12: 检查更新
+    onCheckUpdate: () -> Unit
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -196,6 +198,15 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Default.DeleteSweep, contentDescription = null) }
                             )
                             Divider()
+                            // B-12: 检查更新
+                            DropdownMenuItem(
+                                text = { Text("检查更新") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onCheckUpdate()
+                                },
+                                leadingIcon = { Icon(Icons.Default.SystemUpdate, contentDescription = null) }
+                            )
                             DropdownMenuItem(
                                 text = { Text("断开连接", color = MaterialTheme.colorScheme.error) },
                                 onClick = {

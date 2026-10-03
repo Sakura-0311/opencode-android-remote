@@ -4,7 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- B-11: specialUse 类型声明（dataSync 在 Android 15 上累计 6 小时后会被系统停掉） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -32,10 +33,15 @@
         </activity>
 
         <!-- 后台保活与长任务常驻进度服务 -->
+        <!-- B-11: 改用 specialUse 类型，避免 Android 15 对 dataSync 的 6 小时限制 -->
         <service
             android:name=".service.OpenCodeKeepAliveService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="保持与远程 OpenCode 服务的长连接，在后台持续接收 AI 任务的流式输出与工具审批请求，确保用户离开应用后仍能及时收到执行进度与审批通知。" />
+        </service>
 
     </application>
 

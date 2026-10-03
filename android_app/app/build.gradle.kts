@@ -7,16 +7,33 @@ android {
     namespace = "com.opencode.android"
     compileSdk = 34
 
+    // B-12: versionCode 随 versionName 自动递增（1.5.0 -> 10500）
+    val appVersionName = "1.5.0"
+    val appVersionCode = appVersionName.split(".").let { p ->
+        p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
+    }
+
     defaultConfig {
         applicationId = "com.opencode.android"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            // B-12: 正式签名 keystore 随仓库提交，保证 CI 每次构建签名一致（否则更新安装会报签名不匹配）
+            // 密码可通过环境变量 RELEASE_KEYSTORE_PASSWORD / RELEASE_KEY_PASSWORD 覆盖
+            storeFile = file("release.keystore")
+            storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: "***REMOVED***"
+            keyAlias = "opencode-release"
+            keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: "***REMOVED***"
         }
     }
 
@@ -27,6 +44,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
