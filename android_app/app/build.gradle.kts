@@ -5,10 +5,10 @@ plugins {
     id("org.cyclonedx.bom") version "2.3.1"
 }
 
-// v2.6: SBOM 输出固定为 build/reports/cyclonedx/cyclonedx-bom.json
-cyclonedxBom {
-    outputFormat.set("json")
-    outputName.set("cyclonedx-bom")
+// v2.6: SBOM 输出固定为 build/reports/cyclonedx-bom.json（插件默认输出到 build/reports/）
+tasks.cyclonedxBom {
+    setOutputFormat("json")
+    setOutputName("cyclonedx-bom")
 }
 
 import java.util.Properties

@@ -166,19 +166,19 @@ jobs:
         working-directory: android_app
         run: |
           gradle :app:cyclonedxBom --no-daemon --console=plain --stacktrace
-          ls -la app/build/reports/cyclonedx/cyclonedx-bom.json
+          ls -la app/build/reports/cyclonedx-bom.json
       - name: Scan SBOM for CVEs
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           curl -sSL https://github.com/google/osv-scanner/releases/download/v2.0.3/osv-scanner_linux_amd64 \
             -o /tmp/osv-scanner && chmod +x /tmp/osv-scanner
-          /tmp/osv-scanner --sbom=android_app/app/build/reports/cyclonedx/cyclonedx-bom.json
+          /tmp/osv-scanner --sbom=android_app/app/build/reports/cyclonedx-bom.json
       - name: Upload SBOM
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: cyclonedx-bom
-          path: android_app/app/build/reports/cyclonedx/cyclonedx-bom.json
+          path: android_app/app/build/reports/cyclonedx-bom.json
           if-no-files-found: error
       # v2.6: release 产物附 checksums.txt
       - name: Write checksums.txt
@@ -186,7 +186,7 @@ jobs:
         run: |
           mkdir -p /tmp/release-files
           cp android_app/app/build/outputs/apk/release/app-release.apk /tmp/release-files/
-          cp android_app/app/build/reports/cyclonedx/cyclonedx-bom.json /tmp/release-files/
+          cp android_app/app/build/reports/cyclonedx-bom.json /tmp/release-files/
           (cd /tmp/release-files && sha256sum app-release.apk cyclonedx-bom.json > checksums.txt)
           cat /tmp/release-files/checksums.txt
           cp /tmp/release-files/checksums.txt android_app/app/build/outputs/apk/release/checksums.txt
