@@ -73,7 +73,9 @@ fun ChatScreen(
     // P2-13: 任务中心
     onShowTaskCenter: () -> Unit = {},
     // P2-15: 连接诊断
-    onShowDiagnose: () -> Unit = {}
+    onShowDiagnose: () -> Unit = {},
+    // 对外分发：隐私说明
+    onShowPrivacy: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -277,6 +279,15 @@ fun ChatScreen(
                                     onShowDiagnose()
                                 },
                                 leadingIcon = { Icon(Icons.Default.NetworkCheck, contentDescription = null) }
+                            )
+                            // 对外分发：隐私说明
+                            DropdownMenuItem(
+                                text = { Text("隐私说明") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowPrivacy()
+                                },
+                                leadingIcon = { Icon(Icons.Default.PrivacyTip, contentDescription = null) }
                             )
                             DropdownMenuItem(
                                 text = { Text("断开连接", color = MaterialTheme.colorScheme.error) },

@@ -28,6 +28,7 @@ import com.opencode.android.ui.screens.DeviceManagementDialog
 import com.opencode.android.ui.screens.FileBrowserDialog
 import com.opencode.android.ui.screens.TaskCenterDialog
 import com.opencode.android.ui.screens.ConnectionDiagnoseDialog
+import com.opencode.android.ui.screens.PrivacyDialog
 import com.opencode.android.ui.screens.ModelAgentDialog
 import com.opencode.android.ui.screens.ProjectCenterDialog
 
@@ -82,6 +83,8 @@ class MainActivity : ComponentActivity() {
                 var showTaskCenter by remember { mutableStateOf(false) }
                 // P2-15: 连接诊断
                 var showDiagnose by remember { mutableStateOf(false) }
+                // 对外分发：隐私说明
+                var showPrivacy by remember { mutableStateOf(false) }
 
                 if (!uiState.isPaired) {
                     PairingScreen(
@@ -204,6 +207,10 @@ class MainActivity : ComponentActivity() {
                         // P2-15: 连接诊断
                         onShowDiagnose = {
                             showDiagnose = true
+                        },
+                        // 对外分发：隐私说明
+                        onShowPrivacy = {
+                            showPrivacy = true
                         }
                     )
                 }
@@ -319,6 +326,11 @@ class MainActivity : ComponentActivity() {
                         onRunDiagnose = { viewModel.runDiagnose() },
                         onDismiss = { showDiagnose = false }
                     )
+                }
+
+                // 对外分发：隐私说明
+                if (showPrivacy) {
+                    PrivacyDialog(onDismiss = { showPrivacy = false })
                 }
             }
         }
