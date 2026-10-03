@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.opencode.android.data.AppMode
+import com.opencode.android.data.model.AppMode
 import com.opencode.android.data.model.ConnectionProfile
 import com.opencode.android.util.OpLog
 

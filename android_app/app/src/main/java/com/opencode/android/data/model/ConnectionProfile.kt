@@ -1,6 +1,6 @@
 package com.opencode.android.data.model
 
-import com.opencode.android.data.AppMode
+import com.opencode.android.data.model.AppMode
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID

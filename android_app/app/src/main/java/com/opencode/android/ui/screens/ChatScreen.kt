@@ -849,6 +849,7 @@ fun SessionsManagementModal(
             }
         }
     )
+}
 
 /**
  * v2.5: 统一连接状态文案。中继模式订阅 relayConnectionState，
@@ -874,5 +875,4 @@ private fun connectionStatusLabel(s: OpenCodeUiState): String {
             RelayConnectionState.AUTH_FAILED -> "鉴权失败"
         }
     }
-}
 }

@@ -6,6 +6,7 @@ import com.opencode.android.network.FileEntry
 import com.opencode.android.network.ModelInfo
 import com.opencode.android.network.ProjectInfo
 import com.opencode.android.network.RelayConnectionState
+import com.opencode.android.network.CloudConnectionState
 
 enum class MessageRole {
     USER,
