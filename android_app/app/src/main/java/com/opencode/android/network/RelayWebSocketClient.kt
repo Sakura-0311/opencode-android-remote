@@ -14,6 +14,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -182,6 +183,23 @@ class RelayWebSocketClient {
     // v2.3: 网络层标记离线时暂停重连计时器
     @Volatile private var networkPaused = false
 
+    // v3.0: 协议版本与能力协商
+    companion object {
+        const val PROTOCOL_VERSION = 3
+        val CLIENT_CAPABILITIES = listOf(
+            "hello", "write_idempotency", "file_sandbox",
+            "device_id", "resync", "multi_profile"
+        )
+    }
+    var serverProtocolVersion: Int = 0
+        private set
+    var serverCapabilities: List<String> = emptyList()
+        private set
+    // v3.0: 本次连接是否收到 hello_ack（未收到则对方是 v2 旧服务端）
+    private var helloAckReceived: Boolean = false
+    /** 服务端是否支持某能力（v3 服务端必备；旧服务端无 hello_ack 时为空） */
+    fun serverSupports(cap: String): Boolean = serverCapabilities.contains(cap)
+
     // v1.6 P0 断线恢复：relay 消息序号持久化与幂等去重
     private var seqPrefs: SharedPreferences? = null
     @Volatile private var lastRelaySeq: Long = 0L
@@ -294,6 +312,9 @@ class RelayWebSocketClient {
         this.currentSecret = secret.trim()
         this.listener = listener
         this.isExplicitDisconnect = false
+        helloAckReceived = false
+        serverCapabilities = emptyList()
+        serverProtocolVersion = 0
         // v1.6: 恢复该房间的已确认序号
         loadPersistedSeq()
 
@@ -351,17 +372,15 @@ class RelayWebSocketClient {
                     setState(RelayConnectionState.CONNECTED)
                     listener?.onConnected()
 
-                    // P0-1: 连接建立后第一包必须发送认证帧
-                    // v1.6: 携带 last_relay_seq，服务端补发断线期间的消息
-                    val authPacket = JSONObject().apply {
-                        put("type", "auth")
-                        put("account_id", currentAccountId)
-                        put("secret", currentSecret)
-                        put("client_type", "mobile")
-                        put("last_relay_seq", lastRelaySeq)
+                    // v3.0: 先 hello 能力协商，收到 hello_ack 后再发 auth
+                    val hello = JSONObject().apply {
+                        put("type", "hello")
+                        put("v", PROTOCOL_VERSION)
+                        put("capabilities", JSONArray(CLIENT_CAPABILITIES))
+                        put("device_id", deviceUuid())
                     }
-                    webSocket.send(authPacket.toString())
-                    setState(RelayConnectionState.AUTHENTICATING)
+                    webSocket.send(hello.toString())
+                    AppLog.i("Relay", "v3.0 hello sent, waiting hello_ack")
                 }
             }
 
@@ -380,6 +399,13 @@ class RelayWebSocketClient {
                 mainHandler.post {
                     if (isStale()) return@post
                     AppLog.i("Relay", "ws closed code=$code reason=$reason")
+                    // v3.0: 发了 hello 却没收到 hello_ack 就被 4401 → 对方是 v2 旧服务端
+                    if (code == 4401 && !helloAckReceived) {
+                        listener?.onAppError(
+                            "PROTOCOL_MISMATCH",
+                            "服务端协议版本过旧（未响应 v3 hello），请将 relay_server 与 agent.py 升级到 v3.0"
+                        )
+                    }
                     listener?.onDisconnected("连接已断开: $reason ($code)")
                     // v2.3: 不可重试错误（鉴权失败/被封禁）绝不重连
                     if (!isExplicitDisconnect && !Backoff.isNonRetryableCloseCode(code)) {
@@ -438,6 +464,24 @@ class RelayWebSocketClient {
         reconnectRunnable = null
     }
 
+    /**
+     * v3.0: hello_ack 之后发送认证帧（原 onOpen 内联逻辑抽出）。
+     */
+    private fun sendAuthPacket() {
+        val ws = webSocket ?: return
+        // P0-1: 认证帧；v1.6: 携带 last_relay_seq，服务端补发断线期间的消息
+        val authPacket = JSONObject().apply {
+            put("type", "auth")
+            put("account_id", currentAccountId)
+            // v2.2.1-D: secret 绝不打日志（AppLog 脱敏亦会处理）
+            put("secret", currentSecret)
+            put("client_type", "mobile")
+            put("last_relay_seq", lastRelaySeq)
+        }
+        ws.send(authPacket.toString())
+        setState(RelayConnectionState.AUTHENTICATING)
+    }
+
     private fun parseIncomingMessage(ws: WebSocket, jsonText: String) {
         try {
             val json = JSONObject(jsonText)
@@ -455,6 +499,17 @@ class RelayWebSocketClient {
                 }
             }
             when (val type = json.optString("type")) {
+                // v3.0: 能力协商应答——记录服务端版本与能力，然后发 auth
+                "hello_ack" -> {
+                    helloAckReceived = true
+                    serverProtocolVersion = json.optInt("v", 0)
+                    serverCapabilities = json.optJSONArray("server_capabilities")
+                        ?.let { arr -> (0 until arr.length()).map { arr.optString(it) } }
+                        ?: emptyList()
+                    AppLog.i("Relay", "hello_ack v=$serverProtocolVersion caps=$serverCapabilities")
+                    sendAuthPacket()
+                    return
+                }
                 // v1.6 P0 断线恢复：服务端告知当前序号（重连后）
                 "seq_sync" -> {
                     serverSeq = json.optLong("server_seq", serverSeq)

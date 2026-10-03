@@ -24,6 +24,20 @@ logger = logging.getLogger("OpenCodeRelay")
 app = FastAPI(title="OpenCode Cloud Relay Server", version="1.1.0")
 
 # ==============================================================================
+# v3.0: 协议版本与能力协商
+# 客户端连接后先发 hello（可选），服务端回 hello_ack；之后再走 auth。
+# v2 客户端（无 hello）仍可直接 auth，服务端按旧逻辑处理。
+# ==============================================================================
+PROTOCOL_VERSION = 3
+SERVER_CAPABILITIES = [
+    "hello",            # hello/hello_ack 能力协商
+    "multi_desktop",    # 多 desktop 共存（按 device_id 区分）
+    "device_id_revoke", # 按 device_id 撤销
+    "room_buffer",      # 房间消息缓冲与断线补发
+    "pairing",          # 扫码配对
+]
+
+# ==============================================================================
 # B-8: 建房管理令牌（防房间抢注）
 # 若设置 RELAY_ADMIN_TOKEN，则 desktop 首次建房必须在 auth 消息中携带相符的
 # admin_token；未设置时保持旧行为（仅打警告日志），保证向后兼容。
@@ -289,6 +303,9 @@ class ConnectionManager:
             self.rooms[account_id] = {
                 "secret_hash": secret_hash,
                 "desktop": None,
+                # v3.0: 多 desktop 共存，按 device_id 区分（无 device_id 的旧客户端用 "legacy"）。
+                # "desktop" 保留为"主 desktop"（最近认证/活跃），旧单连接逻辑读它即可。
+                "desktops": {},
                 "mobiles": set(),
                 # v1.6 P0 断线恢复 + P1-6 三重限制缓冲
                 "msg_buffer": RoomBuffer(
@@ -324,7 +341,9 @@ class ConnectionManager:
         self.sessions[session.websocket] = session
 
         if session.client_type == "desktop":
-            old_desktop = room["desktop"]
+            # v3.0: 按 device_id 区分多 desktop；同 device_id 重连才顶替旧连接（旧单连接逻辑保留）
+            desk_key = getattr(session, "device_id", "") or "legacy"
+            old_desktop = room["desktops"].get(desk_key)
             if old_desktop and old_desktop.websocket != session.websocket:
                 # 只有携带了有效 secret 的新 desktop 才能顶替旧 desktop
                 try:
@@ -333,14 +352,16 @@ class ConnectionManager:
                     pass
                 if old_desktop.websocket in self.sessions:
                     del self.sessions[old_desktop.websocket]
+            room["desktops"][desk_key] = session
+            # 主 desktop = 最近认证的（mobile 消息路由目标）
             room["desktop"] = session
-            logger.info(f"Desktop successfully authenticated for room: {account_id}")
+            logger.info(f"Desktop successfully authenticated for room: {account_id} (device_id={desk_key}, desktops={len(room['desktops'])})")
             asyncio.create_task(self.broadcast_status(account_id, desktop_online=True))
         else:
             room["mobiles"].add(session)
             logger.info(f"Mobile successfully authenticated for room: {account_id} (Active mobiles: {len(room['mobiles'])})")
             # 即刻告知当前 desktop 是否在线
-            is_desktop_online = room["desktop"] is not None
+            is_desktop_online = bool(room.get("desktops"))
             asyncio.create_task(session.websocket.send_text(json.dumps({
                 "type": "system_status",
                 "desktop_online": is_desktop_online,
@@ -516,16 +537,24 @@ class ConnectionManager:
         if account_id in self.rooms:
             room = self.rooms[account_id]
             if session.client_type == "desktop":
-                if room["desktop"] == session:
-                    room["desktop"] = None
-                    logger.info(f"Desktop disconnected from room: {account_id}")
+                # v3.0: 按 device_id 移除
+                for k, v in list(room.get("desktops", {}).items()):
+                    if v == session:
+                        del room["desktops"][k]
+                        break
+                if room.get("desktop") == session:
+                    # 主 desktop 断开：推举另一个在线 desktop 为主
+                    remaining = list(room.get("desktops", {}).values())
+                    room["desktop"] = remaining[0] if remaining else None
+                    logger.info(f"Desktop disconnected from room: {account_id} (remaining={len(remaining)})")
+                if not room.get("desktops"):
                     asyncio.create_task(self.broadcast_status(account_id, desktop_online=False))
             else:
                 room["mobiles"].discard(session)
                 logger.info(f"Mobile disconnected from room: {account_id}")
 
             # 房间内无人时清理连接与缓冲；v2.2.1-B: 先把密钥落盘，设备密钥不随房间销毁丢失
-            if room["desktop"] is None and not room["mobiles"]:
+            if not room.get("desktops") and not room["mobiles"]:
                 self._save_state()
                 del self.rooms[account_id]
                 logger.info(f"Room {account_id} destroyed (all clients disconnected).")
@@ -858,6 +887,28 @@ async def websocket_endpoint(
         await websocket.close(code=1000, reason="Pairing done")
         return
 
+    # v3.0: hello 能力协商（auth 之前，可选）。v2 客户端直接发 auth，跳过此分支。
+    if msg_type == "hello":
+        client_v = auth_data.get("v", 0)
+        client_caps = auth_data.get("capabilities", [])
+        logger.info(f"v3.0 hello from {client_ip}: client_v={client_v} caps={client_caps}")
+        await websocket.send_text(json.dumps({
+            "type": "hello_ack",
+            "v": PROTOCOL_VERSION,
+            "server_capabilities": SERVER_CAPABILITIES,
+        }))
+        # 等待真正的 auth 帧
+        try:
+            auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
+            auth_data = json.loads(auth_raw)
+        except Exception:
+            await websocket.close(code=4401, reason="hello without auth")
+            return
+        msg_type = auth_data.get("type")
+        account_id = auth_data.get("account_id") or path_account_id
+        client_type = auth_data.get("client_type") or path_client_type
+        secret = auth_data.get("secret", "")
+
     if msg_type != "auth" or not account_id or client_type not in ["desktop", "mobile"] or not secret:
         logger.warning(f"Auth rejected from {client_ip}: missing required auth fields.")
         rate_limiter.record_auth_failure(client_ip)
@@ -869,6 +920,9 @@ async def websocket_endpoint(
         return
 
     session = ClientSession(websocket, client_type, account_id, client_ip)
+    # v3.0: desktop 在 auth 包中上报 device_id（多 desktop 区分；旧客户端无此字段则为 ""）
+    if client_type == "desktop":
+        session.device_id = str(auth_data.get("device_id", ""))[:64]
     # B-8: 透传 admin_token 供建房校验
     success, reason = manager.register_authenticated(session, secret, auth_data.get("admin_token", ""))
     if not success:
@@ -891,6 +945,9 @@ async def websocket_endpoint(
         "client_type": client_type,
         # v2.2.1-C: 序号纪元（可选字段，旧 App 忽略）
         "room_epoch": manager.rooms.get(account_id, {}).get("room_epoch", ""),
+        # v3.0: 协议版本与能力（可选字段，旧客户端忽略）
+        "v": PROTOCOL_VERSION,
+        "server_capabilities": SERVER_CAPABILITIES,
     }))
 
     # v1.6 P0 断线恢复：移动端携带 last_relay_seq 重连时，补发缓冲中缺失的消息

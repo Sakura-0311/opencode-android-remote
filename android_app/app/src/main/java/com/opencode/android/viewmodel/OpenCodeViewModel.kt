@@ -29,7 +29,14 @@ import com.opencode.android.network.ModelInfo
 import com.opencode.android.network.ProjectInfo
 import com.opencode.android.network.PairClaimResult
 import com.opencode.android.network.PairingClient
+import com.opencode.android.network.CloudTransport
 import com.opencode.android.network.RelayListener
+import com.opencode.android.network.RelayTransport
+import com.opencode.android.network.Transport
+import com.opencode.android.network.TransportFactory
+import com.opencode.android.network.TransportListener
+import com.opencode.android.network.TransportParams
+import com.opencode.android.util.AppLog
 import com.opencode.android.network.RelayConnectionState
 import com.opencode.android.network.RelayWebSocketClient
 import com.opencode.android.network.TunnelDiagnosticsHelper
@@ -51,6 +58,26 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     private val app = application as OpenCodeApp
     private val relayClient: RelayWebSocketClient = app.relayClient
     private val cloudClient: CloudApiClient = app.cloudClient
+
+    // v3.0: 传输抽象（ViewModel 仍是 RelayListener/CloudStreamListener，业务回调不变）
+    private val transportListener = object : TransportListener {
+        override fun onTransportStateChanged(connected: Boolean, detail: String) {
+            AppLog.i("Transport", "state: connected=$connected detail=$detail")
+        }
+
+        override fun onTransportError(code: String, message: String) {
+            _uiState.update { it.copy(appError = AppError(code, message)) }
+        }
+    }
+    private val relayTransport: Transport by lazy { RelayTransport(relayClient, this) }
+    private val cloudTransport: Transport by lazy { CloudTransport(cloudClient, this) }
+
+    /** v3.0: 按当前 appMode 选择传输（transport 切换的唯一决策点） */
+    fun activeTransport(): Transport =
+        TransportFactory.select(_uiState.value.appMode, relayTransport, cloudTransport)
+
+    /** v3.0: 关闭当前传输 */
+    fun disconnectTransport() = activeTransport().close()
 
     private val _uiState: MutableStateFlow<OpenCodeUiState>
 
@@ -407,7 +434,15 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             )
         }
 
-        relayClient.connect(trimmedRelay, trimmedAccount, trimmedSecret, this)
+        // v3.0: 走 Transport（connect/send/close 统一入口）
+        relayTransport.connect(
+            TransportParams(
+                relayUrl = trimmedRelay,
+                accountId = trimmedAccount,
+                secret = trimmedSecret
+            ),
+            transportListener
+        )
     }
 
     fun pairCloud(cloudUrl: String, apiKey: String, workspacePath: String) {

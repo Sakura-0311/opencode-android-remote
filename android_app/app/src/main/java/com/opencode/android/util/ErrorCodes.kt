@@ -28,6 +28,11 @@ object ErrorCodes {
             "断线期间错过的消息超出补发窗口。",
             "应用会自动请求全量同步；若持续出现请检查网络稳定性。"
         ),
+        "PROTOCOL_MISMATCH" to ErrorInfo(
+            "协议版本不匹配",
+            "客户端与服务端协议版本不一致（v3 需要配套的 relay/agent）。",
+            "将电脑端 agent.py 与 relay_server 一起升级到 v3.0 后再连接。"
+        ),
         "DESKTOP_OFFLINE" to ErrorInfo(
             "Desktop 不在线",
             "中继已连通，但电脑端 Agent 未上线。",
