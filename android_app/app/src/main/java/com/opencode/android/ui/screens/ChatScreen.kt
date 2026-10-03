@@ -60,7 +60,7 @@ fun ChatScreen(
     // v1.6 P0 多设备管理
     onRequestDeviceList: () -> Unit = {},
     onRevokeDevice: (String) -> Unit = {},
-    onRenameDevice: (String, String) -> Unit = {}
+    onRenameDevice: (String, String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -579,7 +579,6 @@ fun MessageBubbleWithHighlight(message: ChatMessage, appMode: AppMode, highlight
                 }
             }
         }
-    }
 
     // v1.6 P0 多设备管理对话框
     if (showDeviceManager) {
