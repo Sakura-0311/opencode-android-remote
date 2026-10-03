@@ -4,6 +4,8 @@
 
 基于 **Kotlin + Jetpack Compose** 构建，结合手机移动端的使用场景，提供**“电脑远程中继 (Desktop Relay)”**与**“云端工作区直连 (Cloud Hosted)”**双模支持。
 
+> 隐私说明：[PRIVACY.md](PRIVACY.md) —— 你的数据只保存在你自己的手机上，只发往你自己配置的服务器。
+
 ---
 
 ## ⚡ 3 分钟快速上手
