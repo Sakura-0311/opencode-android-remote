@@ -183,6 +183,40 @@ class RelayWebSocketClient {
         return "last_relay_seq_${urlHash}_${currentAccountId}_${deviceUuid()}"
     }
 
+    // v2.2.1-C: 序号纪元——与 lastRelaySeq 一起持久化，relay 重启（房间重建）时 seq 归零
+    @Volatile private var relayEpoch: String? = null
+    private fun epochKey(): String = seqKey() + "_epoch"
+
+    private fun loadPersistedEpoch() {
+        relayEpoch = seqPrefs?.getString(epochKey(), null)
+    }
+
+    /**
+     * 检查服务端下发的 room_epoch。返回 true 表示 epoch 发生变化（已重置 seq）。
+     * 旧 relay 不下发 epoch（空字符串）时保持旧行为。
+     */
+    private fun checkEpoch(json: org.json.JSONObject): Boolean {
+        val epoch = json.optString("room_epoch", "")
+        if (epoch.isBlank()) return false  // 旧 relay：无 epoch，保持旧行为
+        val known = relayEpoch
+        if (known == null) {
+            // 首次记录
+            relayEpoch = epoch
+            seqPrefs?.edit()?.putString(epochKey(), epoch)?.apply()
+            return false
+        }
+        if (known != epoch) {
+            relayEpoch = epoch
+            lastRelaySeq = 0L
+            seqPrefs?.edit()
+                ?.putString(epochKey(), epoch)
+                ?.putLong(seqKey(), 0L)
+                ?.apply()
+            return true
+        }
+        return false
+    }
+
     /**
      * P1-7: 本机稳定设备标识（首次生成后持久化），用于 seq 持久化隔离。
      * 非敏感，仅做命名空间隔离。
@@ -203,6 +237,7 @@ class RelayWebSocketClient {
 
     private fun loadPersistedSeq() {
         lastRelaySeq = seqPrefs?.getLong(seqKey(), 0L) ?: 0L
+        loadPersistedEpoch()  // v2.2.1-C
     }
 
     private fun persistSeq(seq: Long) {
@@ -335,6 +370,10 @@ class RelayWebSocketClient {
                 // v1.6 P0 断线恢复：服务端告知当前序号（重连后）
                 "seq_sync" -> {
                     serverSeq = json.optLong("server_seq", serverSeq)
+                    // v2.2.1-C: epoch 变化说明房间重建，seq 归零并提示重同步
+                    if (checkEpoch(json)) {
+                        listener?.onAppError("RESYNC_REQUIRED", "服务器已重启，消息序号已重置，正在重新同步。")
+                    }
                 }
                 // v1.6 P0: 缓冲已过期，明确告知需要重同步而非静默丢失
                 "resync_required" -> {
@@ -344,6 +383,10 @@ class RelayWebSocketClient {
                 // P0-1: 认证反馈
                 "auth_ok" -> {
                     setState(RelayConnectionState.AUTHENTICATED)
+                    // v2.2.1-C: auth_ok 也可能携带 epoch，先做检查（seq_sync 还会再确认）
+                    if (checkEpoch(json)) {
+                        listener?.onAppError("RESYNC_REQUIRED", "服务器已重启，消息序号已重置，正在重新同步。")
+                    }
                     listener?.onAuthenticated()
                 }
                 "auth_error" -> {

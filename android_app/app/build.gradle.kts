@@ -9,7 +9,8 @@ import java.util.Properties
 //   1) 环境变量 RELEASE_KEYSTORE_FILE / RELEASE_KEYSTORE_PASSWORD /
 //      RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD（CI 从 Secrets 注入）
 //   2) android_app/keystore.properties（本地开发，已 gitignore）
-//   缺失时降级为 debug 签名并打警告，保证 CI 不中断；该包不可对外分发。
+//   v2.2.1-D: 缺失时 assembleRelease 直接失败（fail-fast），不再静默降级为 debug 签名；
+//   本地调试请用 assembleDebug。
 val keystoreProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
@@ -22,8 +23,18 @@ val releaseKeyAlias = secret("keyAlias", "RELEASE_KEY_ALIAS")
 val releaseKeyPass = secret("keyPassword", "RELEASE_KEY_PASSWORD")
 val hasReleaseSigning = listOf(releaseStorePath, releaseStorePass, releaseKeyAlias, releaseKeyPass)
     .all { !it.isNullOrBlank() }
-if (!hasReleaseSigning) {
-    logger.warn("[N-1] 未配置 release 签名密钥，本次构建的 release 包将使用 debug 签名，不可对外分发")
+// v2.2.1-D: release 构建 fail-fast——缺密钥时直接失败，不再静默用 debug 签名
+tasks.named("assembleRelease") {
+    doFirst {
+        if (!hasReleaseSigning) {
+            throw GradleException(
+                "v2.2.1-D: 缺少 release 签名密钥，禁止构建 release 包。" +
+                "请配置环境变量 RELEASE_KEYSTORE_FILE/RELEASE_KEYSTORE_PASSWORD/" +
+                "RELEASE_KEY_ALIAS/RELEASE_KEY_PASSWORD，或 android_app/keystore.properties；" +
+                "本地调试请用 assembleDebug。"
+            )
+        }
+    }
 }
 
 android {
@@ -31,7 +42,7 @@ android {
     compileSdk = 34
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000）
-    val appVersionName = "2.2.0"
+    val appVersionName = "2.2.1"
     val appVersionCode = appVersionName.split(".").let { p ->
         p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
     }
@@ -67,9 +78,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // N-1: 有密钥才用 release 签名，否则降级 debug 签名（CI 可用，不可分发）
-            signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release")
-            else signingConfigs.getByName("debug")
+            // v2.2.1-D: 缺密钥时 assembleRelease 在 doFirst 即失败，不再降级为 debug 签名
+            signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release") else null
         }
     }
     compileOptions {

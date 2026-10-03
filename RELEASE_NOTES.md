@@ -1,3 +1,21 @@
+# OpenCode Android Remote - Release v2.2.1（热修）
+
+> 基于 v2.2 源码的代码审计修订（P0 先修，不加新功能）。v2.x 之间可覆盖升级（签名不变）。
+
+## P0 修复
+
+- **A 文件沙盒**（`desktop_agent/agent.py`）：文件浏览器限制在 agent 启动目录（OpenCode 项目目录）内，可用 `AGENT_FILE_ROOTS` 环境变量放宽（用时打印警告）；`realpath` 解析防 `..` 与符号链接绕行；`.env`、`id_rsa*`、`*.pem`、`.opencode_secret` 等敏感文件即使在根内也拒绝，返回 `PATH_NOT_ALLOWED`。主 Secret 默认位置迁至 `~/.config/opencode-remote/`（旧位置自动迁移）。
+- **B relay 设备密钥持久化**（`relay_server/server.py`）：`device_secrets` 与主密钥哈希落盘到 `~/.config/opencode-remote/relay_state.json`（0600，原子写，schema_version=1）；房间销毁/relay 重启后，桌面用主密钥重建房间时自动恢复设备密钥，手机无需重新配对。
+- **C 序号纪元**：房间创建时生成随机 `room_epoch`，随 `auth_ok`/`seq_sync` 下发（可选字段）；App 检测到 epoch 变化时 seq 归零并提示重同步，relay 重启后不再静默丢消息。
+- **D 发布签名 fail-fast**：无 release 密钥时 `assembleRelease` 直接失败，不再静默降级为 debug 签名；CI 上 PR 只构建 debug，`v*` tag 才构建 release（缺 Secret 即失败）；新增无密钥 fail-fast 验证 job。
+- **E crash-report 加固**：默认关闭（`RELAY_ENABLE_CRASH_REPORT=1` 才开）；请求体上限 128KB（先查 Content-Length 再流式限长读）；按 IP 限流（每小时 20 次）；文件名只保留 `[A-Za-z0-9-]`；目录配额（500 文件 / 100MB，超了删最旧）。
+
+## 兼容性
+
+详见 `docs/COMPATIBILITY.md`。release 签名指纹（SHA-256）：`D9:21:C0:EB:AE:4A:DD:89:73:0B:BD:E7:49:1F:27:FD:26:41:95:0C:E1:19:1F:30:53:A3:E7:66:00:9E:9E:78`，applicationId `com.opencode.android`，两者永不更改。
+
+---
+
 # OpenCode Android Remote - Release v1.5.0 (GitHub Production Ready)
 
 本版本为面向生产与公开发布的里程碑版本，完成了深度漏洞加固与架构重塑，彻底解决旧版本的契约失配与安全隐患，达到 GitHub 开源发布标准。

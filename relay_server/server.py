@@ -172,6 +172,68 @@ class ConnectionManager:
         # v1.6 P0 扫码配对：pairing_token -> 配对会话
         self.pairing_sessions: Dict[str, dict] = {}
         self.pairing_ttl = int(os.getenv("RELAY_PAIRING_TTL", "120"))
+        # v2.2.1-B: 设备密钥持久化（房间销毁/relay 重启后仍可用设备密钥重连）
+        self.state_file = os.getenv(
+            "RELAY_STATE_FILE",
+            os.path.expanduser("~/.config/opencode-remote/relay_state.json"),
+        )
+        self._saved_state = self._load_state()
+
+    # ---------------- v2.2.1-B: 设备密钥持久化 ----------------
+    STATE_SCHEMA_VERSION = 1
+
+    def _load_state(self) -> dict:
+        """从磁盘加载已保存的房间密钥状态。返回 {account_id: {...}}。"""
+        try:
+            if not os.path.exists(self.state_file):
+                return {}
+            with open(self.state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict) or data.get("schema_version") != self.STATE_SCHEMA_VERSION:
+                logger.warning(f"[v2.2.1-B] relay_state schema 不匹配，已忽略: {self.state_file}")
+                return {}
+            rooms = data.get("rooms", {})
+            return rooms if isinstance(rooms, dict) else {}
+        except Exception as e:
+            logger.warning(f"[v2.2.1-B] 加载 relay_state 失败: {e}")
+            return {}
+
+    def _save_state(self) -> None:
+        """把内存中的 device_secrets/secret_hash 与已保存的合并后原子写入磁盘（0600）。"""
+        try:
+            merged = dict(self._saved_state)
+            for account_id, room in self.rooms.items():
+                merged[account_id] = {
+                    "secret_hash": room.get("secret_hash", ""),
+                    "device_secrets": room.get("device_secrets", {}),
+                    "updated_at": time.time(),
+                }
+            data = {"schema_version": self.STATE_SCHEMA_VERSION, "rooms": merged}
+            d = os.path.dirname(self.state_file)
+            if d:
+                os.makedirs(d, mode=0o700, exist_ok=True)
+            tmp = self.state_file + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, self.state_file)
+            self._saved_state = merged
+        except Exception as e:
+            logger.warning(f"[v2.2.1-B] 保存 relay_state 失败: {e}")
+
+    def _restore_room_secrets(self, account_id: str, room: dict, secret_hash: str) -> None:
+        """房间重建时从磁盘恢复 device_secrets（仅当主密钥哈希一致时）。"""
+        saved = self._saved_state.get(account_id)
+        if not saved:
+            return
+        if not hmac.compare_digest(saved.get("secret_hash", ""), secret_hash):
+            logger.warning(f"[v2.2.1-B] room {account_id} 主密钥已变更，旧设备密钥不恢复")
+            return
+        restored = saved.get("device_secrets") or {}
+        if restored:
+            room["device_secrets"] = dict(restored)
+            logger.info(f"[v2.2.1-B] room {account_id} 恢复 {len(restored)} 个设备密钥")
+    # ---------------- v2.2.1-B 结束 ----------------
 
     def get_session(self, ws: WebSocket) -> Optional[ClientSession]:
         return self.sessions.get(ws)
@@ -206,9 +268,14 @@ class ConnectionManager:
                     max_bytes=self.room_buffer_max_bytes,
                 ),
                 "next_seq": 1,
+                # v2.2.1-C: 序号纪元——房间重建时序号归零，客户端用 epoch 区分
+                "room_epoch": secrets.token_hex(8),
                 # v1.6 P0 扫码配对：secret_hash -> {device_name, created_at}
                 "device_secrets": {},
             }
+            # v2.2.1-B: 从磁盘恢复该房间的设备密钥（主密钥一致时）
+            self._restore_room_secrets(account_id, self.rooms[account_id], secret_hash)
+            self._save_state()
             logger.info(f"New room created: {account_id} by desktop.")
 
         room = self.rooms[account_id]
@@ -304,6 +371,7 @@ class ConnectionManager:
             "last_active": now_ts,
         }
         logger.info(f"v1.6: device '{device_name}' paired to room {account_id}")
+        self._save_state()  # v2.2.1-B: 新配对设备立即落盘
         return True, {
             "device_secret": device_secret,
             "account_id": account_id,
@@ -320,6 +388,7 @@ class ConnectionManager:
             if info.get("device_name") == device_name:
                 del dev_secrets[h]
                 logger.info(f"v1.6: device '{device_name}' revoked from room {account_id}")
+                self._save_state()  # v2.2.1-B: 撤销后落盘
                 return True
         return False
 
@@ -332,6 +401,7 @@ class ConnectionManager:
             if info.get("device_name") == old_name:
                 info["device_name"] = new_name
                 logger.info(f"v1.6: device renamed '{old_name}' -> '{new_name}' in {account_id}")
+                self._save_state()  # v2.2.1-B: 重命名后落盘
                 return True
         return False
 
@@ -375,7 +445,6 @@ class ConnectionManager:
                    if ps["claimed"] or now > ps["expires_at"]]
         for t in expired:
             del self.pairing_sessions[t]
-
     def disconnect(self, ws: WebSocket):
         session = self.sessions.pop(ws, None)
         if not session:
@@ -393,8 +462,9 @@ class ConnectionManager:
                 room["mobiles"].discard(session)
                 logger.info(f"Mobile disconnected from room: {account_id}")
 
-            # 房间内无人时，保留房间配置或在无活跃连接时清理
+            # 房间内无人时清理连接与缓冲；v2.2.1-B: 先把密钥落盘，设备密钥不随房间销毁丢失
             if room["desktop"] is None and not room["mobiles"]:
+                self._save_state()
                 del self.rooms[account_id]
                 logger.info(f"Room {account_id} destroyed (all clients disconnected).")
 
@@ -514,16 +584,81 @@ def index():
     }
 
 # 对外分发：ACRA 崩溃上报接收端（仅收脱敏字段，存本地文件）
+# v2.2.1-E 加固：默认关闭（RELAY_ENABLE_CRASH_REPORT=1 才开）、请求体上限、
+# 按 IP 限流、文件名清洗、目录配额
 CRASH_REPORT_DIR = os.getenv("RELAY_CRASH_REPORT_DIR", "crash_reports")
+CRASH_REPORT_ENABLED = os.getenv("RELAY_ENABLE_CRASH_REPORT", "0") == "1"
+CRASH_REPORT_MAX_BYTES = int(os.getenv("RELAY_CRASH_REPORT_MAX_BYTES", str(128 * 1024)))
+CRASH_REPORT_MAX_FILES = int(os.getenv("RELAY_CRASH_REPORT_MAX_FILES", "500"))
+CRASH_REPORT_MAX_TOTAL_BYTES = int(os.getenv("RELAY_CRASH_REPORT_MAX_TOTAL_BYTES", str(100 * 1024 * 1024)))
+CRASH_REPORT_MAX_PER_HOUR = int(os.getenv("RELAY_CRASH_REPORT_MAX_PER_HOUR", "20"))
+_crash_report_hits: Dict[str, list] = {}  # ip -> [timestamps]
+
+def _crash_report_allowed(ip: str) -> bool:
+    now = time.time()
+    hits = _crash_report_hits.get(ip, [])
+    hits = [t for t in hits if now - t < 3600]
+    _crash_report_hits[ip] = hits
+    if len(hits) >= CRASH_REPORT_MAX_PER_HOUR:
+        return False
+    hits.append(now)
+    return True
+
+def _sanitize_report_id(rid: str) -> str:
+    # v2.2.1-E: 文件名只保留 [A-Za-z0-9-]，防路径穿越
+    cleaned = "".join(c for c in str(rid) if c.isascii() and (c.isalnum() or c == "-"))
+    return cleaned[:32] or "unknown"
+
+def _enforce_crash_dir_quota() -> None:
+    # v2.2.1-E: 目录文件数/总大小上限，超了删最旧的
+    try:
+        files = []
+        for name in os.listdir(CRASH_REPORT_DIR):
+            fp = os.path.join(CRASH_REPORT_DIR, name)
+            if os.path.isfile(fp) and name.startswith("crash-") and name.endswith(".json"):
+                st = os.stat(fp)
+                files.append((st.st_mtime, st.st_size, fp))
+        files.sort()
+        total = sum(s for _, s, _ in files)
+        while (len(files) > CRASH_REPORT_MAX_FILES or total > CRASH_REPORT_MAX_TOTAL_BYTES) and files:
+            _, s, fp = files.pop(0)
+            try:
+                os.remove(fp)
+                total -= s
+                logger.info(f"[v2.2.1-E] crash report quota: removed old {fp}")
+            except OSError:
+                pass
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"[v2.2.1-E] quota enforce failed: {e}")
 
 @app.post("/api/crash-report")
 async def receive_crash_report(request: Request):
     """
     接收 Android 端 ACRA 上报的崩溃报告（JSON）。
     只保留脱敏字段，存入本地文件，不转发、不外传。
+    v2.2.1-E: 默认关闭；请求体上限 128KB；按 IP 限流；文件名清洗；目录配额。
     """
+    if not CRASH_REPORT_ENABLED:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "disabled"})
+    client_ip = get_client_ip(request)
+    if not _crash_report_allowed(client_ip):
+        return JSONResponse(status_code=429, content={"ok": False, "error": "rate limited"})
+    # 读取前先检查 Content-Length，再流式限长读取
     try:
-        data = await request.json()
+        clen = int(request.headers.get("content-length", "0") or 0)
+    except ValueError:
+        clen = 0
+    if clen > CRASH_REPORT_MAX_BYTES:
+        return JSONResponse(status_code=413, content={"ok": False, "error": "payload too large"})
+    try:
+        body = b""
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > CRASH_REPORT_MAX_BYTES:
+                return JSONResponse(status_code=413, content={"ok": False, "error": "payload too large"})
+        data = json.loads(body.decode("utf-8"))
     except Exception:
         return JSONResponse(status_code=400, content={"ok": False, "error": "invalid json"})
     if not isinstance(data, dict):
@@ -541,10 +676,11 @@ async def receive_crash_report(request: Request):
     try:
         os.makedirs(CRASH_REPORT_DIR, exist_ok=True)
         ts = time.strftime("%Y%m%d-%H%M%S")
-        rid = str(report.get("REPORT_ID", "unknown"))[:32]
+        rid = _sanitize_report_id(report.get("REPORT_ID", "unknown"))
         fname = os.path.join(CRASH_REPORT_DIR, f"crash-{ts}-{rid}.json")
         with open(fname, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
+        _enforce_crash_dir_quota()
         logger.warning(f"Crash report saved: {fname} "
                        f"(app {report.get('APP_VERSION_NAME')}, "
                        f"{report.get('PHONE_MODEL')}, Android {report.get('ANDROID_VERSION')})")
@@ -654,7 +790,9 @@ async def websocket_endpoint(
     await websocket.send_text(json.dumps({
         "type": "auth_ok",
         "account_id": account_id,
-        "client_type": client_type
+        "client_type": client_type,
+        # v2.2.1-C: 序号纪元（可选字段，旧 App 忽略）
+        "room_epoch": manager.rooms.get(account_id, {}).get("room_epoch", ""),
     }))
 
     # v1.6 P0 断线恢复：移动端携带 last_relay_seq 重连时，补发缓冲中缺失的消息
@@ -684,7 +822,9 @@ async def websocket_endpoint(
         try:
             await websocket.send_text(json.dumps({
                 "type": "seq_sync",
-                "server_seq": manager.rooms.get(account_id, {}).get("next_seq", 1) - 1
+                "server_seq": manager.rooms.get(account_id, {}).get("next_seq", 1) - 1,
+                # v2.2.1-C: 序号纪元（可选字段）
+                "room_epoch": manager.rooms.get(account_id, {}).get("room_epoch", ""),
             }))
         except Exception:
             pass

@@ -38,13 +38,48 @@ RELAY_ADMIN_TOKEN = os.getenv("RELAY_ADMIN_TOKEN", "")  # B-8: 建房管理令�
 OPENCODE_API_URL = os.getenv("OPENCODE_API_URL", DEFAULT_OPENCODE_BASE_URL)
 OPENCODE_PASSWORD = os.getenv("OPENCODE_SERVER_PASSWORD", None)
 DEFAULT_ACCOUNT_ID = os.getenv("OPENCODE_ACCOUNT_ID", "user_dev_001")
-SECRET_FILE_PATH = os.getenv("OPENCODE_SECRET_FILE", ".opencode_secret")
+# v2.2.1-A: 主 Secret 默认移到 ~/.config/opencode-remote/（目录 0700 / 文件 0600），
+# 避免文件浏览器（即使沙盒被绕过）轻易读到。OPENCODE_SECRET_FILE 仍可覆盖。
+_DEFAULT_SECRET_DIR = os.path.join(os.path.expanduser("~"), ".config", "opencode-remote")
+_DEFAULT_SECRET_PATH = os.path.join(_DEFAULT_SECRET_DIR, ".opencode_secret")
+_LEGACY_SECRET_PATH = os.path.abspath(".opencode_secret")
+SECRET_FILE_PATH = os.getenv("OPENCODE_SECRET_FILE", _DEFAULT_SECRET_PATH)
+
+def _ensure_secret_dir():
+    try:
+        os.makedirs(_DEFAULT_SECRET_DIR, mode=0o700, exist_ok=True)
+        os.chmod(_DEFAULT_SECRET_DIR, 0o700)
+    except Exception:
+        pass
+
+def _migrate_legacy_secret() -> None:
+    """旧位置（启动目录 .opencode_secret）有有效 secret 且新位置没有时，迁移过去。"""
+    if SECRET_FILE_PATH != _DEFAULT_SECRET_PATH:
+        return  # 用户自定义了位置，不碰
+    if os.path.exists(_DEFAULT_SECRET_PATH):
+        return
+    if not os.path.exists(_LEGACY_SECRET_PATH):
+        return
+    try:
+        with open(_LEGACY_SECRET_PATH, "r", encoding="utf-8") as f:
+            old_key = f.read().strip()
+        if old_key and len(old_key) >= 16:
+            _ensure_secret_dir()
+            fd = os.open(_DEFAULT_SECRET_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IRUSR | stat.S_IWUSR)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(old_key)
+            logger.info("[v2.2.1-A] 主 Secret 已从旧位置迁移到 %s", _DEFAULT_SECRET_PATH)
+    except Exception as e:
+        logger.warning(f"[v2.2.1-A] 迁移旧 Secret 失败: {e}")
 
 # ==============================================================================
 # P0-1: 本地密钥管理（0600 受限权限，内存保管，绝不打日志）
 # ==============================================================================
 def get_or_create_secret() -> str:
     """获取或初始化持久化配对 Secret，确保权限仅当前用户可读写 (0600)"""
+    if SECRET_FILE_PATH == _DEFAULT_SECRET_PATH:
+        _ensure_secret_dir()
+        _migrate_legacy_secret()
     if os.path.exists(SECRET_FILE_PATH):
         try:
             with open(SECRET_FILE_PATH, "r", encoding="utf-8") as f:
@@ -370,12 +405,70 @@ async def listen_opencode_events_stream(
 # ==============================================================================
 # ==============================================================================
 # P2-12: 文件浏览器辅助函数
+# v2.2.1-A 文件沙盒：路径白名单 + 敏感文件黑名单
 # ==============================================================================
 FILE_READ_MAX_BYTES = int(os.getenv("AGENT_FILE_READ_MAX_BYTES", str(200 * 1024)))
 
+_file_roots_cache = None
+def _get_file_roots() -> list:
+    """允许访问的根目录列表。默认 = agent 启动时的工作目录（OpenCode 项目目录）。
+    可用 AGENT_FILE_ROOTS 环境变量覆盖（os.pathsep 分隔多个），用时打印一次警告。"""
+    global _file_roots_cache
+    if _file_roots_cache is not None:
+        return _file_roots_cache
+    env_roots = os.getenv("AGENT_FILE_ROOTS", "").strip()
+    if env_roots:
+        roots = [os.path.realpath(os.path.abspath(os.path.expanduser(r)))
+                 for r in env_roots.split(os.pathsep) if r.strip()]
+        logger.warning("[v2.2.1-A] AGENT_FILE_ROOTS 兜底开关已启用，文件浏览器根目录被放宽: %s", roots)
+    else:
+        roots = [os.path.realpath(os.getcwd())]
+    _file_roots_cache = [r for r in roots if os.path.isdir(r)] or [os.path.realpath(os.getcwd())]
+    return _file_roots_cache
+
+# 敏感文件名黑名单（即使在允许根内也拒绝；fnmatch 匹配 basename）
+SENSITIVE_FILENAME_PATTERNS = [
+    ".opencode_secret", ".env", ".env.*", "id_rsa*", "id_ed25519*", "id_ecdsa*",
+    "*.pem", "*.key", "*.p12", "*.pfx", "credentials.json", "secrets.*",
+    ".netrc", "_netrc", ".aws", ".gnupg",
+]
+# 敏感相对路径后缀黑名单
+SENSITIVE_PATH_SUFFIXES = [".git/config", ".ssh/authorized_keys", ".ssh/known_hosts"]
+
+def _resolve_sandboxed_path(path: str):
+    """解析并校验路径。返回 (real_path, None)；失败返回 (None, "PATH_NOT_ALLOWED: 原因")。
+    防 .. 与符号链接绕行（realpath 后做 commonpath 包含判断）。"""
+    import fnmatch
+    expanded = os.path.expanduser(path or "")
+    if not expanded:
+        return None, "PATH_NOT_ALLOWED: 空路径"
+    real = os.path.realpath(os.path.abspath(expanded))
+    roots = _get_file_roots()
+    try:
+        allowed = any(os.path.commonpath([real, root]) == root for root in roots)
+    except ValueError:
+        allowed = False
+    if not allowed:
+        return None, f"PATH_NOT_ALLOWED: 路径超出允许范围（仅可访问: {', '.join(roots)}）"
+    base = os.path.basename(real)
+    for pat in SENSITIVE_FILENAME_PATTERNS:
+        if fnmatch.fnmatch(base, pat):
+            return None, f"PATH_NOT_ALLOWED: 敏感文件禁止访问 ({base})"
+    rel_posix = real.replace(os.sep, "/")
+    for suf in SENSITIVE_PATH_SUFFIXES:
+        if rel_posix.endswith("/" + suf) or rel_posix.endswith(suf):
+            return None, f"PATH_NOT_ALLOWED: 敏感路径禁止访问 ({suf})"
+    return real, None
+
+class PathNotAllowedError(PermissionError):
+    pass
+
 def _list_dir_entries(path: str) -> list:
-    """列出目录条目：按目录优先、名称排序。"""
-    abs_path = os.path.abspath(os.path.expanduser(path))
+    """列出目录条目：按目录优先、名称排序（沙盒校验在前）。"""
+    real_path, err = _resolve_sandboxed_path(path)
+    if err:
+        raise PathNotAllowedError(err)
+    abs_path = real_path
     entries = []
     with os.scandir(abs_path) as it:
         for entry in it:
@@ -395,7 +488,10 @@ def _list_dir_entries(path: str) -> list:
 
 def _read_text_file(path: str) -> tuple:
     """读取文本文件；二进制或超大文件拒绝/截断。返回 (content, truncated)。"""
-    abs_path = os.path.abspath(os.path.expanduser(path))
+    real_path, err = _resolve_sandboxed_path(path)
+    if err:
+        raise PathNotAllowedError(err)
+    abs_path = real_path
     if not os.path.isfile(abs_path):
         raise FileNotFoundError(f"不是文件: {abs_path}")
     size = os.path.getsize(abs_path)
@@ -646,16 +742,25 @@ async def handle_mobile_message(
         else:
             logger.warning(f"respond_to_permission failed for {call_id}, keeping record for retry")
 
-    # P2-12: 文件浏览器——列目录
+    # P2-12: 文件浏览器——列目录（v2.2.1-A 沙盒）
     elif action == "file_list":
-        req_path = payload.get("path") or os.path.expanduser("~")
+        req_path = payload.get("path") or _get_file_roots()[0]
         try:
             entries = _list_dir_entries(req_path)
             await ws_relay.send(json.dumps({
                 "type": "file_list_result",
                 "req_id": req_id,
-                "path": os.path.abspath(req_path),
-                "entries": entries
+                "path": os.path.realpath(os.path.abspath(os.path.expanduser(req_path))),
+                "entries": entries,
+                "roots": _get_file_roots(),
+            }))
+        except PathNotAllowedError as e:
+            logger.warning(f"file_list blocked (sandbox): {req_path}")
+            await ws_relay.send(json.dumps({
+                "type": "error",
+                "code": "PATH_NOT_ALLOWED",
+                "req_id": req_id,
+                "message": str(e)
             }))
         except Exception as e:
             logger.warning(f"file_list failed for {req_path}: {e}")
@@ -666,7 +771,7 @@ async def handle_mobile_message(
                 "message": f"读取目录失败: {e}"
             }))
 
-    # P2-12: 文件浏览器——读文件（文本，大小上限 200KB，二进制拒绝）
+    # P2-12: 文件浏览器——读文件（v2.2.1-A 沙盒；文本，大小上限，二进制拒绝）
     elif action == "file_read":
         req_path = payload.get("path", "")
         try:
@@ -674,9 +779,17 @@ async def handle_mobile_message(
             await ws_relay.send(json.dumps({
                 "type": "file_read_result",
                 "req_id": req_id,
-                "path": os.path.abspath(req_path),
+                "path": os.path.realpath(os.path.abspath(os.path.expanduser(req_path))),
                 "content": content,
                 "truncated": truncated
+            }))
+        except PathNotAllowedError as e:
+            logger.warning(f"file_read blocked (sandbox): {req_path}")
+            await ws_relay.send(json.dumps({
+                "type": "error",
+                "code": "PATH_NOT_ALLOWED",
+                "req_id": req_id,
+                "message": str(e)
             }))
         except Exception as e:
             logger.warning(f"file_read failed for {req_path}: {e}")
