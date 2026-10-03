@@ -565,7 +565,104 @@ async def run_desktop_agent(account_id: str, secret: str, relay_url: str):
                 logger.error(f"Unexpected desktop agent error: {e}. Retrying in 5s...")
                 await asyncio.sleep(5.0)
 
+async def run_pairing_flow(account_id: str, secret: str, relay_url: str):
+    """
+    v1.6 P0 一键扫码配对：
+    向 Relay 申请一次性配对码，在终端显示二维码，手机扫码后完成设备授权。
+    二维码中不包含长期 Secret，仅含短期一次性 pairing_token。
+    """
+    import socket
+    desktop_name = socket.gethostname()
+
+    base_ws_url = relay_url.rstrip("/")
+    ws_endpoint = base_ws_url if base_ws_url.endswith("/desktop") else f"{base_ws_url}/ws/{account_id}/desktop"
+
+    print("\n" + "=" * 60)
+    print("  OpenCode Remote v1.6 — 一键扫码配对")
+    print("=" * 60)
+
+    try:
+        async with websockets.connect(ws_endpoint, ping_interval=20, ping_timeout=10) as ws:
+            auth_message = {"type": "auth", "account_id": account_id,
+                            "secret": secret, "client_type": "desktop"}
+            if RELAY_ADMIN_TOKEN:
+                auth_message["admin_token"] = RELAY_ADMIN_TOKEN
+            await ws.send(json.dumps(auth_message))
+            auth_resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10.0))
+            if auth_resp.get("type") == "auth_error":
+                print(f"  ✘ Relay 认证失败: {auth_resp.get('message')}")
+                return
+
+            # 申请一次性配对码
+            await ws.send(json.dumps({
+                "type": "create_pairing",
+                "desktop_name": desktop_name,
+            }))
+            resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10.0))
+            if resp.get("type") != "pairing_created":
+                print(f"  ✘ 配对码申请失败: {resp.get('error', resp)}")
+                return
+
+            token = resp["pairing_token"]
+            ttl = resp.get("ttl_seconds", 120)
+            # 二维码内容：仅含中继地址、房间号、一次性 token，不含长期 Secret
+            import urllib.parse
+            qr_payload = (
+                "opencode-remote://pair?"
+                + urllib.parse.urlencode({
+                    "relay": relay_url,
+                    "account": account_id,
+                    "token": token,
+                    "name": desktop_name,
+                })
+            )
+            print(f"\n  电脑: {desktop_name}   有效期: {ttl} 秒（一次性）\n")
+            _print_qr(qr_payload)
+            print(f"\n  配对链接（也可手动输入）:\n  {qr_payload}\n")
+            print("  请在手机 App 中扫描上方二维码，等待配对确认…\n")
+
+            # 等待配对完成通知
+            try:
+                while True:
+                    msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=float(ttl + 10)))
+                    if msg.get("type") == "device_paired":
+                        print(f"\n  ✔ 配对成功！新设备：{msg.get('device_name')}")
+                        print("  该设备已获得独立密钥，可随时在桌面端撤销。")
+                        break
+            except asyncio.TimeoutError:
+                print("\n  ✘ 配对码已过期，请重新运行配对。")
+    except Exception as e:
+        print(f"  ✘ 配对失败: {e}")
+
+
+def _print_qr(payload: str):
+    """终端显示二维码；未安装 qrcode 库时降级为纯文本提示。"""
+    try:
+        import qrcode
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(payload)
+        qr.make()
+        # 反色块绘制，终端可扫
+        matrix = qr.get_matrix()
+        for row in matrix:
+            print("  " + "".join("██" if c else "  " for c in row))
+    except ImportError:
+        print("  [提示] 安装 qrcode 库可在终端直接显示二维码：pip install qrcode")
+        print("  当前请复制上方配对链接到手机，或在 App 中手动输入配对码。")
+
+
 def main():
+    # v1.6: pair 子命令用于一键扫码配对
+    if len(sys.argv) > 1 and sys.argv[1] == "pair":
+        account_id = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_ACCOUNT_ID
+        relay_url = sys.argv[3] if len(sys.argv) > 3 else RELAY_SERVER_URL
+        secret = get_or_create_secret()
+        try:
+            asyncio.run(run_pairing_flow(account_id, secret, relay_url))
+        except KeyboardInterrupt:
+            print("\n配对已取消。")
+        return
+
     account_id = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ACCOUNT_ID
     relay_url = sys.argv[2] if len(sys.argv) > 2 else RELAY_SERVER_URL
     secret = get_or_create_secret()

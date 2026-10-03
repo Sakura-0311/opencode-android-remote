@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import sys
 import time
 from collections import deque
@@ -120,12 +121,16 @@ class ConnectionManager:
         #   "mobiles": Set[ClientSession],
         #   "msg_buffer": deque,  # v1.6 P0 断线恢复：房间消息环形缓冲
         #   "next_seq": int,      # v1.6: 下一条消息序号
+        #   "device_secrets": Dict[str, dict],  # v1.6 P0 扫码配对：设备密钥
         # }
         self.rooms: Dict[str, dict] = {}
         # websocket -> ClientSession
         self.sessions: Dict[WebSocket, ClientSession] = {}
         # v1.6: 每个房间保留最近 N 条下行消息，供移动端断线重连补发
         self.room_buffer_size = int(os.getenv("RELAY_ROOM_BUFFER_SIZE", "200"))
+        # v1.6 P0 扫码配对：pairing_token -> 配对会话
+        self.pairing_sessions: Dict[str, dict] = {}
+        self.pairing_ttl = int(os.getenv("RELAY_PAIRING_TTL", "120"))
 
     def get_session(self, ws: WebSocket) -> Optional[ClientSession]:
         return self.sessions.get(ws)
@@ -156,14 +161,21 @@ class ConnectionManager:
                 # v1.6 P0 断线恢复
                 "msg_buffer": deque(maxlen=self.room_buffer_size),
                 "next_seq": 1,
+                # v1.6 P0 扫码配对：secret_hash -> {device_name, created_at}
+                "device_secrets": {},
             }
             logger.info(f"New room created: {account_id} by desktop.")
 
         room = self.rooms[account_id]
 
-        # 密码比对
-        if not hmac.compare_digest(room["secret_hash"], secret_hash):
+        # 密码比对：主密钥或已配对的设备密钥均可
+        # v1.6 P0 扫码配对：设备密钥与具体设备绑定
+        is_master = hmac.compare_digest(room["secret_hash"], secret_hash)
+        device_info = None if is_master else room.get("device_secrets", {}).get(secret_hash)
+        if not is_master and not device_info:
             return False, "Invalid secret for account_id."
+        if device_info:
+            session.device_name = device_info.get("device_name", "unknown")
 
         session.is_authenticated = True
         self.sessions[session.websocket] = session
@@ -193,6 +205,94 @@ class ConnectionManager:
             })))
 
         return True, "OK"
+
+    # ==========================================================================
+    # v1.6 P0 扫码配对
+    # ==========================================================================
+    def create_pairing(self, account_id: str, desktop_name: str) -> Tuple[bool, dict]:
+        """
+        桌面端创建一次性配对会话。
+        返回的 pairing_token 有效期短（默认 120s）、一次性使用，
+        二维码中不包含长期 Secret。
+        """
+        self._cleanup_expired_pairings()
+        if account_id not in self.rooms:
+            return False, {"error": "Room does not exist."}
+        token = secrets.token_urlsafe(24)
+        now = time.time()
+        self.pairing_sessions[token] = {
+            "account_id": account_id,
+            "desktop_name": desktop_name or "Desktop",
+            "created_at": now,
+            "expires_at": now + self.pairing_ttl,
+            "claimed": False,
+        }
+        logger.info(f"v1.6: pairing session created for room {account_id} (ttl={self.pairing_ttl}s)")
+        return True, {
+            "pairing_token": token,
+            "expires_at": now + self.pairing_ttl,
+            "ttl_seconds": self.pairing_ttl,
+        }
+
+    def claim_pairing(self, account_id: str, pairing_token: str, device_name: str) -> Tuple[bool, dict]:
+        """
+        移动端凭配对码认领，成功后签发设备专用密钥。
+        设备密钥与具体设备绑定，避免一个 Secret 无限复用。
+        """
+        self._cleanup_expired_pairings()
+        ps = self.pairing_sessions.get(pairing_token)
+        if not ps or ps["claimed"] or ps["account_id"] != account_id:
+            return False, {"error": "Invalid or expired pairing code."}
+        if time.time() > ps["expires_at"]:
+            del self.pairing_sessions[pairing_token]
+            return False, {"error": "Pairing code expired."}
+        room = self.rooms.get(account_id)
+        if not room:
+            return False, {"error": "Room does not exist."}
+        ps["claimed"] = True
+        device_secret = secrets.token_urlsafe(32)
+        secret_hash = hashlib.sha256(device_secret.encode("utf-8")).hexdigest()
+        room.setdefault("device_secrets", {})[secret_hash] = {
+            "device_name": device_name or "Android",
+            "created_at": time.time(),
+        }
+        logger.info(f"v1.6: device '{device_name}' paired to room {account_id}")
+        return True, {
+            "device_secret": device_secret,
+            "account_id": account_id,
+            "desktop_name": ps["desktop_name"],
+        }
+
+    def revoke_device(self, account_id: str, device_name: str) -> bool:
+        """撤销指定设备的配对授权。"""
+        room = self.rooms.get(account_id)
+        if not room:
+            return False
+        dev_secrets = room.get("device_secrets", {})
+        for h, info in list(dev_secrets.items()):
+            if info.get("device_name") == device_name:
+                del dev_secrets[h]
+                logger.info(f"v1.6: device '{device_name}' revoked from room {account_id}")
+                return True
+        return False
+
+    def list_devices(self, account_id: str) -> list:
+        """列出已配对设备（供多设备管理）。"""
+        room = self.rooms.get(account_id)
+        if not room:
+            return []
+        return [
+            {"device_name": info.get("device_name", "?"),
+             "created_at": info.get("created_at", 0)}
+            for info in room.get("device_secrets", {}).values()
+        ]
+
+    def _cleanup_expired_pairings(self):
+        now = time.time()
+        expired = [t for t, ps in self.pairing_sessions.items()
+                   if ps["claimed"] or now > ps["expires_at"]]
+        for t in expired:
+            del self.pairing_sessions[t]
 
     def disconnect(self, ws: WebSocket):
         session = self.sessions.pop(ws, None)
@@ -364,6 +464,39 @@ async def websocket_endpoint(
     client_type = auth_data.get("client_type") or path_client_type
     secret = auth_data.get("secret", "")
 
+    # v1.6 P0 扫码配对：未认证连接可用配对码认领设备密钥（一次性、短期有效）
+    if msg_type == "pair_claim":
+        pairing_token = auth_data.get("pairing_token", "")
+        device_name = auth_data.get("device_name", "Android")[:64]
+        ok, result = manager.claim_pairing(account_id or "", pairing_token, device_name)
+        if ok:
+            await websocket.send_text(json.dumps({
+                "type": "pair_success",
+                "account_id": result["account_id"],
+                "desktop_name": result["desktop_name"],
+                "device_secret": result["device_secret"],
+                "message": "配对成功，请使用设备密钥重新连接。"
+            }))
+            # 通知桌面端有新设备配对
+            room = manager.rooms.get(account_id or "")
+            if room and room.get("desktop"):
+                try:
+                    await room["desktop"].websocket.send_text(json.dumps({
+                        "type": "device_paired",
+                        "device_name": device_name,
+                        "message": f"新设备已配对：{device_name}"
+                    }))
+                except Exception:
+                    pass
+        else:
+            rate_limiter.record_auth_failure(client_ip)
+            await websocket.send_text(json.dumps({
+                "type": "pair_error",
+                "message": result.get("error", "配对失败")
+            }))
+        await websocket.close(code=1000, reason="Pairing done")
+        return
+
     if msg_type != "auth" or not account_id or client_type not in ["desktop", "mobile"] or not secret:
         logger.warning(f"Auth rejected from {client_ip}: missing required auth fields.")
         rate_limiter.record_auth_failure(client_ip)
@@ -447,6 +580,28 @@ async def websocket_endpoint(
                 elif parsed.get("type") == "ping":
                     session.last_pong_time = time.time()
                     await websocket.send_text(json.dumps({"type": "pong", "timestamp": time.time()}))
+                    continue
+                # v1.6 P0 扫码配对：桌面端配对管理（已认证）
+                elif parsed.get("type") == "create_pairing" and session.client_type == "desktop":
+                    ok, result = manager.create_pairing(
+                        session.account_id, parsed.get("desktop_name", "Desktop"))
+                    await websocket.send_text(json.dumps({
+                        "type": "pairing_created" if ok else "pairing_error",
+                        **result
+                    }))
+                    continue
+                elif parsed.get("type") == "revoke_device" and session.client_type == "desktop":
+                    ok = manager.revoke_device(session.account_id, parsed.get("device_name", ""))
+                    await websocket.send_text(json.dumps({
+                        "type": "device_revoked" if ok else "device_revoke_failed",
+                        "device_name": parsed.get("device_name", "")
+                    }))
+                    continue
+                elif parsed.get("type") == "list_devices" and session.client_type == "desktop":
+                    await websocket.send_text(json.dumps({
+                        "type": "device_list",
+                        "devices": manager.list_devices(session.account_id)
+                    }))
                     continue
             except Exception:
                 pass

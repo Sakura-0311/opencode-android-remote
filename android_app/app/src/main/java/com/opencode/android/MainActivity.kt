@@ -67,6 +67,10 @@ class MainActivity : ComponentActivity() {
                         },
                         onConnectCloud = { cloudUrl, apiKey, workspace ->
                             viewModel.pairCloud(cloudUrl, apiKey, workspace)
+                        },
+                        // v1.6 P0 扫码配对
+                        onQrPairing = { relayUrl, accountId, pairingToken, desktopName ->
+                            viewModel.claimPairingByQr(relayUrl, accountId, pairingToken, desktopName) { _, _ -> }
                         }
                     )
                 } else {

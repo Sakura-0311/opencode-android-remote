@@ -42,7 +42,9 @@ fun PairingScreen(
     onSwitchMode: (AppMode) -> Unit,
     onTestConnectivity: () -> Unit,
     onConnectDesktop: (accountId: String, secret: String, relayUrl: String) -> Unit,
-    onConnectCloud: (cloudUrl: String, apiKey: String, workspace: String) -> Unit
+    onConnectCloud: (cloudUrl: String, apiKey: String, workspace: String) -> Unit,
+    // v1.6 P0 扫码配对
+    onQrPairing: (relayUrl: String, accountId: String, pairingToken: String, desktopName: String) -> Unit = { _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     var selectedTab by remember(currentMode) {
@@ -58,6 +60,56 @@ fun PairingScreen(
     // 模式 2 状态
     var cloudUrl by remember(initialCloudUrl) { mutableStateOf(initialCloudUrl) }
     var cloudKey by remember(initialCloudKey) { mutableStateOf(initialCloudKey) }
+
+    // v1.6 P0 扫码配对状态
+    var showScanner by remember { mutableStateOf(false) }
+    var scannedQr by remember { mutableStateOf<PairingQrData?>(null) }
+    var showPairConfirm by remember { mutableStateOf(false) }
+
+    // v1.6: 扫码器全屏覆盖
+    if (showScanner) {
+        QrScannerScreen(
+            onQrScanned = { data ->
+                scannedQr = data
+                showScanner = false
+                showPairConfirm = true
+            },
+            onCancel = { showScanner = false }
+        )
+        return
+    }
+
+    // v1.6: 扫码后确认对话框（显示设备名称、电脑名称、连接地址和权限摘要）
+    if (showPairConfirm && scannedQr != null) {
+        val qr = scannedQr!!
+        AlertDialog(
+            onDismissRequest = { showPairConfirm = false },
+            title = { Text("确认配对") },
+            text = {
+                Column {
+                    Text("电脑名称：${qr.desktopName}", fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("房间号：${qr.accountId}", fontSize = 13.sp)
+                    Text("中继地址：${qr.relayUrl}", fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "配对后此设备将获得独立密钥，可执行会话操作与工具审批。配对码一次性有效，电脑端可随时撤销此设备。",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showPairConfirm = false
+                    onQrPairing(qr.relayUrl, qr.accountId, qr.pairingToken, qr.desktopName)
+                }) { Text("确认配对") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPairConfirm = false }) { Text("取消") }
+            }
+        )
+    }
     var cloudWorkspace by remember(initialCloudWorkspace) { mutableStateOf(initialCloudWorkspace) }
     var isCloudKeyVisible by remember { mutableStateOf(false) }
 
@@ -332,6 +384,19 @@ fun PairingScreen(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("连接电脑端", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // v1.6 P0 一键扫码配对
+            OutlinedButton(
+                onClick = { showScanner = true },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("📷 扫码配对（一键连接）", fontSize = 14.sp)
             }
 
             Spacer(modifier = Modifier.height(20.dp))

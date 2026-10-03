@@ -245,6 +245,54 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     // 6. 连接与收发消息核心调度 (接入真实端点)
     // =========================================================================
 
+    /**
+     * v1.6 P0 一键扫码配对：凭扫码得到的配对信息认领设备密钥。
+     * 成功后凭据保存到加密存储（Android Keystore），之后用设备密钥连接。
+     */
+    fun claimPairingByQr(
+        relayUrl: String,
+        accountId: String,
+        pairingToken: String,
+        desktopName: String,
+        onDone: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(statusBanner = "正在与 $desktopName 配对…", appError = null)
+            }
+            val result = try {
+                PairingClient.claimPairing(relayUrl, accountId, pairingToken)
+            } catch (e: Exception) {
+                PairClaimResult(success = false, error = e.message ?: "配对异常")
+            }
+            if (result.success && result.deviceSecret.isNotBlank()) {
+                // v1.6: 设备密钥保存到加密存储
+                prefsManager.savePairingInfo(
+                    result.accountId.ifBlank { accountId },
+                    result.deviceSecret,
+                    relayUrl
+                )
+                _uiState.update {
+                    it.copy(
+                        appMode = AppMode.DESKTOP_RELAY,
+                        accountId = result.accountId.ifBlank { accountId },
+                        secret = result.deviceSecret,
+                        relayUrl = relayUrl,
+                        isPaired = true,
+                        isAuthenticated = false,
+                        appError = null,
+                        statusBanner = "已与 ${result.desktopName.ifBlank { desktopName }} 配对成功，正在连接…"
+                    )
+                }
+                onDone(true, "配对成功")
+            } else {
+                val err = result.error.ifBlank { "配对失败，请重新扫码" }
+                _uiState.update { it.copy(appError = AppError("PAIR_FAILED", err), statusBanner = null) }
+                onDone(false, err)
+            }
+        }
+    }
+
     fun pairDesktop(accountId: String, secret: String, relayUrl: String) {
         val trimmedAccount = accountId.trim()
         val trimmedSecret = secret.trim()
