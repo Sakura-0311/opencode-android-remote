@@ -183,14 +183,6 @@ class RelayWebSocketClient {
     // v2.3: 网络层标记离线时暂停重连计时器
     @Volatile private var networkPaused = false
 
-    // v3.0: 协议版本与能力协商
-    companion object {
-        const val PROTOCOL_VERSION = 3
-        val CLIENT_CAPABILITIES = listOf(
-            "hello", "write_idempotency", "file_sandbox",
-            "device_id", "resync", "multi_profile"
-        )
-    }
     var serverProtocolVersion: Int = 0
         private set
     var serverCapabilities: List<String> = emptyList()
@@ -274,6 +266,13 @@ class RelayWebSocketClient {
 
     companion object {
         private const val KEY_DEVICE_UUID = "device_uuid_v1"
+
+        // v3.0: 协议版本与能力协商
+        const val PROTOCOL_VERSION = 3
+        val CLIENT_CAPABILITIES = listOf(
+            "hello", "write_idempotency", "file_sandbox",
+            "device_id", "resync", "multi_profile"
+        )
     }
 
     private fun loadPersistedSeq() {
