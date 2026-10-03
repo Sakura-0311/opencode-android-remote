@@ -1,0 +1,28 @@
+# Android
+*.apk
+*.aab
+local.properties
+.gradle/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Runtime
+*.log
+sessions/
