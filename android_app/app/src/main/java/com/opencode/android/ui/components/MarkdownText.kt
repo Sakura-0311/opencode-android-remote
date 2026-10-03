@@ -70,7 +70,7 @@ private data class InlineSpan(
 // ---------- 行内解析 ----------
 
 private val INLINE_PATTERN = Regex(
-    """(\*\*.+?\*\*|\*[^*\n]+?\*|~~.+?~~|`[^`\n]+?`|\[[^\]\n]+\]\([^)\n]+\))"
+    """(\*\*.+?\*\*|\*[^*\n]+?\*|~~.+?~~|`[^`\n]+?`|\[[^\]\n]+\]\([^)\n]+\))"""
 )
 
 private fun parseInline(text: String): List<InlineSpan> {

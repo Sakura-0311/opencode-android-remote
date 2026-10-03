@@ -689,7 +689,6 @@ class RelayWebSocketClient {
         webSocket?.send(envelope.toString())
         return reqId
     }
-}
 
     /**
      * v1.6 P1: 请求 Model/Agent 配置（动态获取）
