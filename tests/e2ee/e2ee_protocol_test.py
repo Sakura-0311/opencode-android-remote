@@ -62,7 +62,18 @@ def main():
     desk_pub_b64 = b64e(desk_priv.public_key().public_bytes_raw())
     desk_sig = sign_pubkey(master_secret, desk_pub_b64)
 
-    ws_d = websocket.create_connection(f"{RELAY_WS}/ws/{ACCOUNT}/desktop", timeout=10)
+    ws_url_d = f"{RELAY_WS}/ws/{ACCOUNT}/desktop"
+    print(f"[test] connecting desktop to {ws_url_d}", flush=True)
+    ws_d = None
+    for i in range(5):
+        try:
+            ws_d = websocket.create_connection(ws_url_d, timeout=10)
+            break
+        except Exception as e:
+            print(f"[test] desktop connect attempt {i+1} failed: {e}", flush=True)
+            time.sleep(3)
+    if not ws_d:
+        print("E2EE_FAIL: desktop WS connect failed"); sys.exit(1)
     ws_d.send(json.dumps({"type": "hello", "v": 4, "capabilities": ["e2ee"], "device_id": "mock-desktop-1"}))
     assert json.loads(ws_d.recv())["type"] == "hello_ack", "desktop hello failed"
     ws_d.send(json.dumps({"type": "auth", "account_id": ACCOUNT, "secret": "testsecret",
