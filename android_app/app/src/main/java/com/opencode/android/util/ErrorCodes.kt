@@ -110,7 +110,8 @@ object ErrorCodes {
         "SAKURAFRP_ERROR" to ErrorInfo(
             R.string.err_055,
             R.string.err_056,
-            R.string.err_057
+            R.string.err_057,
+        ),
     )
 
     /** 未知错误码回退为通用条目，不抛异常。 */
