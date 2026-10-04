@@ -91,6 +91,8 @@ jobs:
           MODE="__MODE__"
           if [ "$MODE" = "rtl" ]; then
             echo "切换阿拉伯语 + 大字体..."
+            adb root
+            adb wait-for-device
             adb shell "setprop persist.sys.locale ar-SA"
             adb shell "settings put system font_scale 1.3"
             adb reboot
