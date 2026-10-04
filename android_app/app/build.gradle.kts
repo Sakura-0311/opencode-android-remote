@@ -164,8 +164,6 @@ dependencies {
     testImplementation("org.json:json:20240303")
     // v4.3.1: E2EE 模拟器联调 instrumentation 测试
     androidTestImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test:runner:1.5.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test:rules:1.5.0")
+    androidTestImplementation("androidx.test:core:1.5.0")
     // 注：不用 kotlinx-coroutines-test（会引入未锁定的 kotlin-reflect 2.4.10）；runBlocking 走主依赖的 coroutines-core
 }
