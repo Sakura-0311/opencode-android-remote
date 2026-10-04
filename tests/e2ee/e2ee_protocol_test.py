@@ -24,8 +24,10 @@ ACCOUNT = "test"
 def b64e(b: bytes) -> str: return base64.b64encode(b).decode()
 def b64d(s: str) -> bytes: return base64.b64decode(s)
 
-def sign_pubkey(master_secret: str, pubkey_b64: str) -> str:
-    return hmac.new(master_secret.encode(), pubkey_b64.encode(), hashlib.sha256).hexdigest()
+def sign_pubkey(master_secret: str, device_id: str, pubkey_b64: str) -> str:
+    # 与 desktop_agent/modules/e2ee.py::sign_pubkey 和 Kotlin E2eeCrypto.hmacPubkeySig 一致
+    msg = f"e2ee-pubkey|{device_id}|{pubkey_b64}".encode()
+    return hmac.new(master_secret.encode(), msg, hashlib.sha256).hexdigest()
 
 def derive_keys(shared: bytes, salt: bytes):
     d2m = HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"opencode-e2ee-d2m").derive(shared)
@@ -60,7 +62,7 @@ def main():
     # --- Desktop 侧 ---
     desk_priv = X25519PrivateKey.generate()
     desk_pub_b64 = b64e(desk_priv.public_key().public_bytes_raw())
-    desk_sig = sign_pubkey(master_secret, desk_pub_b64)
+    desk_sig = sign_pubkey(master_secret, "mock-desktop-1", desk_pub_b64)
 
     ws_url_d = f"{RELAY_WS}/ws"
     print(f"[test] connecting desktop to {ws_url_d}", flush=True)
@@ -98,7 +100,7 @@ def main():
     assert r.get("type") == "pair_success", f"pair_claim failed: {r}"
     device_secret = r["device_secret"]
     # HMAC 验签（手动配对模式）
-    exp_sig = sign_pubkey(master_secret, r["e2ee_pubkey"])
+    exp_sig = sign_pubkey(master_secret, "mock-desktop-1", r["e2ee_pubkey"])
     assert hmac.compare_digest(exp_sig, r.get("e2ee_pubkey_sig", "")), "HMAC sig mismatch"
     print(f"[test] mobile paired, HMAC verified", flush=True)
 
