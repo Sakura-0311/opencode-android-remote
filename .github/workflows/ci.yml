@@ -17,6 +17,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: 'pip'  # v4.2.0/O4: pip 依赖缓存提速
       - name: Run Smoke Test Contract
         run: |
           pip install -r desktop_agent/requirements.txt
@@ -106,6 +107,26 @@ jobs:
           path: android_app/gradle/verification-metadata.xml
           if-no-files-found: error
 
+  # v4.2.0/O4: Android 单测独立 job（v2.3 起在 android-build 内串行跑），
+  # 与 android-build 并行，CI 总耗时缩短
+  android-unit-tests:
+    name: Android unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      # 本地单测（Backoff / AppLog 脱敏 / Transport / Tink 等）
+      - name: Run unit tests
+        working-directory: android_app
+        run: gradle :app:testDebugUnitTest --no-daemon --console=plain --stacktrace
+
   android-build:
     name: Build Android APK
     runs-on: ubuntu-latest
@@ -119,10 +140,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
-      # v2.3: 本地单测（Backoff / AppLog 脱敏等）
-      - name: Run unit tests
-        working-directory: android_app
-        run: gradle :app:testDebugUnitTest --no-daemon --console=plain --stacktrace
       - name: Build Debug APK
         working-directory: android_app
         run: gradle assembleDebug --no-daemon --console=plain --stacktrace
@@ -245,7 +262,7 @@ jobs:
             echo ""
             echo "- release APK 大小： ${apk_size_bytes:-未知} bytes"
             echo "- 签名指纹： D9:21:C0:EB:AE:4A:DD:89:73:0B:BD:E7:49:1F:27:FD:26:41:95:0C:E1:19:1F:30:53:A3:E7:66:00:9E:9E:78（已校验）"
-            echo "- R8： minify=true（v3.3 开启），shrinkResources=false"
+            echo "- R8： minify=true（v3.3 开启），shrinkResources=true（v4.2.0 开启）"
             echo "- 契约测试： python-tests job（19 项）"
             echo "- 依赖 CVE 扫描： supply-chain job（osv-scanner）"
           } > android_app/app/build/outputs/apk/release/ci-report.md

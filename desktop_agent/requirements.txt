@@ -2,3 +2,5 @@ aiohttp>=3.14.3
 websockets>=12.0
 qrcode>=7.4.2
 cryptography>=50.0.0  # v4.1 E2EE: 旧版有已知 CVE，50.x 干净（2026-10 实测）
+# v4.2.0/V2: 可选依赖——Windows Credential Manager / macOS Keychain（Linux 仍走 0600 文件）
+keyring>=25.6.0 ; sys_platform == "win32" or sys_platform == "darwin"

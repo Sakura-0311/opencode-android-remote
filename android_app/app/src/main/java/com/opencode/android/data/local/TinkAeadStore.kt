@@ -40,7 +40,7 @@ class TinkAeadStore(
             val cipher = b64.decode(b64str)
             String(aead.decrypt(cipher, key.toByteArray(Charsets.UTF_8)), Charsets.UTF_8)
         } catch (e: Exception) {
-            android.util.Log.e("TinkAeadStore", "解密失败 key=$key", e)
+            android.util.Log.e("TinkAeadStore", "解密失败", e)
             null
         }
     }

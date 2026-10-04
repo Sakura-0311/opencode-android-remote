@@ -38,5 +38,5 @@
 - OkHttp 4.12.0：自带（v2.4 已确认）
 - 项目无反射、无 Gson 解析（org.json 手动解析），Compose 由 AGP 处理
 - 唯一缺口：security-crypto（legacy 路径）无 consumer rules → 已在 proguard-rules.pro 手写 keep
-- `isMinifyEnabled=true`（`shrinkResources=false` 保守）；CI 加模拟器启动冒烟兜底；
+- `isMinifyEnabled=true`，`shrinkResources=true`（v4.2.0 开启；此前保守关闭）；CI 加模拟器启动冒烟兜底；
   真机核心流程回归仍标"未验证"，见 TESTING_CHECKLIST 第 10 节。

@@ -50,7 +50,7 @@ android {
     compileSdk = 34
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000；4.0.0 -> 40000）
-    val appVersionName = "4.1.0"
+    val appVersionName = "4.2.0"
     val appVersionCode = appVersionName.split(".").let { p ->
         p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
     }
@@ -85,10 +85,11 @@ android {
             applicationIdSuffix = ".debug"
         }
         release {
-            // v3.3: R8 开启（评估通过：ACRA/ML Kit/Tink/OkHttp consumer rules 齐全，
-            // 项目无反射/Gson）。shrinkResources 保持关闭（保守）；回滚只需改回 false。
+            // v4.2.0/O1: shrinkResources 开启（全仓无 getIdentifier 动态资源引用，
+            // emulator-smoke（tag 构建）兜底 R8/资源裁剪导致的启动问题；fullMode 不开）。
+            // 回滚只需改回 false。
             isMinifyEnabled = true
-            isShrinkResources = false
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

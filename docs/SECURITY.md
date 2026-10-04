@@ -43,3 +43,27 @@ RELAY_ENABLE_CRASH_REPORT=0
 - 崩溃上报默认关闭；开启后仅收集脱敏字段（版本/机型/Android 版本/堆栈/时间），无 logcat、无设备 ID。
 - 文件日志（AppLog）已脱敏：不含 Secret、口令、token、prompt 与代码正文。
 - `allowBackup=false`：密钥不随系统云备份泄露。
+
+## v4.1.0 审计结论与 v4.2.0 落实情况（方案 1：E2EE 发版后实施）
+
+来源：用户 2026-10-04 上传《OpenCode 项目漏洞排查与优化建议》8 项，全部只读审计；v4.2.0 落实 5 项改动，3 项只注记。
+
+**已实施（v4.2.0）：**
+
+- V2：桌面端 `keyring` 可选依赖——Windows Credential Manager / macOS Keychain 优先，
+  try-import 失败或后端不可用时回退原有 0600 文件存储（`desktop_agent/modules/secrets.py`）。
+- V4-1：`TinkAeadStore` 解密失败日志去掉 key 名（key 名非密钥值，风险低，按审计要求清理）。
+- V4-2：`proguard-rules.pro` 加 `-assumenosideeffects` 剥除 `android.util.Log.d/v`（release 纵深防御）。
+- O1：release 包开启 `shrinkResources=true`（全仓无 `getIdentifier` 动态资源引用；
+  CI 报告模板同步更新；emulator-smoke 兜底；`fullMode` 不开）。
+- O3：`relay_server/Dockerfile` 多阶段构建（builder 装依赖到 `/install`，final 只拷
+  `/usr/local` + `server.py`；`python:3.11-slim` 不变）。
+- O4：CI 提速——`python-tests` job 加 pip 缓存；Android 单测从 `android-build` 拆独立 job 并行。
+
+**只注记不改（决策理由）：**
+
+- V1（SSL Pinning 不做）：relay 由用户自建自配 URL（含局域网 ws），pin 会断连；
+  main 的 `network_security_config.xml` 已是 `cleartextTrafficPermitted="false"`（v2.1 起）。
+- V3（不加 pip-audit）：CI 已有 supply-chain job（gitleaks + osv-scanner），pip-audit 与
+  osv-scanner 同源（OSV 数据库），冗余不加；依赖均为新版无已知高危。
+- O2（`Backoff.kt` 无需改）：已有 0.85~1.15 乘法抖动 + 单测覆盖。

@@ -1,3 +1,38 @@
+# OpenCode Android Remote - Release v4.2.0（安全审计优化）
+
+## 内容（全部非破坏性；E2EE 相关文件未动）
+
+- **V2 桌面端系统级密钥存储**：`desktop_agent` 加 `keyring` **可选依赖**（try-import）——
+  优先 Windows Credential Manager / macOS Keychain，成功则不再落盘；无依赖或后端不可用时
+  回退原有 0600 文件存储（行为不变）。`requirements.txt` 按平台条件安装（仅 win32/darwin）。
+- **V4-1 日志去密钥名**：`TinkAeadStore` 解密失败日志不再打印 key 名（只保留异常对象）。
+- **V4-2 proguard 纵深防御**：`-assumenosideeffects` 剥除 `android.util.Log.d/v`（release）。
+- **O1 shrinkResources 开启**：全仓无 `getIdentifier` 动态资源引用，release 包资源裁剪开启；
+  CI 的 ci-report 模板同步更新；emulator-smoke 兜底（tag 构建）。`fullMode` 不开，只做评估注记。
+- **O3 relay Dockerfile 多阶段**：builder 阶段 `pip install --prefix=/install`，final 阶段只拷
+  `/usr/local` + `server.py`；基础镜像保持 `python:3.11-slim`，保留 `--no-cache-dir`。
+- **O4 CI 提速**：`python-tests` job 加 pip 缓存（`setup-python` 的 `cache: 'pip'`）；
+  Android 单测从 `android-build` 拆成独立 job，与 build 并行。
+
+## 审计注记（不改，已写进 docs/SECURITY.md）
+
+- V1 SSL Pinning 不做：relay 用户自建自配 URL（含局域网 ws），pin 会断连；
+  main 的 `network_security_config.xml` 已是 `cleartextTrafficPermitted="false"`（v2.1）。
+- V3 供应链已有 supply-chain job（gitleaks + osv-scanner）；pip-audit 与 osv-scanner 同源（OSV），
+  冗余不加；依赖均为新版无已知高危。
+- O2 `Backoff.kt` 已有乘法抖动（0.85~1.15）+ 单测，无需改。
+
+## 兼容性
+
+- 非破坏性：覆盖升级，无需迁移。versionCode 40200，随 versionName 自动递增。
+
+## 验证
+
+- 契约测试 25/25（含 2 项 E2EE 盲转发，未动）；Python 单测通过；CI 全绿
+- emulator-smoke（tag 构建）：云端模拟器启动无 FATAL
+
+---
+
 # OpenCode Android Remote - Release v4.1.0（E2EE 端到端加密，默认关闭）
 
 ## 内容

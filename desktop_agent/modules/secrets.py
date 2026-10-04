@@ -61,10 +61,48 @@ def _migrate_legacy_secret() -> None:
         logger.warning(f"[v2.2.1-A] 迁移旧 Secret 失败: {e}")
 
 # ==============================================================================
+# v4.2.0/V2: 系统级密钥存储（Windows Credential Manager / macOS Keychain）
+# keyring 为可选依赖：import 失败或后端不可用时，一律回退原有 0600 文件存储
+# ==============================================================================
+_KEYRING_SERVICE = "opencode-remote"
+_KEYRING_ACCOUNT = "pairing-secret"
+
+def _keyring_get() -> Optional[str]:
+    """从 OS 密钥库读取配对密钥。无 keyring 依赖或后端时返回 None。"""
+    try:
+        import keyring
+    except ImportError:
+        return None
+    try:
+        stored = keyring.get_password(_KEYRING_SERVICE, _KEYRING_ACCOUNT)
+        if stored and len(stored) >= 16:
+            return stored
+    except Exception as e:
+        logger.debug(f"keyring read failed, fallback to file: {e}")
+    return None
+
+def _keyring_save(new_value: str) -> bool:
+    """写入 OS 密钥库。成功返回 True，无依赖/后端时返回 False。"""
+    try:
+        import keyring
+    except ImportError:
+        return False
+    try:
+        keyring.set_password(_KEYRING_SERVICE, _KEYRING_ACCOUNT, new_value)
+        return True
+    except Exception as e:
+        logger.debug(f"keyring write failed, fallback to file: {e}")
+        return False
+
+# ==============================================================================
 # P0-1: 本地密钥管理（0600 受限权限，内存保管，绝不打日志）
 # ==============================================================================
 def get_or_create_secret() -> str:
     """获取或初始化持久化配对 Secret，确保权限仅当前用户可读写 (0600)"""
+    # v4.2.0/V2: 优先系统密钥库（Windows Credential Manager / macOS Keychain）
+    stored = _keyring_get()
+    if stored:
+        return stored
     if config.SECRET_FILE_PATH == config._DEFAULT_SECRET_PATH:
         _ensure_secret_dir()
         _migrate_legacy_secret()
@@ -79,6 +117,13 @@ def get_or_create_secret() -> str:
 
     # 生成 32 字节高熵随机十六进制密钥
     new_secret = secrets.token_hex(16)
+    # v4.2.0/V2: 先尝试系统密钥库，成功则不再落盘文件（文件作为回退）
+    try:
+        if _keyring_save(new_secret):
+            logger.info("pairing secret stored in OS keyring (Credential Manager/Keychain)")
+            return new_secret
+    except Exception:
+        pass
     try:
         fd = os.open(config.SECRET_FILE_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
