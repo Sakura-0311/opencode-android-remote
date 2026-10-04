@@ -62,7 +62,7 @@ def main():
     desk_pub_b64 = b64e(desk_priv.public_key().public_bytes_raw())
     desk_sig = sign_pubkey(master_secret, desk_pub_b64)
 
-    ws_url_d = f"{RELAY_WS}/ws/{ACCOUNT}/desktop"
+    ws_url_d = f"{RELAY_WS}/ws"
     print(f"[test] connecting desktop to {ws_url_d}", flush=True)
     ws_d = None
     for i in range(5):
@@ -91,7 +91,7 @@ def main():
     mob_priv = X25519PrivateKey.generate()
     mob_pub_b64 = b64e(mob_priv.public_key().public_bytes_raw())
 
-    ws_m = websocket.create_connection(f"{RELAY_WS}/ws/{ACCOUNT}/mobile", timeout=10)
+    ws_m = websocket.create_connection(f"{RELAY_WS}/ws", timeout=10)
     ws_m.send(json.dumps({"type": "pair_claim", "pairing_token": token, "account_id": ACCOUNT,
                           "device_name": "MockMobile", "e2ee_pubkey": mob_pub_b64}))
     r = json.loads(ws_m.recv())
@@ -118,7 +118,7 @@ def main():
 
     # Mobile auth 后发送 E2EE 消息
     ws_m.close()
-    ws_m = websocket.create_connection(f"{RELAY_WS}/ws/{ACCOUNT}/mobile", timeout=10)
+    ws_m = websocket.create_connection(f"{RELAY_WS}/ws", timeout=10)
     ws_m.send(json.dumps({"type": "auth", "account_id": ACCOUNT, "secret": device_secret,
                           "client_type": "mobile", "device_id": "mock-mobile-1"}))
     r = json.loads(ws_m.recv())
