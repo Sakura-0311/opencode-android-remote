@@ -561,4 +561,8 @@
     <string name="vm_039">【オフライン】%1$s</string>
     <string name="vm_code_change">コード変更</string>
     <string name="vm_tool_desc">%1$s: %2$s</string>
+    <string name="e2ee_001">暗号化済み</string>
+    <string name="e2ee_002">ハンドシェイク待機中</string>
+    <string name="e2ee_003">暗号化チャネルを確立しました</string>
+    <string name="e2ee_004">暗号化チャネルを確立しました。このデバイスとデスクトップ間のメッセージはエンドツーエンドで暗号化されます。中継サーバーが見るのはルーティングメタデータ（誰・いつ・何バイト）のみで、内容は見えません。</string>
 </resources>

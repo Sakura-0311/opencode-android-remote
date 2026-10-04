@@ -10,6 +10,7 @@ import com.opencode.android.data.model.DiffLineType
 import com.opencode.android.data.model.SessionItem
 import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.util.AppLog
+import com.opencode.android.util.TAG_DEFAULT
 import com.opencode.android.security.E2eeManager
 import com.opencode.android.util.FeatureFlags
 import okhttp3.OkHttpClient
@@ -677,7 +678,7 @@ class RelayWebSocketClient(private val appContext: Context) {
                             val id = itemObj.optString("id", "")
                             val title = itemObj.optString("title", itemObj.optString("name", appContext.getString(R.string.relay_010, id)))
                             if (id.isNotEmpty()) {
-                                list.add(SessionItem(id = id, title = title, tag = appContext.getString(R.string.relay_011)))
+                                list.add(SessionItem(id = id, title = title, tag = TAG_DEFAULT))
                             }
                         }
                     }
@@ -1075,12 +1076,17 @@ class RelayWebSocketClient(private val appContext: Context) {
                 put("agent", agent.id)
             }
         }
-        // v4.1: E2EE——目标 desktop 有协商密钥时加密 payload（relay 盲转发）
+        // v4.3 M-1: E2EE fail-closed——加密失败拒绝发送，绝不回退明文
         val effectiveTarget = targetDeviceId?.ifEmpty { null }
             ?: cachedDesktops.firstOrNull { it.isPrimary }?.deviceId?.ifEmpty { null }
-        val encryptedPayload = if (!effectiveTarget.isNullOrEmpty()) {
+        val payloadResult: E2eeManager.PayloadResult? = if (!effectiveTarget.isNullOrEmpty()) {
             e2eeManager?.encryptForDesktop(payload.toString(), effectiveTarget, deviceUuid(), sessionId)
         } else null
+        if (payloadResult is E2eeManager.PayloadResult.Failed) {
+            AppLog.e("E2EE", "发送中止：${payloadResult.reason}")
+            listener?.onError("E2EE 加密失败，已拒绝发送：${payloadResult.reason}")
+            return
+        }
         val envelope = JSONObject().apply {
             put("action", "send_prompt")
             put("session_id", sessionId)
@@ -1088,14 +1094,17 @@ class RelayWebSocketClient(private val appContext: Context) {
             put("client_msg_id", clientMsgId)
             // v3.1: 顶层定向字段，与 action/session_id 同级（旧 relay/agent 忽略未知字段）
             if (!targetDeviceId.isNullOrEmpty()) put("target_device_id", targetDeviceId)
-            if (encryptedPayload != null) {
+            val enc = payloadResult as? E2eeManager.PayloadResult.Encrypted
+            if (enc != null) {
                 put("e2ee", true)
-                put("encrypted_payload", encryptedPayload)
+                put("encrypted_payload", enc.b64)
             } else {
                 put("payload", payload)
             }
         }
-        if (encryptedPayload != null) AppLog.i("Relay", "v4.1 E2EE: send_prompt 已加密 -> $effectiveTarget")
+        if (payloadResult is E2eeManager.PayloadResult.Encrypted) {
+            AppLog.i("Relay", "v4.1 E2EE: send_prompt 已加密 -> $effectiveTarget")
+        }
         sendEnvelope("send_prompt", envelope, clientMsgId)
     }
 

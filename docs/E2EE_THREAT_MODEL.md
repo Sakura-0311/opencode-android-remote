@@ -30,7 +30,11 @@
 
 ### 2.3 假设
 
-- 配对过程可信（用户亲手扫码，MITM 配对二维码不在模型内）
+- v4.3 起：desktop 公钥经房间主 secret 做 HMAC-SHA256 绑定（`e2ee_pubkey_sig`），
+  relay 只存 `sha256(secret)` 无法伪造。**手动配对**（mobile 持有主 secret）时
+  mobile 校验签名，签名无效拒绝保存；**扫码配对**（mobile 只有 device_secret，
+  relay 明文知晓）无法做不可伪造绑定，走 TOFU——主动替换公钥的 relay 在扫码
+  配对场景下仍可 MITM，此为已知取舍
 - Android Keystore / desktop 本地密钥存储可信
 - Tink 原语实现正确
 
@@ -41,8 +45,10 @@
 - 加密粒度：消息 **内容载荷**（prompt 文本、回复流、文件内容）；路由元数据
   （`type`、`session_id`、`target_device_id`、`relay_seq`）保持明文，relay 仍可路由、
   缓冲、补发——**不断线恢复能力**
-- 算法：X25519 密钥协商 + XChaCha20-Poly1305（经 Tink `HybridEncrypt` 或手动组合；
-  Android 侧 Tink 已有，desktop 侧 Python 用 `cryptography` 库）
+- 算法：X25519 密钥协商 + ChaCha20-Poly1305（IETF，12 字节随机 nonce；
+  Android 侧 Tink subtle，desktop 侧 Python 用 `cryptography` 库）。
+  v4.3 勘误：早期草案误写为 XChaCha20-Poly1305（24 字节 nonce），与线格式
+  `docs/E2EE_WIRE_v1.md` 及两端实现不符，实现一直是 IETF ChaCha20-Poly1305。
 
 ### 3.2 密钥协商：复用配对流程
 

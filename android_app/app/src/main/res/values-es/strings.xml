@@ -560,4 +560,8 @@
     <string name="vm_039">[Sin conexión] %1$s</string>
     <string name="vm_code_change">Cambio de código</string>
     <string name="vm_tool_desc">%1$s: %2$s</string>
+    <string name="e2ee_001">Cifrado</string>
+    <string name="e2ee_002">Esperando handshake</string>
+    <string name="e2ee_003">Canal cifrado establecido</string>
+    <string name="e2ee_004">Canal cifrado establecido. Los mensajes entre este dispositivo y el escritorio están cifrados de extremo a extremo. El relay solo ve metadatos de enrutamiento (quién, cuándo, cuántos bytes), no el contenido.</string>
 </resources>

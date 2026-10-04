@@ -561,4 +561,8 @@
     <string name="vm_039">[오프라인] %1$s</string>
     <string name="vm_code_change">코드 변경</string>
     <string name="vm_tool_desc">%1$s: %2$s</string>
+    <string name="e2ee_001">암호화됨</string>
+    <string name="e2ee_002">핸드셰이크 대기 중</string>
+    <string name="e2ee_003">암호화 채널이 설정되었습니다</string>
+    <string name="e2ee_004">암호화 채널이 설정되었습니다. 이 기기와 데스크톱 간의 메시지는 종단간 암호화됩니다. 릴레이는 라우팅 메타데이터(누가, 언제, 몇 바이트)만 볼 수 있고 내용은 볼 수 없습니다.</string>
 </resources>

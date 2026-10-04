@@ -21,6 +21,7 @@ import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.CloudStreamListener
 import com.opencode.android.network.CloudConnectionState
 import com.opencode.android.util.OpLog
+import com.opencode.android.util.TAG_ALL
 import com.opencode.android.util.ConfigImportExport
 import com.opencode.android.data.model.ConnectionProfile
 import com.opencode.android.network.DeviceInfo
@@ -188,7 +189,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     // =========================================================================
 
     fun setTagFilter(tag: String?) {
-        val finalTag = if (tag == "全部") null else tag
+        // v4.3 M-4: 按稳定 key 过滤
+        val finalTag = if (tag == TAG_ALL) null else tag
         _uiState.update { it.copy(selectedTagFilter = finalTag) }
     }
 
@@ -379,12 +381,23 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             } catch (e: Exception) {
                 PairClaimResult(success = false, error = e.message ?: getApplication<Application>().getString(R.string.vm_008))
             }
-            // v4.1: 保存 desktop 的 E2EE 公钥（按 device_id 绑定）
+            // v4.3 M-2: 保存 desktop 的 E2EE 公钥（按 device_id 绑定，HMAC 验签）
             if (result.success && result.e2eePeerPubkey.isNotEmpty() && result.desktopDeviceId.isNotEmpty()) {
-                e2eeManager.storePeerPubkey(result.desktopDeviceId, result.e2eePeerPubkey)
+                val ok = e2eeManager.storePeerPubkey(
+                    result.desktopDeviceId, result.e2eePeerPubkey, result.e2eePubkeySig)
+                if (!ok) {
+                    _uiState.update { it.copy(appError = AppError(
+                        "E2EE_PUBKEY_UNTRUSTED", "对端公钥认证失败，已拒绝（疑似中继篡改）")) }
+                } else {
+                    // v4.3 M-5: 新配对成功，给一次「已建立加密通道」明确提示
+                    _uiState.update { it.copy(showE2eeChannelDialog = true) }
+                }
+                refreshE2eePeerReady()
             }
             if (result.success && result.deviceSecret.isNotBlank()) {
                 // v1.6: 设备密钥保存到加密存储；P0-3: 加密不可用时拒绝保存并报错
+                // v4.3 M-2: 扫码配对存的是 device_secret（非主 secret），标记之
+                prefsManager.secretIsMaster = false
                 val saved = prefsManager.savePairingInfo(
                     result.accountId.ifBlank { accountId },
                     result.deviceSecret,
@@ -436,6 +449,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             return
         }
 
+        // v4.3 M-2: 手动配对填的是房间主 secret，可做 E2EE 公钥 HMAC 绑定校验
+        prefsManager.secretIsMaster = true
         // P0-3: 加密存储不可用时拒绝保存敏感凭据
         if (!prefsManager.savePairingInfo(trimmedAccount, trimmedSecret, trimmedRelay)) {
             _uiState.update {
@@ -1174,6 +1189,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     fun setE2eeEnabled(enabled: Boolean) {
         prefsManager.isE2eeEnabled = enabled
         AppLog.i("E2EE", "开关: $enabled")
+        refreshE2eePeerReady()
+    }
+
+    /** v4.3 M-5: 关闭「已建立加密通道」提示框 */
+    fun dismissE2eeChannelDialog() {
+        _uiState.update { it.copy(showE2eeChannelDialog = false) }
     }
 
     /** v4.0: 关闭 v3 旧服务端提示（每个 relayUrl 只提示一次） */
@@ -1209,6 +1230,19 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 desktopList = desktops,
                 targetDesktopId = if (targetAlive) prevTarget else ""
             )
+        }
+        refreshE2eePeerReady()
+    }
+
+    /** v4.3 M-5: 按当前目标（targetDesktopId 或主 desktop）刷新 E2EE 就绪状态。 */
+    private fun refreshE2eePeerReady() {
+        val s = _uiState.value
+        val target = s.targetDesktopId.ifEmpty {
+            s.desktopList.firstOrNull { it.isPrimary }?.deviceId.orEmpty()
+        }
+        val ready = target.isNotEmpty() && e2eeManager.hasPeerKey(target)
+        if (s.e2eePeerReady != ready) {
+            _uiState.update { it.copy(e2eePeerReady = ready) }
         }
     }
 

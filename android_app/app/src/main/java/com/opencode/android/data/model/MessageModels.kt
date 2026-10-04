@@ -1,5 +1,11 @@
 package com.opencode.android.data.model
 
+import com.opencode.android.util.TAG_ALL
+import com.opencode.android.util.TAG_AUTO
+import com.opencode.android.util.TAG_DEBUG
+import com.opencode.android.util.TAG_DEFAULT
+import com.opencode.android.util.TAG_SCRIPT
+
 import com.opencode.android.R
 import androidx.annotation.StringRes
 
@@ -50,7 +56,7 @@ data class ChatMessage(
 data class SessionItem(
     val id: String,
     val title: String,
-    val tag: String = "默认",          // 自定义标签（如 "自动化任务", "代码调试", "脚本生成"）
+    val tag: String = TAG_DEFAULT,  // 标签 key（内置）或用户自建文案
     val isPinned: Boolean = false,     // 会话置顶
     val isArchived: Boolean = false,   // 旧会话归档
     val updatedAt: Long = System.currentTimeMillis()
@@ -133,6 +139,9 @@ data class OpenCodeUiState(
     val showSecureMigrationNotice: Boolean = false,
     // v4.0: v3 旧服务端升级提示（hello_ack v<4 时一次性，不阻断）
     val showOldRelayWarning: Boolean = false,
+    // v4.3 M-5: E2EE 状态可见——当前目标 desktop 是否已有协商公钥；配对成功一次提示
+    val e2eePeerReady: Boolean = false,
+    val showE2eeChannelDialog: Boolean = false,
     
     // 电脑中继模式参数
     val accountId: String = "",
@@ -174,7 +183,8 @@ data class OpenCodeUiState(
     val currentSessionId: String = "",
     val availableSessions: List<SessionItem> = emptyList(),
     val selectedTagFilter: String? = null, // null 表示查看全部，支持按标签过滤
-    val availableTags: List<String> = listOf("全部", "默认", "代码调试", "自动化任务", "脚本生成"),
+    // v4.3 M-4: 内部用稳定 key，显示时映射文案
+    val availableTags: List<String> = listOf(TAG_ALL, TAG_DEFAULT, TAG_DEBUG, TAG_AUTO, TAG_SCRIPT),
     val showArchivedSessions: Boolean = false,
 
     // 工具审批与 Diff 预览

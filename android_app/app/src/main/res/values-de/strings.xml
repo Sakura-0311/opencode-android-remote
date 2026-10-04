@@ -560,4 +560,8 @@
 <string name="vm_039">【Offline】%1$s</string>
 <string name="vm_code_change">Codeänderung</string>
 <string name="vm_tool_desc">%1$s: %2$s</string>
+    <string name="e2ee_001">Verschlüsselt</string>
+    <string name="e2ee_002">Warte auf Handshake</string>
+    <string name="e2ee_003">Verschlüsselter Kanal eingerichtet</string>
+    <string name="e2ee_004">Verschlüsselter Kanal eingerichtet. Nachrichten zwischen diesem Gerät und dem Desktop sind Ende-zu-Ende verschlüsselt. Das Relay sieht nur Routing-Metadaten (wer, wann, wie viele Bytes), keine Inhalte.</string>
 </resources>

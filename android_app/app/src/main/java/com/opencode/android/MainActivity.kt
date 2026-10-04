@@ -256,6 +256,9 @@ class MainActivity : ComponentActivity() {
                         // 对外分发：崩溃上报开关
                         crashReportEnabled = crashReportEnabled,
                         e2eeEnabled = e2eeEnabled,
+                        e2eePeerReady = uiState.e2eePeerReady,
+                        showE2eeChannelDialog = uiState.showE2eeChannelDialog,
+                        onDismissE2eeChannelDialog = { viewModel.dismissE2eeChannelDialog() },
                         onToggleE2ee = { enabled ->
                             viewModel.setE2eeEnabled(enabled)
                             e2eeEnabled = enabled

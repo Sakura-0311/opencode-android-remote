@@ -966,6 +966,9 @@ async def websocket_endpoint(
             }
             if result.get("e2ee_pubkey"):
                 pair_success_msg["e2ee_pubkey"] = result["e2ee_pubkey"]
+            # v4.3 M-2: 公钥 HMAC 签名透传给 mobile 校验
+            if result.get("e2ee_pubkey_sig"):
+                pair_success_msg["e2ee_pubkey_sig"] = result["e2ee_pubkey_sig"]
             # E2EE: desktop 的 device_id，mobile 用它把公钥绑定到设备；缺失则跳过绑定
             if result.get("desktop_device_id"):
                 pair_success_msg["desktop_device_id"] = result["desktop_device_id"]

@@ -9,7 +9,7 @@ import com.opencode.android.data.model.SessionItem
 import org.json.JSONArray
 import org.json.JSONObject
 
-class PreferencesManager(context: Context) {
+class PreferencesManager(context: Context) : com.opencode.android.security.E2eePrefs {
 
     // P0-3: 加密存储失败时禁止静默降级（fail-closed）。
     // securePrefs 为 null 表示加密不可用：敏感凭据（Secret / API Key / AccountId）
@@ -114,10 +114,19 @@ class PreferencesManager(context: Context) {
     }
 
     /** 加密存储是否可用；为 false 时禁止保存任何敏感凭据 */
-    val isSecureStorageAvailable: Boolean get() = secure() != null
+    override val isSecureStorageAvailable: Boolean get() = secure() != null
 
     // v4.2: E2EE 运行时开关（非敏感，明文存储；默认关闭）
-    var isE2eeEnabled: Boolean
+    /**
+     * v4.3 M-2: 存储的 secret 是否为房间主 secret。
+     * 手动配对（用户直接填主 secret）= true；扫码配对（device_secret）= false。
+     * 仅 true 时可做 E2EE 公钥 HMAC 绑定校验。
+     */
+    override var secretIsMaster: Boolean
+        get() = prefs.getBoolean("secret_is_master", false)
+        set(v) { prefs.edit().putBoolean("secret_is_master", v).apply() }
+
+    override var isE2eeEnabled: Boolean
         get() = prefs.getBoolean("e2ee_enabled", false)
         set(v) { prefs.edit().putBoolean("e2ee_enabled", v).apply() }
 
@@ -127,21 +136,21 @@ class PreferencesManager(context: Context) {
         set(v) { prefs.edit().putString("app_locale", v).apply() }
 
     // v4.1: E2EE 密钥材料（敏感，只走 secure()；不可用时返回 null / 抛异常由调用方降级）
-    fun getE2eePrivateKey(): String? = secure()?.get("e2ee_privkey")
-    fun setE2eePrivateKey(privateKeyB64: String) {
+    override fun getE2eePrivateKey(): String? = secure()?.get("e2ee_privkey")
+    override fun setE2eePrivateKey(privateKeyB64: String) {
         secure()?.put("e2ee_privkey", privateKeyB64)
             ?: throw IllegalStateException("安全存储不可用，拒绝保存 E2EE 私钥")
     }
 
-    fun getE2eePeerPubkey(deviceId: String): String? =
+    override fun getE2eePeerPubkey(deviceId: String): String? =
         secure()?.get("e2ee_peer_$deviceId")
 
-    fun setE2eePeerPubkey(deviceId: String, pubkeyB64: String) {
+    override fun setE2eePeerPubkey(deviceId: String, pubkeyB64: String) {
         secure()?.put("e2ee_peer_$deviceId", pubkeyB64)
             ?: throw IllegalStateException("安全存储不可用，拒绝保存 E2EE 对端公钥")
     }
 
-    fun removeE2eePeerPubkey(deviceId: String) {
+    override fun removeE2eePeerPubkey(deviceId: String) {
         secure()?.remove("e2ee_peer_$deviceId")
     }
 
@@ -262,7 +271,7 @@ class PreferencesManager(context: Context) {
         return secure()?.get(KEY_ACCOUNT_ID) ?: ""
     }
 
-    fun getSecret(): String {
+    override fun getSecret(): String {
         return secure()?.get(KEY_SECRET) ?: ""
     }
 
@@ -341,7 +350,8 @@ class PreferencesManager(context: Context) {
                     SessionItem(
                         id = obj.optString("id", "default"),
                         title = obj.optString("title", "Main Workspace"),
-                        tag = obj.optString("tag", "默认"),
+                        // v4.3 M-4: 存量中文标签一次性迁移为稳定 key
+                        tag = com.opencode.android.util.migrateTag(obj.optString("tag", null)),
                         isPinned = obj.optBoolean("isPinned", false),
                         isArchived = obj.optBoolean("isArchived", false),
                         updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())

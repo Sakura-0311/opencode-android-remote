@@ -560,4 +560,8 @@
     <string name="vm_039">【离线】%1$s</string>
     <string name="vm_code_change">代码修改</string>
     <string name="vm_tool_desc">%1$s: %2$s</string>
+    <string name="e2ee_001">已加密</string>
+    <string name="e2ee_002">等待握手</string>
+    <string name="e2ee_003">已建立加密通道</string>
+    <string name="e2ee_004">加密通道已建立，此设备与桌面之间的消息将端到端加密。中继只能看到路由元数据（谁、何时、多少字节），看不到内容。</string>
 </resources>

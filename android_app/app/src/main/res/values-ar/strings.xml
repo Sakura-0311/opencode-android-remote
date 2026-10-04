@@ -560,4 +560,8 @@
     <string name="vm_039">【غير متصل】%1$s</string>
     <string name="vm_code_change">تعديل الكود</string>
     <string name="vm_tool_desc">%1$s: %2$s</string>
+    <string name="e2ee_001">مشفّر</string>
+    <string name="e2ee_002">بانتظار المصافحة</string>
+    <string name="e2ee_003">تم إنشاء قناة مشفّرة</string>
+    <string name="e2ee_004">تم إنشاء قناة مشفّرة. الرسائل بين هذا الجهاز وسطح المكتب مشفّرة من الطرف إلى الطرف. يرى المرحّل بيانات التوجيه الوصفية فقط (من، متى، كم بايت)، وليس المحتوى.</string>
 </resources>

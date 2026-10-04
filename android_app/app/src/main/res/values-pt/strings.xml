@@ -560,4 +560,8 @@
 <string name="vm_039">【Offline】%1$s</string>
 <string name="vm_code_change">Alteração de código</string>
 <string name="vm_tool_desc">%1$s: %2$s</string>
+    <string name="e2ee_001">Criptografado</string>
+    <string name="e2ee_002">Aguardando handshake</string>
+    <string name="e2ee_003">Canal criptografado estabelecido</string>
+    <string name="e2ee_004">Canal criptografado estabelecido. As mensagens entre este dispositivo e o desktop são criptografadas de ponta a ponta. O relay vê apenas metadados de roteamento (quem, quando, quantos bytes), não o conteúdo.</string>
 </resources>

@@ -24,6 +24,8 @@ data class PairClaimResult(
     val error: String = "",
     // v4.1: E2EE——desktop 的 X25519 公钥（base64），缺失则无 E2EE
     val e2eePeerPubkey: String = "",
+    // v4.3 M-2: 公钥 HMAC 绑定签名（hex），旧 relay/desktop 为空
+    val e2eePubkeySig: String = "",
     val desktopDeviceId: String = ""
 )
 
@@ -80,6 +82,7 @@ object PairingClient {
                             accountId = json.optString("account_id", accountId),
                             desktopName = json.optString("desktop_name", "Desktop"),
                             e2eePeerPubkey = json.optString("e2ee_pubkey", ""),
+                            e2eePubkeySig = json.optString("e2ee_pubkey_sig", ""),
                             desktopDeviceId = json.optString("desktop_device_id", "")
                         ))
                         "pair_error" -> finish(PairClaimResult(

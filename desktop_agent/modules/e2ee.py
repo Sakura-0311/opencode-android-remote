@@ -217,6 +217,20 @@ def decrypt(payload_b64: str, key: bytes, sender_device_id: str, session_id: str
 # 协议钩子（send/recv 消息处调用；未启用/未协商时静默透传）
 # ---------------------------------------------------------------------------
 
+def sign_pubkey(secret: str, device_id: str, pubkey_b64: str) -> str:
+    """v4.3 M-2: 用房间主 secret 对 E2EE 公钥做 HMAC-SHA256 绑定。
+
+    relay 只存 sha256(secret) 从不存明文，因此无法伪造该签名；
+    mobile 用同样的主 secret 校验（仅手动配对持有主 secret 时有效）。
+    消息格式与 Kotlin 侧 E2eeCrypto.hmacPubkeySig 严格一致：
+    key=UTF-8(secret), msg=UTF-8("e2ee-pubkey|{device_id}|{pubkey_b64}"), 输出 hex。
+    """
+    import hashlib
+    import hmac as hmac_mod
+    msg = f"e2ee-pubkey|{device_id}|{pubkey_b64}".encode("utf-8")
+    return hmac_mod.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+
+
 def decrypt_incoming(msg: dict) -> dict:
     """收消息钩子（mobile -> desktop）。
 

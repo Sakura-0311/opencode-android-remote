@@ -560,4 +560,8 @@
     <string name="vm_039">[Offline] %1$s</string>
     <string name="vm_code_change">Code changes</string>
     <string name="vm_tool_desc">%1$s: %2$s</string>
+    <string name="e2ee_001">Encrypted</string>
+    <string name="e2ee_002">Waiting for handshake</string>
+    <string name="e2ee_003">Encrypted channel established</string>
+    <string name="e2ee_004">Encrypted channel established. Messages between this device and the desktop are end-to-end encrypted. The relay only sees routing metadata (who, when, how many bytes), not content.</string>
 </resources>

@@ -38,17 +38,17 @@ import com.opencode.android.ui.components.MarkdownText
 import com.opencode.android.ui.components.looksLikeMarkdown
 import com.opencode.android.util.MarkdownExporter
 import com.opencode.android.util.ErrorCodes
+import com.opencode.android.util.TAG_ALL
+import com.opencode.android.util.TAG_DEFAULT
+import com.opencode.android.util.TAG_KEY_TO_RES
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun tagDisplay(tag: String): String = when (tag) {
-    "全部" -> stringResource(R.string.tag_all)
-    "默认" -> stringResource(R.string.tag_default)
-    "代码调试" -> stringResource(R.string.tag_debug)
-    "自动化任务" -> stringResource(R.string.tag_auto)
-    "脚本生成" -> stringResource(R.string.tag_script)
-    else -> tag
+private fun tagDisplay(tag: String): String {
+    // v4.3 M-4: 内置标签按 key 映射文案，用户自建标签原样显示
+    val res = TAG_KEY_TO_RES[tag]
+    return if (res != null) stringResource(res) else tag
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,7 +104,11 @@ fun ChatScreen(
     crashReportEnabled: Boolean = false,
     onToggleCrashReport: (Boolean) -> Unit = {},
     e2eeEnabled: Boolean = false,
-    onToggleE2ee: (Boolean) -> Unit = {}
+    onToggleE2ee: (Boolean) -> Unit = {},
+    // v4.3 M-5: E2EE 状态可见
+    e2eePeerReady: Boolean = false,
+    showE2eeChannelDialog: Boolean = false,
+    onDismissE2eeChannelDialog: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -182,9 +186,24 @@ fun ChatScreen(
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
                                 )
+                                // v4.3 M-5: E2EE 状态标识（仅 E2EE 开启时显示）
+                                if (e2eeEnabled) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    val (e2eeLabel, e2eeColor) = if (e2eePeerReady) {
+                                        stringResource(R.string.e2ee_001) to Color(0xFF10B981)
+                                    } else {
+                                        stringResource(R.string.e2ee_002) to Color(0xFFF59E0B)
+                                    }
+                                    Text(
+                                        text = "🔒 $e2eeLabel",
+                                        fontSize = 11.sp,
+                                        color = e2eeColor,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
                             val currentSession = uiState.availableSessions.find { it.id == uiState.currentSessionId }
-                            val sessionTag = currentSession?.tag ?: "默认"
+                            val sessionTag = currentSession?.tag ?: TAG_DEFAULT
                             val sessionTagDisplay = tagDisplay(sessionTag)
                             val statusText = if (uiState.appMode == AppMode.CLOUD_HOSTED) {
                                 stringResource(R.string.chat_status_cloud, sessionTagDisplay, currentSession?.title ?: stringResource(R.string.chat_task_cloud))
@@ -655,6 +674,19 @@ fun ChatScreen(
     }
 
     // 会话分组与标签管理弹窗
+    // v4.3 M-5: 新配对「已建立加密通道」一次提示
+    if (showE2eeChannelDialog) {
+        AlertDialog(
+            onDismissRequest = onDismissE2eeChannelDialog,
+            title = { Text("🔒 " + stringResource(R.string.e2ee_003), fontWeight = FontWeight.Bold) },
+            text = { Text(stringResource(R.string.e2ee_004), fontSize = 14.sp) },
+            confirmButton = {
+                TextButton(onClick = onDismissE2eeChannelDialog) {
+                    Text(stringResource(android.R.string.ok))
+                }
+            }
+        )
+    }
     if (showSessionsModal) {
         SessionsManagementModal(
             sessions = uiState.availableSessions,
@@ -812,10 +844,10 @@ fun SessionsManagementModal(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(availableTags) { tag ->
-                        val isSelected = (selectedTagFilter == null && tag == "全部") || (selectedTagFilter == tag)
+                        val isSelected = (selectedTagFilter == null && tag == TAG_ALL) || (selectedTagFilter == tag)
                         FilterChip(
                             selected = isSelected,
-                            onClick = { onSelectTagFilter(if (tag == "全部") null else tag) },
+                            onClick = { onSelectTagFilter(if (tag == TAG_ALL) null else tag) },
                             label = { Text(tagDisplay(tag), fontSize = 11.sp) },
                             shape = RoundedCornerShape(12.dp)
                         )

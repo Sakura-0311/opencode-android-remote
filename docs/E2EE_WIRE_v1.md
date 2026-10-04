@@ -56,3 +56,12 @@
 - Android：`PreferencesManager.isE2eeEnabled` 运行时开关（菜单可切，默认 false）；
   desktop `E2EE_ENABLED` 环境变量（默认 0）。
 - 任一端未启用/未协商 → 明文互通（原有行为）。
+
+## 元数据声明（v4.3 M-5）
+
+- **加密的**：消息内容载荷（prompt 文本、回复流、文件内容）。
+- **不加密的**：路由元数据——`type`、`action`、`session_id`、`target_device_id`、
+  `relay_seq`、`req_id`、`client_msg_id`、时间戳、载荷字节数。relay 需要它们做
+  路由、缓冲、补发，这是设计取舍（不断线恢复能力优先）。
+- 即使 E2EE 开启，中继/网络观察者仍能看到「谁在何时发了多少字节给哪个设备」，
+  只是看不到内容。用户应在「安全」设置页与配对成功提示中知晓这一点。

@@ -16,6 +16,19 @@ import com.google.crypto.tink.subtle.X25519
  */
 object E2eeCrypto {
 
+    /**
+     * v4.3 M-2: E2EE 公钥 HMAC 绑定签名。
+     * 与 desktop_agent/modules/e2ee.py::sign_pubkey 严格一致：
+     * key=UTF-8(secret), msg=UTF-8("e2ee-pubkey|{deviceId}|{pubkeyB64}"), 输出小写 hex。
+     */
+    fun hmacPubkeySig(secret: String, deviceId: String, pubkeyB64: String): String {
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        mac.init(javax.crypto.spec.SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        val msg = "e2ee-pubkey|$deviceId|$pubkeyB64".toByteArray(Charsets.UTF_8)
+        return mac.doFinal(msg).joinToString("") { "%02x".format(it) }
+    }
+
+
     private const val HKDF_HASH = "HMACSHA256"
     private const val KEY_LEN = 32
     private const val NONCE_LEN = 12

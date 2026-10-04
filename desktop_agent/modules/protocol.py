@@ -566,6 +566,9 @@ async def run_pairing_flow(account_id: str, secret: str, relay_url: str):
                 try:
                     _, _pub_b64 = _em.get_or_create_keypair()
                     pairing_req["e2ee_pubkey"] = _pub_b64
+                    # v4.3 M-2: 公钥 HMAC 绑定（relay 无法伪造；mobile 手动配对时可校验）
+                    _did = config.get_desktop_device_id()
+                    pairing_req["e2ee_pubkey_sig"] = _em.sign_pubkey(secret, _did, _pub_b64)
                 except Exception as e:
                     logger.warning(f"E2EE 公钥生成失败，配对走明文流程: {e}")
             await ws.send(json.dumps(pairing_req))

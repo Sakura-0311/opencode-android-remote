@@ -561,4 +561,8 @@
 <string name="vm_039">%1$s</string>
 <string name="vm_code_change">Изменение кода</string>
 <string name="vm_tool_desc">%1$s: %2$s</string>
+    <string name="e2ee_001">Зашифровано</string>
+    <string name="e2ee_002">Ожидание handshake</string>
+    <string name="e2ee_003">Зашифрованный канал установлен</string>
+    <string name="e2ee_004">Зашифрованный канал установлен. Сообщения между этим устройством и десктопом зашифрованы end-to-end. Релей видит только метаданные маршрутизации (кто, когда, сколько байт), но не содержимое.</string>
 </resources>

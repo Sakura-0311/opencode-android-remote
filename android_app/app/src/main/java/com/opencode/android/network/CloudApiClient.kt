@@ -430,7 +430,7 @@ class CloudApiClient(private val appContext: Context) {
                             val id = obj.optString("id")
                             val title = obj.optString("title", obj.optString("name", appContext.getString(R.string.cloud_012, id)))
                             if (id.isNotEmpty()) {
-                                list.add(com.opencode.android.data.model.SessionItem(id = id, title = title, tag = appContext.getString(R.string.cloud_013)))
+                                list.add(com.opencode.android.data.model.SessionItem(id = id, title = title, tag = com.opencode.android.util.TAG_DEFAULT))
                             }
                         }
                     } catch (e: Exception) {}
