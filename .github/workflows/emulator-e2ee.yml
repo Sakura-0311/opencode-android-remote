@@ -39,8 +39,7 @@ jobs:
         working-directory: android_app
         run: |
           # 测试 workflow 关闭依赖校验（release 主 CI 保持严格校验）
-          gradle :app:assembleDebug --no-daemon --console=plain -q \
-            -Dorg.gradle.dependency.verification=off
+          # 只调 assembleDebugAndroidTest（自动构建所依赖的 debug APK），避免两次调用间的配置污染
           gradle :app:assembleDebugAndroidTest --no-daemon --console=plain -q \
             -Dorg.gradle.dependency.verification=off
           ls app/build/outputs/apk/debug/app-debug.apk
