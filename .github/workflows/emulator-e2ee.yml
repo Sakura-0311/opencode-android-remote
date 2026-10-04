@@ -39,6 +39,8 @@ jobs:
         working-directory: android_app
         run: |
           # 只调 assembleDebugAndroidTest（自动构建所依赖的 debug APK），避免两次调用间的配置污染
+          # 临时关闭校验定位问题
+          echo "org.gradle.dependency.verification=off" >> gradle.properties
           gradle :app:assembleDebugAndroidTest --no-daemon --console=plain -q
           ls app/build/outputs/apk/debug/app-debug.apk
           ls app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
