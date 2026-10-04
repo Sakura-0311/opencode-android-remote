@@ -135,7 +135,7 @@ def main():
     session_id = "test-session-1"
     plaintext = "hello e2ee integration test"
     enc = encrypt(m2d_m, plaintext, "mock-mobile-1", session_id)
-    ws_m.send(json.dumps({"action": "send_prompt", "target_device_id": "mock-desktop-1",
+    ws_m.send(json.dumps({"action": "send_prompt",
                           "session_id": session_id, "e2ee": True,
                           "encrypted_payload": enc, "sender_id": "mock-mobile-1"}))
     print(f"[test] mobile sent E2EE prompt", flush=True)
