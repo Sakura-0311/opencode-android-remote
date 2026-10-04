@@ -1,0 +1,58 @@
+name: Crash Diagnose (one-off)
+
+# 一次性崩溃诊断：用户手机（Android 16）上 v2.1+ 启动即闪退，本地无法复现。
+# 用云端模拟器（API 36 = Android 16）安装 release APK 并抓 logcat。
+# 用完即删，不进常规 CI。
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: "APK 下载地址"
+        required: true
+        default: "https://github.com/Sakura-0311/opencode-android-remote/releases/download/v3.0.0/opencode-remote-v3.0.apk"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 下载 APK
+        run: |
+          curl -sL -o app.apk "${{ inputs.apk_url }}"
+          ls -la app.apk
+
+      - name: 启用 KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: 启动模拟器并复现崩溃
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          script: |
+            adb install -r app.apk
+            # 清 logcat，启动应用
+            adb logcat -c
+            adb shell am start -n com.opencode.android/.MainActivity
+            sleep 15
+            # 抓崩溃相关的 logcat
+            adb logcat -d -v time "*:E" > logcat_error.txt || true
+            adb logcat -d -v time | grep -iE "FATAL|AndroidRuntime|com.opencode.android" > logcat_crash.txt || true
+            echo "=== FATAL EXCEPTION 摘要 ==="
+            grep -A 30 "FATAL EXCEPTION" logcat_crash.txt | head -60 || echo "(无 FATAL EXCEPTION)"
+            echo "=== 进程状态 ==="
+            adb shell pidof com.opencode.android || echo "(进程已死)"
+
+      - name: 上传 logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-logcat
+          path: |
+            logcat_error.txt
+            logcat_crash.txt
