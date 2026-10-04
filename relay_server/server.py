@@ -653,6 +653,7 @@ class ConnectionManager:
             desktop = None
             if target_id:
                 cand = room.get("desktops", {}).get(target_id)
+                logger.info(f"[E2EE-TEST] routing to target_id={target_id}, found={bool(cand)}, desktops={list(room.get('desktops', {}).keys())}")
                 if cand and getattr(cand, "websocket", None):
                     desktop = cand
                 else:
