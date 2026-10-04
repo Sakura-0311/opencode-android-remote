@@ -1,3 +1,25 @@
+# OpenCode Android Remote - Release v3.1.0（多 desktop 体验）
+
+## 内容
+
+- **定向路由（协议，可选字段）**：新增 capability `desktop_routing`；mobile→desktop 信封可带 `target_device_id`（缺省仍走主 desktop）；desktop→mobile 消息带 `source_device_id`；新增 `list_desktops` 查询在线 desktop 列表
+- **App**：设备页显示在线 desktop 列表（名称、ID 缩写、最近活动、主标记）；可选择目标电脑并持久化（按连接 profile 隔离）；会话与电脑绑定，切换目标时若有进行中会话会弹出确认；目标离线时给针对性 `DESKTOP_OFFLINE` 提示
+- **开关**：所有新行为受 `FeatureFlags.ENABLE_DESKTOP_ROUTING` 控制（默认关闭，保持 v3.0 主路由行为）；旧 relay 自动退回主路由
+- **序号语义不变**：relay_seq 仍按房间单调递增，断线补发逻辑不动
+
+## 兼容性
+
+- 协议只加可选字段；旧 App 忽略 `source_device_id`，行为不变
+- 旧 relay 不识别 `target_device_id` 时，App 退回主 desktop 路由
+- 回滚：App 回到 v3.0.x；服务端新字段可被忽略，无需数据迁移
+
+## 验证
+
+- 契约测试 19/19 通过（含新增 7 项路由用例）
+- 真机验证：未验证（需两台电脑 + 一部手机，见 TESTING_CHECKLIST 第 8 节）
+
+---
+
 # OpenCode Android Remote - Release v3.0.2（补丁：CI 与文档）
 
 ## 内容

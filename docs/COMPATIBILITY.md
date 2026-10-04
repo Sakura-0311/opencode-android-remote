@@ -36,6 +36,7 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 | 3.0.0 | 30000 |
 | 3.0.1 | 30001 |
 | 3.0.2 | 30002 |
+| 3.1.0 | 30100 |
 
 ## 协议兼容（v2.2.1）
 
@@ -44,6 +45,7 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 - 错误码新增 `PATH_NOT_ALLOWED`（文件沙盒拒绝）；旧 App 会显示为普通错误文案，不影响其他功能。
 - v2.3：`send_prompt` / `cancel` 信封新增可选 `client_msg_id`；agent 可能回复 `duplicate_ignored`（旧 App 忽略未知 type）。
 - v2.4：`revoke_device` / `rename_device` 改按 `device_id`（仍兼容 `device_name`）；`device_list` / `pair_success` 新增 `device_id`（旧 App 忽略）。
+- v3.1：新增 capability `desktop_routing`。`send_prompt` 信封新增可选 `target_device_id`（缺省走主 desktop）；desktop→mobile 消息新增可选 `source_device_id`；新增 `list_desktops` → `desktop_list` 查询在线 desktop。旧 App 忽略未知字段；旧 relay 不识别 `target_device_id` 时 App 通过 `serverSupports(desktop_routing)` 退回主路由。
 
 ## 存储兼容
 

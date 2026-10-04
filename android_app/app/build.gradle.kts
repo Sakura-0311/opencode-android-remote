@@ -50,7 +50,7 @@ android {
     compileSdk = 34
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000）
-    val appVersionName = "3.0.2"
+    val appVersionName = "3.1.0"
     val appVersionCode = appVersionName.split(".").let { p ->
         p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
     }

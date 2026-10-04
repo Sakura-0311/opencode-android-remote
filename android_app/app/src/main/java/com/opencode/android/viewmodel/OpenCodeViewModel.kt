@@ -23,6 +23,7 @@ import com.opencode.android.util.OpLog
 import com.opencode.android.util.ConfigImportExport
 import com.opencode.android.data.model.ConnectionProfile
 import com.opencode.android.network.DeviceInfo
+import com.opencode.android.network.DesktopInfo
 import com.opencode.android.network.FileEntry
 import com.opencode.android.network.AgentInfo
 import com.opencode.android.network.ModelInfo
@@ -37,6 +38,8 @@ import com.opencode.android.network.TransportFactory
 import com.opencode.android.network.TransportListener
 import com.opencode.android.network.TransportParams
 import com.opencode.android.util.AppLog
+import com.opencode.android.util.DesktopRoutingPolicy
+import com.opencode.android.util.FeatureFlags
 import com.opencode.android.network.RelayConnectionState
 import com.opencode.android.network.RelayWebSocketClient
 import com.opencode.android.network.TunnelDiagnosticsHelper
@@ -134,7 +137,9 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 availableSessions = savedSessions,
                 currentSessionId = savedSessions.firstOrNull()?.id ?: "",
                 taskStatus = effectiveStatus,
-                taskStatusDetail = effectiveDetail
+                taskStatusDetail = effectiveDetail,
+                // v3.1: 恢复已选目标电脑（按 profile 隔离）
+                targetDesktopId = prefsManager.getTargetDesktopId()
             )
         )
 
@@ -565,11 +570,22 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
         if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
             // v1.6 P1: 透传用户选择的 Model/Agent
+            // v3.1: 定向路由——开关开且服务端支持且已选目标时才传 target，否则走主 desktop
+            val targetId = DesktopRoutingPolicy.resolveTarget(
+                flagEnabled = FeatureFlags.ENABLE_DESKTOP_ROUTING,
+                serverSupports = relayClient.serverSupports(DesktopRoutingPolicy.CAPABILITY),
+                targetDeviceId = _uiState.value.targetDesktopId
+            )
+            val sid = _uiState.value.currentSessionId
+            if (targetId != null && sid.isNotEmpty()) {
+                prefsManager.saveSessionDesktopBinding(sid, targetId)
+            }
             relayClient.sendPrompt(
                 trimmed,
-                _uiState.value.currentSessionId,
+                sid,
                 model = _uiState.value.selectedModel,
-                agent = _uiState.value.selectedAgent
+                agent = _uiState.value.selectedAgent,
+                targetDeviceId = targetId
             )
         } else {
             _uiState.update { it.copy(cloudConnectionState = CloudConnectionState.CONNECTING) }
@@ -709,6 +725,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
         // P1-1: 认证成功后主动向电脑端查询真实会话列表
         relayClient.sendListSessions()
+        // v3.1: 服务端支持 desktop_routing 时拉取在线 desktop 列表；旧 relay 不请求（退回主路由）
+        if (FeatureFlags.ENABLE_DESKTOP_ROUTING && relayClient.serverSupports(DesktopRoutingPolicy.CAPABILITY)) {
+            relayClient.requestDesktopList()
+        }
     }
 
     override fun onSessionsListReceived(sessions: List<SessionItem>) {
@@ -1104,6 +1124,112 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onDeviceRenamed(deviceName: String) {
         requestDeviceList()
+    }
+
+    // =========================================================================
+    // v3.1 多 desktop 定向路由
+    // =========================================================================
+
+    /** 打开目标电脑选择列表（Dialog 打开时会自动刷新） */
+    fun openDesktopList() {
+        _uiState.update { it.copy(showDesktopList = true) }
+    }
+
+    fun closeDesktopList() {
+        _uiState.update { it.copy(showDesktopList = false) }
+    }
+
+    /** 刷新在线 desktop 列表（开关关闭或旧 relay 时不请求） */
+    fun refreshDesktopList() {
+        if (_uiState.value.appMode == AppMode.DESKTOP_RELAY &&
+            FeatureFlags.ENABLE_DESKTOP_ROUTING &&
+            relayClient.serverSupports(DesktopRoutingPolicy.CAPABILITY)
+        ) {
+            relayClient.requestDesktopList()
+        }
+    }
+
+    override fun onDesktopList(desktops: List<DesktopInfo>) {
+        val prevTarget = _uiState.value.targetDesktopId
+        // 已选目标不在在线列表中 → 清空选择，回主 desktop 路由
+        val targetAlive = prevTarget.isEmpty() || desktops.any { it.deviceId == prevTarget }
+        if (!targetAlive) {
+            prefsManager.saveTargetDesktopId("")
+            AppLog.i("DesktopRouting", "target $prevTarget offline, fallback to primary")
+        }
+        _uiState.update {
+            it.copy(
+                desktopList = desktops,
+                targetDesktopId = if (targetAlive) prevTarget else ""
+            )
+        }
+    }
+
+    override fun onTargetDesktopOffline(targetDeviceId: String, message: String) {
+        OpenCodeKeepAliveService.stopTaskProgress(getApplication())
+        val targetName = _uiState.value.desktopList
+            .firstOrNull { it.deviceId == targetDeviceId }
+            ?.deviceName.orEmpty()
+        val hint = DesktopRoutingPolicy.offlineHint(targetName, targetDeviceId, message)
+        AppLog.w("DesktopRouting", "target offline: $hint")
+        _uiState.update { state ->
+            val sysMsg = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                role = MessageRole.SYSTEM,
+                content = "【离线】$hint",
+                isError = true
+            )
+            state.copy(
+                messages = (state.messages + sysMsg).takeLast(MAX_MESSAGES_COUNT),
+                isGenerating = false,
+                // 复用既有 appError 展示机制
+                appError = AppError("DESKTOP_OFFLINE", hint),
+                targetOfflineHint = hint
+            )
+        }
+    }
+
+    fun clearTargetOfflineHint() {
+        _uiState.update { it.copy(targetOfflineHint = null) }
+    }
+
+    /**
+     * 请求切换目标电脑。有活跃会话（生成中或存在当前会话）时先弹确认，
+     * 由 UI 层根据 pendingTargetSwitch 展示确认对话框。
+     */
+    fun requestTargetSwitch(deviceId: String) {
+        val st = _uiState.value
+        if (st.isGenerating || st.currentSessionId.isNotEmpty()) {
+            _uiState.update { it.copy(pendingTargetSwitch = deviceId) }
+        } else {
+            applyTargetSwitch(deviceId)
+        }
+    }
+
+    fun confirmTargetSwitch() {
+        val pending = _uiState.value.pendingTargetSwitch ?: return
+        _uiState.update { it.copy(pendingTargetSwitch = null) }
+        applyTargetSwitch(pending)
+    }
+
+    fun cancelTargetSwitch() {
+        _uiState.update { it.copy(pendingTargetSwitch = null) }
+    }
+
+    private fun applyTargetSwitch(deviceId: String) {
+        prefsManager.saveTargetDesktopId(deviceId)
+        val sid = _uiState.value.currentSessionId
+        if (sid.isNotEmpty()) {
+            prefsManager.saveSessionDesktopBinding(sid, deviceId)
+        }
+        _uiState.update {
+            it.copy(
+                targetDesktopId = deviceId,
+                showDesktopList = false,
+                targetOfflineHint = null,
+                appError = null
+            )
+        }
     }
 
     // =========================================================================

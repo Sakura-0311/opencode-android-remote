@@ -413,4 +413,32 @@ class PreferencesManager(context: Context) {
         sp.edit().putString(KEY_PROFILE_CLOUD_KEY_PREFIX + profileId, k).apply()
         return true
     }
+
+    // ============ v3.1: 多 desktop 目标选择（按 profile 隔离） ============
+
+    private val targetDesktopStore = TargetDesktopStore(object : TargetDesktopStore.Kv {
+        override fun getString(key: String, def: String): String =
+            prefs.getString(key, def) ?: def
+        override fun putString(key: String, value: String) {
+            prefs.edit().putString(key, value).apply()
+        }
+    })
+
+    /** 目标电脑 deviceId；空字符串表示未选择，走主 desktop */
+    fun saveTargetDesktopId(deviceId: String) {
+        targetDesktopStore.saveTargetDesktopId(getActiveProfileId(), deviceId)
+    }
+
+    fun getTargetDesktopId(): String {
+        return targetDesktopStore.getTargetDesktopId(getActiveProfileId())
+    }
+
+    /** 会话与电脑绑定 */
+    fun saveSessionDesktopBinding(sessionId: String, deviceId: String) {
+        targetDesktopStore.saveSessionBinding(sessionId, deviceId)
+    }
+
+    fun getSessionDesktopBinding(sessionId: String): String {
+        return targetDesktopStore.getSessionBinding(sessionId)
+    }
 }

@@ -1,6 +1,7 @@
 package com.opencode.android.data.model
 
 import com.opencode.android.network.AgentInfo
+import com.opencode.android.network.DesktopInfo
 import com.opencode.android.network.DeviceInfo
 import com.opencode.android.network.FileEntry
 import com.opencode.android.network.ModelInfo
@@ -116,6 +117,12 @@ data class OpenCodeUiState(
     val projects: List<ProjectInfo> = emptyList(),
     val favoriteProjectIds: Set<String> = emptySet(),
     val projectsError: String? = null,
+    // v3.1: 多 desktop 定向路由——在线列表 / 已选目标（空=走主）/ 列表弹窗 / 离线提示 / 待确认切换
+    val desktopList: List<DesktopInfo> = emptyList(),
+    val targetDesktopId: String = "",
+    val showDesktopList: Boolean = false,
+    val targetOfflineHint: String? = null,
+    val pendingTargetSwitch: String? = null,
     
     // 电脑中继模式参数
     val accountId: String = "",

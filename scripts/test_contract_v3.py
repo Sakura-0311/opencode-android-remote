@@ -194,6 +194,116 @@ async def test_primary_fallback_by_auth_time():
         await w.close()
 
 
+async def _drain(ws, n=5):
+    for _ in range(n):
+        try:
+            await asyncio.wait_for(ws.recv(), timeout=0.2)
+        except asyncio.TimeoutError:
+            break
+
+
+async def test_desktop_routing():
+    """v3.1: desktop_routing —— target_device_id 定向路由 / 缺省走主 / 目标不存在报错 / source 打标 / list_desktops"""
+    dA = await new_ws("desktop")
+    ack_a, _ = await hello_auth(dA, "desktop", "desk-A")
+    check("hello_ack 含 desktop_routing",
+          "desktop_routing" in ack_a.get("server_capabilities", []), str(ack_a.get("server_capabilities")))
+    await asyncio.sleep(0.05)
+    dB = await new_ws("desktop")
+    await hello_auth(dB, "desktop", "desk-B")
+    await asyncio.sleep(0.3)
+    # 此时主是 B（最后认证）
+    m = await new_ws("mobile")
+    await hello_auth(m, "mobile", "mobile-rt")
+    await _drain(dA); await _drain(dB); await _drain(m)
+
+    # 1. 带 target_device_id=desk-A：消息应到 A（而非主 B）
+    await m.send(json.dumps({"type": "send_prompt", "session_id": "s1",
+                             "prompt": "to-A", "target_device_id": "desk-A"}))
+    got_a = got_b = None
+    try:
+        raw = await asyncio.wait_for(dA.recv(), timeout=3)
+        got_a = json.loads(raw)
+    except asyncio.TimeoutError:
+        pass
+    try:
+        raw = await asyncio.wait_for(dB.recv(), timeout=1)
+        got_b = json.loads(raw)
+    except asyncio.TimeoutError:
+        pass
+    check("target_device_id 路由到 A",
+          got_a and got_a.get("prompt") == "to-A" and not got_b,
+          f"A={bool(got_a)} B={bool(got_b)}")
+
+    # 2. 不带 target：走主 desktop（B）
+    await _drain(dA); await _drain(dB)
+    await m.send(json.dumps({"type": "send_prompt", "session_id": "s2", "prompt": "to-primary"}))
+    got_b2 = None
+    try:
+        raw = await asyncio.wait_for(dB.recv(), timeout=3)
+        got_b2 = json.loads(raw)
+    except asyncio.TimeoutError:
+        pass
+    check("无 target 走主 desktop（B）",
+          got_b2 and got_b2.get("prompt") == "to-primary", str(bool(got_b2)))
+
+    # 3. target 不存在：明确错误（DESKTOP_OFFLINE + target_device_id）
+    await _drain(m)
+    await m.send(json.dumps({"type": "send_prompt", "session_id": "s3",
+                             "prompt": "x", "target_device_id": "desk-NOPE"}))
+    err = None
+    try:
+        err = json.loads(await asyncio.wait_for(m.recv(), timeout=3))
+    except asyncio.TimeoutError:
+        pass
+    check("目标不存在返回明确错误",
+          err and err.get("type") == "error" and err.get("code") == "DESKTOP_OFFLINE"
+          and err.get("target_device_id") == "desk-NOPE", str(err))
+
+    # 4. desktop->mobile 消息带 source_device_id
+    await _drain(m)
+    await dA.send(json.dumps({"type": "task_update", "session_id": "s1", "text": "hi"}))
+    fwd = None
+    try:
+        fwd = json.loads(await asyncio.wait_for(m.recv(), timeout=3))
+    except asyncio.TimeoutError:
+        pass
+    check("desktop->mobile 带 source_device_id",
+          fwd and fwd.get("source_device_id") == "desk-A", str(fwd))
+
+    # 5. list_desktops 返回在线列表（含主标记）
+    await _drain(m)
+    await m.send(json.dumps({"type": "list_desktops"}))
+    lst = None
+    try:
+        lst = json.loads(await asyncio.wait_for(m.recv(), timeout=3))
+    except asyncio.TimeoutError:
+        pass
+    ds = (lst or {}).get("desktops", [])
+    ids = {d.get("device_id") for d in ds}
+    prim = [d for d in ds if d.get("is_primary")]
+    check("list_desktops 返回 A/B 且主为 B",
+          ids == {"desk-A", "desk-B"} and len(prim) == 1 and prim[0]["device_id"] == "desk-B",
+          str(ds))
+
+    # 6. v2 旧 mobile（无 hello、无 target）行为不变：仍走主
+    m2 = await new_ws("mobile")
+    await m2.send(json.dumps({"type": "auth", "account_id": ACCOUNT, "secret": SECRET,
+                              "client_type": "mobile"}))
+    await asyncio.wait_for(m2.recv(), timeout=5)
+    await _drain(dA); await _drain(dB)
+    await m2.send(json.dumps({"type": "send_prompt", "session_id": "s4", "prompt": "v2"}))
+    got_v2 = None
+    try:
+        got_v2 = json.loads(await asyncio.wait_for(dB.recv(), timeout=3))
+    except asyncio.TimeoutError:
+        pass
+    check("v2 旧客户端无 target 仍走主", got_v2 and got_v2.get("prompt") == "v2", str(bool(got_v2)))
+
+    for w in (dA, dB, m, m2):
+        await w.close()
+
+
 async def main():
     env = dict(os.environ)
     proc = subprocess.Popen(
@@ -213,6 +323,7 @@ async def main():
         await test_v2_legacy_auth()
         await test_multi_desktop()
         await test_primary_fallback_by_auth_time()
+        await test_desktop_routing()
     finally:
         proc.terminate()
         proc.wait(timeout=10)

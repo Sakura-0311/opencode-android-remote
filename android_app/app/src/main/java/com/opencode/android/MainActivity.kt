@@ -27,6 +27,7 @@ import com.opencode.android.util.UpdateChecker
 import com.opencode.android.viewmodel.OpenCodeViewModel
 import com.opencode.android.service.OpenCodeKeepAliveService
 import com.opencode.android.ui.screens.DeviceManagementDialog
+import com.opencode.android.ui.screens.DesktopListDialog
 import com.opencode.android.ui.screens.FileBrowserDialog
 import com.opencode.android.ui.screens.TaskCenterDialog
 import com.opencode.android.ui.screens.ConnectionDiagnoseDialog
@@ -305,7 +306,34 @@ class MainActivity : ComponentActivity() {
                         onRefresh = { viewModel.requestDeviceList() },
                         onRevoke = { id, name -> viewModel.revokeDevice(id, name) },
                         onRename = { id, old, new -> viewModel.renameDevice(id, old, new) },
-                        onDismiss = { showDeviceManager = false }
+                        onDismiss = { showDeviceManager = false },
+                        onOpenDesktopList = { viewModel.openDesktopList() }
+                    )
+                }
+
+                // v3.1: 在线 desktop 列表（选择目标电脑）
+                if (uiState.showDesktopList) {
+                    DesktopListDialog(
+                        desktops = uiState.desktopList,
+                        selectedDeviceId = uiState.targetDesktopId,
+                        onRefresh = { viewModel.refreshDesktopList() },
+                        onSelect = { viewModel.requestTargetSwitch(it) },
+                        onDismiss = { viewModel.closeDesktopList() }
+                    )
+                }
+
+                // v3.1: 切换目标电脑时有进行中会话 → 确认
+                uiState.pendingTargetSwitch?.let { pending ->
+                    AlertDialog(
+                        onDismissRequest = { viewModel.cancelTargetSwitch() },
+                        title = { Text("切换目标电脑") },
+                        text = { Text("当前会话正在进行中，切换后新消息将发送到另一台电脑。确定切换吗？") },
+                        confirmButton = {
+                            Button(onClick = { viewModel.confirmTargetSwitch() }) { Text("切换") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { viewModel.cancelTargetSwitch() }) { Text("取消") }
+                        }
                     )
                 }
 

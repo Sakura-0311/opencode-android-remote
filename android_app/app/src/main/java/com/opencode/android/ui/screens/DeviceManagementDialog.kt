@@ -27,7 +27,8 @@ fun DeviceManagementDialog(
     onRefresh: () -> Unit,
     onRevoke: (String, String) -> Unit,
     onRename: (String, String, String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenDesktopList: (() -> Unit)? = null
 ) {
     var revokeTarget by remember { mutableStateOf<DeviceInfo?>(null) }
     var renameTarget by remember { mutableStateOf<DeviceInfo?>(null) }
@@ -57,11 +58,23 @@ fun DeviceManagementDialog(
                     }
                 }
 
-                Text(
-                    "${devices.size} 台已配对设备",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${devices.size} 台已配对设备",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    // v3.1: 在线 desktop 列表入口
+                    if (onOpenDesktopList != null) {
+                        TextButton(onClick = onOpenDesktopList) {
+                            Text("目标电脑", fontSize = 12.sp)
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
 
                 if (devices.isEmpty()) {

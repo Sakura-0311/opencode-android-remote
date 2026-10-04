@@ -35,6 +35,7 @@ SERVER_CAPABILITIES = [
     "device_id_revoke", # 按 device_id 撤销
     "room_buffer",      # 房间消息缓冲与断线补发
     "pairing",          # 扫码配对
+    "desktop_routing",  # v3.1: source/target_device_id 定向路由
 ]
 
 # ==============================================================================
@@ -148,6 +149,7 @@ class ClientSession:
         self.is_authenticated = False
         # v3.0.2/B2: 本次认证时间（主 desktop 掉线回退时选最近认证者）
         self.auth_time = 0.0
+        self.last_active = 0.0  # v3.1: desktop 最近活动（在线列表用）
         # v2.4: 设备身份（设备密钥登录时填充）
         self.device_id = ""
         self.device_name = str()
@@ -516,6 +518,25 @@ class ConnectionManager:
             })
         return result
 
+    def list_desktops(self, account_id: str):
+        """v3.1: 在线 desktop 列表（device_id、名称缩写、最近活动、是否主）。"""
+        room = self.rooms.get(account_id)
+        if not room:
+            return []
+        primary = room.get("desktop")
+        result = []
+        for did, sess in room.get("desktops", {}).items():
+            name = getattr(sess, "device_name", "") or did or "Desktop"
+            result.append({
+                "device_id": did,
+                "device_name": name,
+                "is_primary": sess is primary,
+                "last_active": getattr(sess, "last_active", 0.0) or getattr(sess, "auth_time", 0.0),
+            })
+        # 按最近活动倒序
+        result.sort(key=lambda d: d["last_active"], reverse=True)
+        return result
+
     def mark_device_active(self, account_id: str, device_name: str):
         """更新设备最近活动时间。"""
         room = self.rooms.get(account_id)
@@ -590,10 +611,39 @@ class ConnectionManager:
         device_name = getattr(sender_session, "device_name", None)
         if device_name:
             self.mark_device_active(account_id, device_name)
+        # v3.1: desktop 会话的最近活动（在线 desktop 列表用）
+        if sender_session.client_type == "desktop":
+            sender_session.last_active = time.time()
 
         room = self.rooms[account_id]
         if sender_session.client_type == "mobile":
-            desktop = room.get("desktop")
+            # v3.1: 可选 target_device_id 定向路由；缺省仍走主 desktop
+            target_id = ""
+            try:
+                _m = json.loads(message_str)
+                if isinstance(_m, dict):
+                    target_id = str(_m.get("target_device_id", "") or "")
+            except Exception:
+                pass
+            desktop = None
+            if target_id:
+                cand = room.get("desktops", {}).get(target_id)
+                if cand and getattr(cand, "websocket", None):
+                    desktop = cand
+                else:
+                    # 目标不存在或不在线：明确报错（带目标标识）
+                    try:
+                        await sender_session.websocket.send_text(json.dumps({
+                            "type": "error",
+                            "code": "DESKTOP_OFFLINE",
+                            "target_device_id": target_id,
+                            "message": f"目标电脑（{target_id[:8]}…）当前不在线，无法执行指令。"
+                        }))
+                    except Exception:
+                        pass
+                    return
+            else:
+                desktop = room.get("desktop")
             if desktop and desktop.websocket:
                 try:
                     await desktop.websocket.send_text(message_str)
@@ -617,6 +667,10 @@ class ConnectionManager:
                 msg_obj = json.loads(message_str)
                 if isinstance(msg_obj, dict):
                     msg_obj["relay_seq"] = seq
+                    # v3.1: 记录消息来源 desktop（缓冲条目一并带上；旧 App 忽略）
+                    _src_id = getattr(sender_session, "device_id", "") or ""
+                    if _src_id:
+                        msg_obj["source_device_id"] = _src_id
                     sequenced_str = json.dumps(msg_obj)
                 else:
                     sequenced_str = message_str
@@ -1024,6 +1078,13 @@ async def websocket_endpoint(
                     await websocket.send_text(json.dumps({
                         "type": "device_list",
                         "devices": manager.list_devices(session.account_id)
+                    }))
+                    continue
+                # v3.1: 在线 desktop 列表（设备页选择目标电脑用）
+                elif parsed.get("type") == "list_desktops":
+                    await websocket.send_text(json.dumps({
+                        "type": "desktop_list",
+                        "desktops": manager.list_desktops(session.account_id)
                     }))
                     continue
                 elif parsed.get("type") == "revoke_device":

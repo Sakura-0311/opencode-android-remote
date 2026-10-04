@@ -81,8 +81,9 @@ interface RelayListener {
     // v1.6 P1 Model/Agent 管理
     fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>, configError: String? = null) {}
 
-    // v1.6 P1 项目管理中心
-    fun onProjectsDataReceived(projects: List<ProjectInfo>, projectsError: String? = null) {}
+    // v3.1: 多 desktop 定向路由
+    fun onDesktopList(desktops: List<DesktopInfo>) {}
+    fun onTargetDesktopOffline(targetDeviceId: String, message: String) {}
 }
 
 /**
@@ -123,6 +124,16 @@ data class DeviceInfo(
     val deviceName: String,
     val createdAt: Long = 0L,
     val isOnline: Boolean = false,
+    val lastActive: Long = 0L
+)
+
+/**
+ * v3.1 多 desktop 定向路由：在线 desktop 信息（relay `desktop_list` 下发）
+ */
+data class DesktopInfo(
+    val deviceId: String,
+    val deviceName: String,
+    val isPrimary: Boolean = false,
     val lastActive: Long = 0L
 )
 
@@ -497,6 +508,11 @@ class RelayWebSocketClient {
                     newSeqSeen = true
                 }
             }
+            // v3.1: 记录消息来源 desktop（暂只打日志，不展示）
+            val srcId = json.optString("source_device_id", "")
+            if (srcId.isNotEmpty()) {
+                AppLog.d("Relay", "msg from desktop $srcId type=${json.optString("type")}")
+            }
             when (val type = json.optString("type")) {
                 // v3.0: 能力协商应答——记录服务端版本与能力，然后发 auth
                 "hello_ack" -> {
@@ -796,7 +812,32 @@ class RelayWebSocketClient {
                 "error" -> {
                     val code = json.optString("code", "UNKNOWN_ERROR")
                     val message = json.optString("message", "发生未知错误")
-                    listener?.onAppError(code, message)
+                    // v3.1: 目标电脑离线 → 针对性提示，而非笼统错误
+                    val targetId = json.optString("target_device_id", "")
+                    if (code == "DESKTOP_OFFLINE" && targetId.isNotEmpty()) {
+                        listener?.onTargetDesktopOffline(targetId, message)
+                    } else {
+                        listener?.onAppError(code, message)
+                    }
+                }
+                // v3.1: 在线 desktop 列表
+                "desktop_list" -> {
+                    val arr = json.optJSONArray("desktops")
+                    val list = mutableListOf<DesktopInfo>()
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            list.add(
+                                DesktopInfo(
+                                    deviceId = o.optString("device_id", ""),
+                                    deviceName = o.optString("device_name", "?"),
+                                    isPrimary = o.optBoolean("is_primary", false),
+                                    lastActive = (o.optDouble("last_active", 0.0) * 1000).toLong()
+                                )
+                            )
+                        }
+                    }
+                    listener?.onDesktopList(list)
                 }
                 else -> {}
             }
@@ -829,6 +870,11 @@ class RelayWebSocketClient {
      */
     fun requestDeviceList() {
         webSocket?.send(JSONObject().apply { put("type", "list_devices") }.toString())
+    }
+
+    /** v3.1: 请求在线 desktop 列表（定向路由的目标选择用） */
+    fun requestDesktopList() {
+        webSocket?.send(JSONObject().apply { put("type", "list_desktops") }.toString())
     }
 
     // v2.4: 按 deviceId 撤销（deviceName 仅兼容旧 relay）
@@ -938,7 +984,14 @@ class RelayWebSocketClient {
         return ok
     }
 
-    fun sendPrompt(prompt: String, sessionId: String, model: ModelInfo? = null, agent: AgentInfo? = null) {
+    fun sendPrompt(
+        prompt: String,
+        sessionId: String,
+        model: ModelInfo? = null,
+        agent: AgentInfo? = null,
+        // v3.1: 定向路由目标 desktop（可选；为空则服务端走主 desktop）
+        targetDeviceId: String? = null
+    ) {
         val clientMsgId = newClientMsgId()
         val payload = JSONObject().apply {
             put("prompt", prompt)
@@ -958,6 +1011,8 @@ class RelayWebSocketClient {
             put("session_id", sessionId)
             put("req_id", UUID.randomUUID().toString())
             put("client_msg_id", clientMsgId)
+            // v3.1: 顶层定向字段，与 action/session_id 同级（旧 relay/agent 忽略未知字段）
+            if (!targetDeviceId.isNullOrEmpty()) put("target_device_id", targetDeviceId)
             put("payload", payload)
         }
         sendEnvelope("send_prompt", envelope, clientMsgId)

@@ -6,4 +6,6 @@ package com.opencode.android.util
 object FeatureFlags {
     /** 网络监听（NetworkMonitor）：false 时回到 v2.2 行为（无网络回调） */
     const val USE_NETWORK_MONITOR = true
+    /** v3.1: 多 desktop 定向路由。false 时保持 v3.0 的主 desktop 路由行为 */
+    const val ENABLE_DESKTOP_ROUTING = false
 }
