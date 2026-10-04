@@ -4,7 +4,6 @@ import android.util.Base64
 import com.google.crypto.tink.subtle.ChaCha20Poly1305
 import com.google.crypto.tink.subtle.Hkdf
 import com.google.crypto.tink.subtle.X25519
-import java.security.SecureRandom
 
 /**
  * v4.1: E2EE 端到端加密（mobile ↔ desktop，relay 盲转发）。
@@ -22,8 +21,6 @@ object E2eeCrypto {
     private const val NONCE_LEN = 12
     private const val INFO_M2D = "opencode-remote-e2ee-v1-m2d"
     private const val INFO_D2M = "opencode-remote-e2ee-v1-d2m"
-
-    private val secureRandom = SecureRandom()
 
     /**
      * v4.1: Base64 编解解耦（测试替身）。
@@ -55,23 +52,22 @@ object E2eeCrypto {
 
     /**
      * 加密。plaintext 为待保护内容的 UTF-8 字符串（通常是一段 JSON）。
+     * Tink 的 ChaCha20Poly1305.encrypt 自带 12B 随机 nonce，返回 nonce||密文；
+     * 线格式 base64(nonce||ct) 与规范一致。
      * @param senderDeviceId 发送端 device_id，用于 AAD 绑定
      */
     fun encrypt(plaintext: String, key: ByteArray, senderDeviceId: String, sessionId: String): String {
-        val nonce = ByteArray(NONCE_LEN).also { secureRandom.nextBytes(it) }
         val aad = aad(senderDeviceId, sessionId)
-        val ct = ChaCha20Poly1305(key).encrypt(nonce, plaintext.toByteArray(Charsets.UTF_8), aad)
-        return b64(nonce + ct)
+        val out = ChaCha20Poly1305(key).encrypt(plaintext.toByteArray(Charsets.UTF_8), aad)
+        return b64(out)
     }
 
     /** 解密 [encrypt] 产生的 base64 载荷，失败抛 GeneralSecurityException。 */
     fun decrypt(payloadB64: String, key: ByteArray, senderDeviceId: String, sessionId: String): String {
         val raw = unb64(payloadB64)
         require(raw.size > NONCE_LEN) { "e2ee payload too short" }
-        val nonce = raw.copyOfRange(0, NONCE_LEN)
-        val ct = raw.copyOfRange(NONCE_LEN, raw.size)
         val aad = aad(senderDeviceId, sessionId)
-        val pt = ChaCha20Poly1305(key).decrypt(nonce, ct, aad)
+        val pt = ChaCha20Poly1305(key).decrypt(raw, aad)
         return pt.toString(Charsets.UTF_8)
     }
 

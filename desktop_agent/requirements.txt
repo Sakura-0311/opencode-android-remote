@@ -1,4 +1,4 @@
 aiohttp>=3.14.3
 websockets>=12.0
 qrcode>=7.4.2
-cryptography>=42
+cryptography>=44.0.0  # v4.1 E2EE: 42 有已知 CVE，>=44 干净

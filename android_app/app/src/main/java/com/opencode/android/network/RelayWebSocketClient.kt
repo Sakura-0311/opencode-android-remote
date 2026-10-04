@@ -10,7 +10,6 @@ import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.util.AppLog
 import com.opencode.android.security.E2eeManager
 import com.opencode.android.util.FeatureFlags
-import com.opencode.android.util.FeatureFlags
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
