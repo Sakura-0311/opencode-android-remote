@@ -20,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -310,7 +311,7 @@ private fun CodeBlockView(code: String, language: String, baseColor: Color) {
             IconButton(onClick = { clipboard.setText(AnnotatedString(code)) }) {
                 Icon(
                     imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "复制代码",
+                    contentDescription = stringResource(R.string.md_001),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

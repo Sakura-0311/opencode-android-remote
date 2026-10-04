@@ -45,6 +45,7 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 | 4.1.0 | 40100 | E2EE（默认关闭，非破坏性） |
 | 4.2.0 | 40200 | E2EE 运行时开关（非破坏性） |
 | 4.2.0 | 40200 | 安全审计优化（V2/V4-1/V4-2/O1/O3/O4，非破坏性） |
+| 4.3.0 | 40300 | 多语言（10 种语言+跟随系统，非破坏性） |
 | 4.0.0 | 40000 |
 
 ## 协议兼容（v4.0，唯一破坏性版本）
@@ -75,6 +76,7 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 - Relay：`~/.config/opencode-remote/relay_state.json`（0600，schema_version=1），只存设备密钥哈希与主密钥哈希。
 - Agent：主 Secret 默认位置从启动目录 `.opencode_secret` 迁移到 `~/.config/opencode-remote/.opencode_secret`；旧位置有有效密钥时自动迁移（目录 0700 / 文件 0600）。
 - v2.3：`PreferencesManager` 新增 `schema_version`（当前 1），只增不改 key。
+- v4.3：`PreferencesManager` 新增 `app_locale`（明文，空字符串=跟随系统），只增不改 key。
 
 ## 发布顺序
 

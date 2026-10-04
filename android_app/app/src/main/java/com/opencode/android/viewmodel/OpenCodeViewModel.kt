@@ -122,7 +122,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             TaskStatus.DISCONNECTED
         } else restoredStatus
         val effectiveDetail = if (effectiveStatus == TaskStatus.DISCONNECTED && restoredStatus != TaskStatus.IDLE) {
-            "应用重启，连接已断开。${savedDetail}"
+            getApplication<Application>().getString(R.string.vm_001, savedDetail)
         } else savedDetail
 
         _uiState = MutableStateFlow(
@@ -264,7 +264,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             callId = UUID.randomUUID().toString(),
             toolName = "edit_file",
             filePath = "src/auth/AuthService.kt",
-            summary = "重构 Token 校验逻辑，引入高可靠性 JWT 签名算法",
+            summary = getApplication<Application>().getString(R.string.vm_003),
             diffLines = sampleDiff
         )
         _uiState.update { it.copy(pendingApproval = approval) }
@@ -295,11 +295,11 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         OpLog.record(getApplication(), OpLog.OpType.REJECT, "callId=$callId")
         // P0-3 修复：回传真实拒绝决定；B-9: 云端模式同上
         if (state.appMode == AppMode.DESKTOP_RELAY) {
-            relayClient.sendApprovalResponse(callId, false, "用户在手机端拒绝了修改", nonce)
+            relayClient.sendApprovalResponse(callId, false, getApplication<Application>().getString(R.string.vm_004), nonce)
         } else if (state.appMode == AppMode.CLOUD_HOSTED) {
             cloudClient.respondToPermission(
                 state.cloudServerUrl, state.cloudApiKey,
-                state.currentSessionId, callId, false, "用户在手机端拒绝了修改"
+                state.currentSessionId, callId, false, getApplication<Application>().getString(R.string.vm_004)
             )
         }
     }
@@ -318,11 +318,11 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
         _uiState.update {
             it.copy(
-                diagnostics = DiagnosticsResult(isChecking = true, statusTitle = "正在诊断连通性...")
+                diagnostics = DiagnosticsResult(isChecking = true, statusTitle = getApplication<Application>().getString(R.string.vm_005))
             )
         }
 
-        TunnelDiagnosticsHelper.diagnoseEndpoint(targetUrl, key) { result ->
+        TunnelDiagnosticsHelper.diagnoseEndpoint(getApplication(), targetUrl, key) { result ->
             _uiState.update { it.copy(diagnostics = result) }
         }
     }
@@ -348,8 +348,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     // =========================================================================
 
     fun exportCurrentSession(): String {
-        val currentTitle = _uiState.value.availableSessions.find { it.id == _uiState.value.currentSessionId }?.title ?: "OpenCode 会话"
-        return MarkdownExporter.generateMarkdown(currentTitle, _uiState.value.messages)
+        val currentTitle = _uiState.value.availableSessions.find { it.id == _uiState.value.currentSessionId }?.title ?: getApplication<Application>().getString(R.string.vm_006)
+        return MarkdownExporter.generateMarkdown(getApplication(), currentTitle, _uiState.value.messages)
     }
 
     // =========================================================================
@@ -369,14 +369,14 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     ) {
         viewModelScope.launch {
             _uiState.update {
-                it.copy(statusBanner = "正在与 $desktopName 配对…", appError = null)
+                it.copy(statusBanner = getApplication<Application>().getString(R.string.vm_007, desktopName), appError = null)
             }
             // v4.1: E2EE 公钥交换（开关关闭时传空，relay/对端跳过）
             val e2eePubkey = e2eeManager.ownPublicKeyB64() ?: ""
             val result = try {
-                PairingClient.claimPairing(relayUrl, accountId, pairingToken, e2eePubkey = e2eePubkey)
+                PairingClient.claimPairing(getApplication(), relayUrl, accountId, pairingToken, e2eePubkey = e2eePubkey)
             } catch (e: Exception) {
-                PairClaimResult(success = false, error = e.message ?: "配对异常")
+                PairClaimResult(success = false, error = e.message ?: getApplication<Application>().getString(R.string.vm_008))
             }
             // v4.1: 保存 desktop 的 E2EE 公钥（按 device_id 绑定）
             if (result.success && result.e2eePeerPubkey.isNotEmpty() && result.desktopDeviceId.isNotEmpty()) {
@@ -392,11 +392,11 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 if (!saved) {
                     _uiState.update {
                         it.copy(
-                            appError = AppError("SECURE_STORAGE_UNAVAILABLE", "安全存储不可用，配对凭据未保存，请重启应用后重试"),
+                            appError = AppError("SECURE_STORAGE_UNAVAILABLE", getApplication<Application>().getString(R.string.vm_009)),
                             statusBanner = null
                         )
                     }
-                    onDone(false, "安全存储不可用")
+                    onDone(false, getApplication<Application>().getString(R.string.vm_010))
                     return@launch
                 }
                 _uiState.update {
@@ -408,13 +408,13 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                         isPaired = true,
                         isAuthenticated = false,
                         appError = null,
-                        statusBanner = "已与 ${result.desktopName.ifBlank { desktopName }} 配对成功，正在连接…"
+                        statusBanner = getApplication<Application>().getString(R.string.vm_011, result.desktopName.ifBlank { desktopName })
                     )
                 }
-                onDone(true, "配对成功")
+                onDone(true, getApplication<Application>().getString(R.string.vm_012))
                 OpLog.record(getApplication(), OpLog.OpType.PAIR, "desktop=${result.desktopName.ifBlank { desktopName }}")
             } else {
-                val err = result.error.ifBlank { "配对失败，请重新扫码" }
+                val err = result.error.ifBlank { getApplication<Application>().getString(R.string.vm_013) }
                 _uiState.update { it.copy(appError = AppError("PAIR_FAILED", err), statusBanner = null) }
                 onDone(false, err)
             }
@@ -427,18 +427,18 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         val trimmedRelay = relayUrl.trim()
 
         if (trimmedAccount.isBlank()) {
-            _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", "请输入有效的账号/配对码")) }
+            _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_014))) }
             return
         }
         if (trimmedSecret.isBlank()) {
-            _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", "请输入电脑端启动时显示的 Secret 密钥")) }
+            _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_015))) }
             return
         }
 
         // P0-3: 加密存储不可用时拒绝保存敏感凭据
         if (!prefsManager.savePairingInfo(trimmedAccount, trimmedSecret, trimmedRelay)) {
             _uiState.update {
-                it.copy(appError = AppError("SECURE_STORAGE_UNAVAILABLE", "安全存储不可用，配对凭据未保存，请重启应用后重试"))
+                it.copy(appError = AppError("SECURE_STORAGE_UNAVAILABLE", getApplication<Application>().getString(R.string.vm_009)))
             }
             return
         }
@@ -453,7 +453,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 isAuthenticated = false,
                 appError = null,
                 diagnostics = null,
-                statusBanner = "正在连接中继服务器..."
+                statusBanner = getApplication<Application>().getString(R.string.vm_016)
             )
         }
 
@@ -474,12 +474,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         val trimmedWorkspace = workspacePath.trim()
 
         if (trimmedUrl.isBlank()) {
-            _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", "请输入云端 OpenCode 服务地址")) }
+            _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_017))) }
             return
         }
 
         _uiState.update {
-            it.copy(statusBanner = "正在探测云端 /global/health 真实健康状态...")
+            it.copy(statusBanner = getApplication<Application>().getString(R.string.vm_018))
         }
 
         cloudClient.checkHealth(trimmedUrl, trimmedKey) { isSuccess, message ->
@@ -488,7 +488,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 if (!prefsManager.saveCloudConfig(trimmedUrl, trimmedKey, trimmedWorkspace)) {
                     _uiState.update {
                         it.copy(
-                            appError = AppError("SECURE_STORAGE_UNAVAILABLE", "安全存储不可用，云端凭据未保存，请重启应用后重试"),
+                            appError = AppError("SECURE_STORAGE_UNAVAILABLE", getApplication<Application>().getString(R.string.vm_019)),
                             statusBanner = null
                         )
                     }
@@ -571,7 +571,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             )
         }
         // v1.6 P0: 任务开始，状态持久化
-        setTaskStatus(TaskStatus.RUNNING, "执行指令: ${trimmed.take(30)}...")
+        setTaskStatus(TaskStatus.RUNNING, getApplication<Application>().getString(R.string.vm_020, trimmed.take(30)))
         // v1.6 P0 任务通知：记录任务信息用于完成通知
         taskStartTimeMs = System.currentTimeMillis()
         taskName = trimmed.take(40)
@@ -579,7 +579,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
         OpenCodeKeepAliveService.startTaskProgress(
             getApplication(),
-            "执行指令: ${trimmed.take(30)}...",
+            getApplication<Application>().getString(R.string.vm_020, trimmed.take(30)),
             _uiState.value.currentSessionId
         )
 
@@ -712,7 +712,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 profiles = prefsManager.getProfiles(),
                 appError = null,
-                statusBanner = "已导入 " + imported.size + " 个配置，密钥未导入，请重新配对。"
+                statusBanner = getApplication<Application>().getString(R.string.vm_021) + imported.size + getApplication<Application>().getString(R.string.vm_022)
             )
         }
         return true
@@ -725,7 +725,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 isRelayConnected = true,
                 isReconnecting = false,
-                statusBanner = "中继已连通，正在验证 Secret..."
+                statusBanner = getApplication<Application>().getString(R.string.vm_023)
             )
         }
     }
@@ -862,7 +862,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 isReconnecting = true,
                 isRelayConnected = false,
-                statusBanner = "中继中断，将在 ${(delayMs + 500) / 1000} 秒后自动重试..."
+                statusBanner = getApplication<Application>().getString(R.string.vm_024, (delayMs + 500) / 1000)
             )
         }
     }
@@ -888,9 +888,9 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 },
                 isReconnecting = state == RelayConnectionState.RECONNECTING,
                 statusBanner = when (state) {
-                    RelayConnectionState.CONNECTING -> "正在连接中继服务器..."
-                    RelayConnectionState.CONNECTED -> "中继已连通，正在验证 Secret..."
-                    RelayConnectionState.AUTHENTICATING -> "正在验证身份..."
+                    RelayConnectionState.CONNECTING -> getApplication<Application>().getString(R.string.vm_016)
+                    RelayConnectionState.CONNECTED -> getApplication<Application>().getString(R.string.vm_023)
+                    RelayConnectionState.AUTHENTICATING -> getApplication<Application>().getString(R.string.vm_025)
                     RelayConnectionState.RECONNECTING -> s.statusBanner // 保持重连倒计时文案
                     RelayConnectionState.AUTH_FAILED -> null
                     RelayConnectionState.DISCONNECTED -> null
@@ -904,10 +904,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(pendingApproval = request) }
         // v1.6 P0: 统计修改文件 + 明确进入"权限审批"状态
         request.filePath?.takeIf { it.isNotBlank() }?.let { taskModifiedFiles.add(it) }
-        setTaskStatus(TaskStatus.APPROVAL_REQUIRED, "等待审批: ${request.toolName}")
+        setTaskStatus(TaskStatus.APPROVAL_REQUIRED, getApplication<Application>().getString(R.string.vm_026, request.toolName))
         OpenCodeKeepAliveService.notifyApprovalRequired(
             getApplication(),
-            "${request.toolName}: ${request.filePath ?: "代码修改"}"
+            getApplication<Application>().getString(R.string.vm_tool_desc, request.toolName, request.filePath ?: getApplication<Application>().getString(R.string.vm_code_change))
         )
     }
 
@@ -948,7 +948,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         val now = System.currentTimeMillis()
         if (now - lastProgressNotifyMs > 1000) {
             lastProgressNotifyMs = now
-            OpenCodeKeepAliveService.updateProgress(getApplication(), "AI 正在生成/执行...")
+            OpenCodeKeepAliveService.updateProgress(getApplication(), getApplication<Application>().getString(R.string.vm_027))
         }
         if (streamFlushJob?.isActive != true) {
             streamFlushJob = viewModelScope.launch {
@@ -984,7 +984,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         return if (lines.size > MAX_STREAM_LINES) {
             val header = lines.take(50).joinToString("\n")
             val tail = lines.takeLast(MAX_STREAM_LINES - 50).joinToString("\n")
-            "$header\n\n... [已自动折叠中间超长日志 (${lines.size - MAX_STREAM_LINES} 行)] ...\n\n$tail"
+            getApplication<Application>().getString(R.string.vm_028, header, lines.size - MAX_STREAM_LINES, tail)
         } else {
             combined
         }
@@ -997,7 +997,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         streamFlushJob?.cancel()
         flushStreamBuffer()
         // v1.6 P0: 任务完成
-        setTaskStatus(TaskStatus.COMPLETED, "任务已完成")
+        setTaskStatus(TaskStatus.COMPLETED, getApplication<Application>().getString(R.string.vm_029))
         // v1.6 P0 任务通知：完成通知（任务名、耗时、修改文件数，点击直达会话）
         val durationMs = if (taskStartTimeMs > 0) System.currentTimeMillis() - taskStartTimeMs else 0L
         OpenCodeKeepAliveService.notifyTaskCompleted(
@@ -1026,7 +1026,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     override fun onAppError(code: String, message: String) {
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
         // v1.6 P0: 任务失败状态 + 失败通知
-        setTaskStatus(TaskStatus.FAILED, "任务失败: $message")
+        setTaskStatus(TaskStatus.FAILED, getApplication<Application>().getString(R.string.vm_030, message))
         OpenCodeKeepAliveService.notifyTaskFailed(
             getApplication(),
             message,
@@ -1036,7 +1036,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             val errorMsg = ChatMessage(
                 id = UUID.randomUUID().toString(),
                 role = MessageRole.SYSTEM,
-                content = "【错误 $code】 $message",
+                content = getApplication<Application>().getString(R.string.vm_031, code, message),
                 isError = true
             )
             state.copy(
@@ -1061,7 +1061,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             val notice = ChatMessage(
                 id = UUID.randomUUID().toString(),
                 role = MessageRole.SYSTEM,
-                content = "【同步】$message",
+                content = getApplication<Application>().getString(R.string.vm_032, message),
                 isError = false
             )
             state.copy(messages = (state.messages + notice).takeLast(MAX_MESSAGES_COUNT))
@@ -1074,15 +1074,15 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
      */
     override fun onWriteUnconfirmed(action: String, clientMsgId: String) {
         val what = when (action) {
-            "send_prompt" -> "消息"
-            "cancel" -> "中断请求"
-            else -> "操作"
+            "send_prompt" -> getApplication<Application>().getString(R.string.vm_033)
+            "cancel" -> getApplication<Application>().getString(R.string.vm_034)
+            else -> getApplication<Application>().getString(R.string.vm_035)
         }
         _uiState.update { state ->
             val notice = ChatMessage(
                 id = UUID.randomUUID().toString(),
                 role = MessageRole.SYSTEM,
-                content = "【未确认】${what}未能发出（连接不可用），请重连后手动重发，不会自动重发。",
+                content = getApplication<Application>().getString(R.string.vm_036, what),
                 isError = true
             )
             state.copy(
@@ -1096,7 +1096,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
      * v1.6 P0 任务通知：AI 等待用户输入（高优先级通知 + 状态）
      */
     override fun onWaitingInput(sessionId: String, prompt: String) {
-        setTaskStatus(TaskStatus.WAITING_INPUT, "等待输入: ${prompt.take(40)}")
+        setTaskStatus(TaskStatus.WAITING_INPUT, getApplication<Application>().getString(R.string.vm_037, prompt.take(40)))
         OpenCodeKeepAliveService.notifyWaitingInput(
             getApplication(),
             prompt,
@@ -1138,7 +1138,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         // 撤销后刷新列表
         requestDeviceList()
         _uiState.update {
-            it.copy(statusBanner = if (deviceName.isNotBlank()) "已撤销设备：$deviceName" else null)
+            it.copy(statusBanner = if (deviceName.isNotBlank()) getApplication<Application>().getString(R.string.vm_038, deviceName) else null)
         }
     }
 
@@ -1216,13 +1216,13 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         val targetName = _uiState.value.desktopList
             .firstOrNull { it.deviceId == targetDeviceId }
             ?.deviceName.orEmpty()
-        val hint = DesktopRoutingPolicy.offlineHint(targetName, targetDeviceId, message)
+        val hint = DesktopRoutingPolicy.offlineHint(getApplication(), targetName, targetDeviceId, message)
         AppLog.w("DesktopRouting", "target offline: $hint")
         _uiState.update { state ->
             val sysMsg = ChatMessage(
                 id = UUID.randomUUID().toString(),
                 role = MessageRole.SYSTEM,
-                content = "【离线】$hint",
+                content = getApplication<Application>().getString(R.string.vm_039, hint),
                 isError = true
             )
             state.copy(

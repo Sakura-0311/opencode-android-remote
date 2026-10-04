@@ -13,17 +13,17 @@ import java.util.Locale
 
 object MarkdownExporter {
 
-    fun generateMarkdown(sessionTitle: String, messages: List<ChatMessage>): String {
+    fun generateMarkdown(context: Context, sessionTitle: String, messages: List<ChatMessage>): String {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         val exportTime = dateFormat.format(Date())
 
         val sb = StringBuilder()
-        sb.append("# 📝 OpenCode 会话记录: ").append(sessionTitle).append("\n\n")
-        sb.append("> 导出时间: ").append(exportTime).append(" | 消息总数: ").append(messages.size).append(" 条\n\n")
+        sb.append(context.getString(R.string.export_001)).append(sessionTitle).append("\n\n")
+        sb.append(context.getString(R.string.export_002)).append(exportTime).append(context.getString(R.string.export_003)).append(messages.size).append(context.getString(R.string.export_004))
         sb.append("---\n\n")
 
         if (messages.isEmpty()) {
-            sb.append("*(当前会话暂无消息记录)*\n")
+            sb.append(context.getString(R.string.export_005))
             return sb.toString()
         }
 
@@ -31,15 +31,15 @@ object MarkdownExporter {
             val msgTime = dateFormat.format(Date(msg.timestamp))
             when (msg.role) {
                 MessageRole.USER -> {
-                    sb.append("### 👤 用户指令 [").append(msgTime).append("]\n\n")
+                    sb.append(context.getString(R.string.export_006)).append(msgTime).append("]\n\n")
                     sb.append(msg.content.trim()).append("\n\n")
                 }
                 MessageRole.ASSISTANT -> {
-                    sb.append("### 🤖 OpenCode 输出 [").append(msgTime).append("]\n\n")
+                    sb.append(context.getString(R.string.export_007)).append(msgTime).append("]\n\n")
                     sb.append(msg.content.trim()).append("\n\n")
 
                     if (msg.toolEvents.isNotEmpty()) {
-                        sb.append("#### 🛠️ 工具调用与执行轨迹\n\n")
+                        sb.append(context.getString(R.string.export_008))
                         sb.append("```bash\n")
                         msg.toolEvents.forEach { event ->
                             sb.append(event).append("\n")
@@ -48,7 +48,7 @@ object MarkdownExporter {
                     }
                 }
                 MessageRole.SYSTEM -> {
-                    val icon = if (msg.isError) "❌ 异常告警" else "⚙️ 系统通知"
+                    val icon = if (msg.isError) context.getString(R.string.export_009) else context.getString(R.string.export_010)
                     sb.append("### ").append(icon).append(" [").append(msgTime).append("]\n\n")
                     sb.append("> ").append(msg.content.trim()).append("\n\n")
                 }
@@ -65,16 +65,16 @@ object MarkdownExporter {
             val sendIntent = Intent().apply {
                 action = Intent.ACTION_SEND
                 putExtra(Intent.EXTRA_TEXT, markdownContent)
-                putExtra(Intent.EXTRA_SUBJECT, "OpenCode 会话导出: $title")
+                putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.export_011, title))
                 type = "text/plain"
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
-            val shareIntent = Intent.createChooser(sendIntent, "分享会话 Markdown 到...").apply {
+            val shareIntent = Intent.createChooser(sendIntent, context.getString(R.string.export_012)).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             context.startActivity(shareIntent)
         } catch (e: Exception) {
-            Toast.makeText(context, "无法唤起系统分享: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.export_013, e.message), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -83,9 +83,9 @@ object MarkdownExporter {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             val clip = ClipData.newPlainText("OpenCode Markdown", text)
             clipboard?.setPrimaryClip(clip)
-            Toast.makeText(context, "已将完整 Markdown 复制到剪贴板", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.export_014), Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(context, "复制失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.export_015, e.message), Toast.LENGTH_SHORT).show()
         }
     }
 }

@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,18 +80,18 @@ fun FileBrowserDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = if (previewPath.isNotEmpty()) "文件预览" else "文件浏览器",
+                        text = if (previewPath.isNotEmpty()) stringResource(R.string.file_001) else stringResource(R.string.file_002),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Row {
                         if (previewPath.isEmpty()) {
                             IconButton(onClick = onRefresh) {
-                                Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.file_003))
                             }
                         }
                         IconButton(onClick = { if (previewPath.isNotEmpty()) onClosePreview() else onDismiss() }) {
-                            Icon(Icons.Default.Close, contentDescription = "关闭")
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.file_004))
                         }
                     }
                 }
@@ -105,7 +106,7 @@ fun FileBrowserDialog(
                     )
                     if (previewTruncated) {
                         Text(
-                            text = "文件过大，仅显示前 200KB",
+                            text = stringResource(R.string.file_005),
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -115,7 +116,7 @@ fun FileBrowserDialog(
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                     } else {
                         Text(
-                            text = previewContent.ifBlank { "(空文件)" },
+                            text = previewContent.ifBlank { stringResource(R.string.file_006) },
                             fontFamily = FontFamily.Monospace,
                             fontSize = 12.sp,
                             lineHeight = 17.sp,
@@ -126,7 +127,7 @@ fun FileBrowserDialog(
                         )
                     }
                     TextButton(onClick = onClosePreview, modifier = Modifier.align(Alignment.End)) {
-                        Text("返回目录")
+                        Text(stringResource(R.string.file_007))
                     }
                 } else {
                     // ---- 目录列表 ----
@@ -138,7 +139,7 @@ fun FileBrowserDialog(
                             .padding(vertical = 4.dp)
                     ) {
                         Text(
-                            text = currentPath.ifBlank { "…" },
+                            text = currentPath.ifBlank { stringResource(R.string.file_008) },
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -148,7 +149,7 @@ fun FileBrowserDialog(
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                     } else if (entries.isEmpty()) {
                         Text(
-                            text = "空目录",
+                            text = stringResource(R.string.file_009),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.align(Alignment.CenterHorizontally).padding(24.dp)
                         )
@@ -173,7 +174,7 @@ fun FileBrowserDialog(
                                         modifier = Modifier.size(22.dp)
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text("..（上级目录）", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+                                    Text(stringResource(R.string.file_010), fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
                             items(entries) { entry ->
@@ -199,7 +200,7 @@ fun FileBrowserDialog(
                                         Text(entry.name, fontSize = 14.sp, maxLines = 1)
                                         if (!entry.isDir) {
                                             Text(
-                                                text = "${formatSize(entry.size)} · ${formatTime(entry.mtime)}",
+                                                text = stringResource(R.string.file_011, formatSize(entry.size), formatTime(entry.mtime)),
                                                 fontSize = 11.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )

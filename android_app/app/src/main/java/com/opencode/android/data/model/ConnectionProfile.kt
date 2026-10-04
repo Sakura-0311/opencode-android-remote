@@ -31,7 +31,7 @@ data class ConnectionProfile(
     companion object {
         fun fromJson(o: JSONObject): ConnectionProfile = ConnectionProfile(
             id = o.optString("id").ifBlank { UUID.randomUUID().toString() },
-            name = o.optString("name").ifBlank { "未命名" },
+            name = o.optString("name").ifBlank { "" },
             mode = runCatching { AppMode.valueOf(o.optString("mode")) }.getOrDefault(AppMode.DESKTOP_RELAY),
             relayUrl = o.optString("relayUrl"),
             accountId = o.optString("accountId"),

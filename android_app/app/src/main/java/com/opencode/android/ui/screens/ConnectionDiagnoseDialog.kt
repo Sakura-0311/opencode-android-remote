@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -88,15 +89,15 @@ fun ConnectionDiagnoseDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.NetworkCheck, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("连接诊断", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.diag_001), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭")
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.diag_002))
                     }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "按链路逐层检查，定位故障环节",
+                    stringResource(R.string.diag_003),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -120,12 +121,12 @@ fun ConnectionDiagnoseDialog(
                     if (uiState.diagnoseLoading) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("正在检测 OpenCode 服务…", fontSize = 12.sp)
+                        Text(stringResource(R.string.diag_004), fontSize = 12.sp)
                     } else {
                         TextButton(onClick = onRunDiagnose) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("重新检测 OpenCode")
+                            Text(stringResource(R.string.diag_005))
                         }
                     }
                 }
@@ -134,24 +135,25 @@ fun ConnectionDiagnoseDialog(
     }
 }
 
+@Composable
 private fun buildLayers(uiState: OpenCodeUiState, phoneNetOk: Boolean): List<DiagnoseLayer> {
     val state = uiState.relayConnectionState
     return listOf(
         DiagnoseLayer(
-            name = "手机网络",
+            name = stringResource(R.string.diag_006),
             status = if (phoneNetOk) LayerStatus.OK else LayerStatus.ERROR,
-            detail = if (phoneNetOk) "移动数据 / Wi-Fi 可用" else "手机无可用网络，请检查 Wi-Fi 或移动数据"
+            detail = if (phoneNetOk) stringResource(R.string.diag_007) else stringResource(R.string.diag_008)
         ),
         DiagnoseLayer(
-            name = "Relay 服务器",
+            name = stringResource(R.string.diag_009),
             status = when (state) {
                 RelayConnectionState.DISCONNECTED -> LayerStatus.ERROR
                 else -> LayerStatus.OK
             },
-            detail = "地址：${uiState.relayUrl.ifBlank { "未配置" }}"
+            detail = stringResource(R.string.diag_010, uiState.relayUrl.ifBlank { stringResource(R.string.diag_n01) })
         ),
         DiagnoseLayer(
-            name = "WebSocket 连接",
+            name = stringResource(R.string.diag_011),
             status = when (state) {
                 RelayConnectionState.CONNECTED,
                 RelayConnectionState.AUTHENTICATING,
@@ -162,27 +164,27 @@ private fun buildLayers(uiState: OpenCodeUiState, phoneNetOk: Boolean): List<Dia
                 else -> LayerStatus.ERROR
             },
             detail = when (state) {
-                RelayConnectionState.DISCONNECTED -> "未连接"
-                RelayConnectionState.CONNECTING -> "正在连接…"
-                RelayConnectionState.RECONNECTING -> "断线重连中…"
-                RelayConnectionState.CONNECTED -> "已连通，等待鉴权"
-                RelayConnectionState.AUTHENTICATING -> "正在验证身份…"
-                RelayConnectionState.AUTH_FAILED -> "连接曾建立，但鉴权失败"
+                RelayConnectionState.DISCONNECTED -> stringResource(R.string.diag_012)
+                RelayConnectionState.CONNECTING -> stringResource(R.string.diag_013)
+                RelayConnectionState.RECONNECTING -> stringResource(R.string.diag_014)
+                RelayConnectionState.CONNECTED -> stringResource(R.string.diag_015)
+                RelayConnectionState.AUTHENTICATING -> stringResource(R.string.diag_016)
+                RelayConnectionState.AUTH_FAILED -> stringResource(R.string.diag_017)
                 RelayConnectionState.AUTHENTICATED,
-                RelayConnectionState.DESKTOP_ONLINE -> "连接正常"
+                RelayConnectionState.DESKTOP_ONLINE -> stringResource(R.string.diag_018)
             }
         ),
         DiagnoseLayer(
-            name = "身份鉴权",
+            name = stringResource(R.string.diag_019),
             status = when {
                 uiState.isAuthenticated -> LayerStatus.OK
                 state == RelayConnectionState.AUTH_FAILED -> LayerStatus.ERROR
                 else -> LayerStatus.WARN
             },
             detail = when {
-                uiState.isAuthenticated -> "Secret 验证通过（房间：${uiState.accountId.ifBlank { "?" }}）"
-                state == RelayConnectionState.AUTH_FAILED -> "Secret 错误或已失效，请重新配对"
-                else -> "尚未完成鉴权"
+                uiState.isAuthenticated -> stringResource(R.string.diag_020, uiState.accountId.ifBlank { "?" })
+                state == RelayConnectionState.AUTH_FAILED -> stringResource(R.string.diag_021)
+                else -> stringResource(R.string.diag_022)
             }
         ),
         DiagnoseLayer(
@@ -193,39 +195,39 @@ private fun buildLayers(uiState: OpenCodeUiState, phoneNetOk: Boolean): List<Dia
                 else -> LayerStatus.UNKNOWN
             },
             detail = when {
-                uiState.isDesktopOnline -> "电脑端桥接在线"
-                uiState.isAuthenticated -> "电脑端未连接：请在电脑上启动 desktop_agent（python agent.py）"
-                else -> "需先完成鉴权才能判断"
+                uiState.isDesktopOnline -> stringResource(R.string.diag_023)
+                uiState.isAuthenticated -> stringResource(R.string.diag_024)
+                else -> stringResource(R.string.diag_025)
             }
         ),
         DiagnoseLayer(
-            name = "OpenCode 服务",
+            name = stringResource(R.string.diag_026),
             status = when (uiState.diagnoseOpencodeOk) {
                 true -> LayerStatus.OK
                 false -> LayerStatus.ERROR
                 null -> if (uiState.isDesktopOnline) LayerStatus.WARN else LayerStatus.UNKNOWN
             },
             detail = when (uiState.diagnoseOpencodeOk) {
-                true -> "服务正常${uiState.diagnoseOpencodeVersion.takeIf { it.isNotBlank() }?.let { "（$it）" } ?: ""}"
-                false -> uiState.diagnoseOpencodeError.ifBlank { "服务无响应" } +
-                        "：请在电脑终端执行 opencode serve --port 4096"
-                null -> if (uiState.isDesktopOnline) "尚未检测，点击下方按钮检测"
-                else "需 Desktop Agent 在线才能检测"
+                true -> stringResource(R.string.diag_027, uiState.diagnoseOpencodeVersion.takeIf { it.isNotBlank() }?.let { "（$it）" } ?: "")
+                false -> uiState.diagnoseOpencodeError.ifBlank { stringResource(R.string.diag_028) } +
+                        stringResource(R.string.diag_029)
+                null -> if (uiState.isDesktopOnline) stringResource(R.string.diag_030)
+                else stringResource(R.string.diag_031)
             }
         ),
         DiagnoseLayer(
-            name = "当前会话",
+            name = stringResource(R.string.diag_032),
             status = if (uiState.currentSessionId.isNotBlank()) LayerStatus.OK else LayerStatus.WARN,
             detail = if (uiState.currentSessionId.isNotBlank()) {
                 val title = uiState.availableSessions.find { it.id == uiState.currentSessionId }?.title
-                "已选择：${title?.ifBlank { uiState.currentSessionId } ?: uiState.currentSessionId}"
-            } else "未选择会话"
+                stringResource(R.string.diag_033, title?.ifBlank { uiState.currentSessionId } ?: uiState.currentSessionId)
+            } else stringResource(R.string.diag_034)
         ),
         // v3.2: 安全存储状态
         DiagnoseLayer(
-            name = "安全存储",
+            name = stringResource(R.string.diag_035),
             status = if (uiState.secureStorageOk) LayerStatus.OK else LayerStatus.WARN,
-            detail = uiState.secureStorageInfo.ifBlank { "未知" }
+            detail = uiState.secureStorageInfo.ifBlank { stringResource(R.string.diag_036) }
         )
     )
 }

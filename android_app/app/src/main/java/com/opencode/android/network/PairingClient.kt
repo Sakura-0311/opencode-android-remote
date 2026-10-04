@@ -1,6 +1,7 @@
 package com.opencode.android.network
 
 import android.os.Build
+import android.content.Context
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.*
 import org.json.JSONObject
@@ -32,6 +33,7 @@ object PairingClient {
         .build()
 
     suspend fun claimPairing(
+        context: Context,
         relayUrl: String,
         accountId: String,
         pairingToken: String,
@@ -81,7 +83,7 @@ object PairingClient {
                         ))
                         "pair_error" -> finish(PairClaimResult(
                             success = false,
-                            error = json.optString("message", "配对失败")
+                            error = json.optString("message", context.getString(R.string.pairc_001))
                         ))
                     }
                 } catch (_: Exception) {}
@@ -90,13 +92,13 @@ object PairingClient {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 finish(PairClaimResult(
                     success = false,
-                    error = t.localizedMessage ?: "连接失败"
+                    error = t.localizedMessage ?: context.getString(R.string.pairc_002)
                 ))
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (cont.isActive) {
-                    finish(PairClaimResult(success = false, error = "连接已关闭"))
+                    finish(PairClaimResult(success = false, error = context.getString(R.string.pairc_003)))
                 }
             }
         })

@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,16 +85,16 @@ fun PairingScreen(
         val qr = scannedQr!!
         AlertDialog(
             onDismissRequest = { showPairConfirm = false },
-            title = { Text("确认配对") },
+            title = { Text(stringResource(R.string.pair_001)) },
             text = {
                 Column {
-                    Text("电脑名称：${qr.desktopName}", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.pair_002, qr.desktopName), fontWeight = FontWeight.SemiBold)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("房间号：${qr.accountId}", fontSize = 13.sp)
-                    Text("中继地址：${qr.relayUrl}", fontSize = 13.sp)
+                    Text(stringResource(R.string.pair_003, qr.accountId), fontSize = 13.sp)
+                    Text(stringResource(R.string.pair_004, qr.relayUrl), fontSize = 13.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "配对后此设备将获得独立密钥，可执行会话操作与工具审批。配对码一次性有效，电脑端可随时撤销此设备。",
+                        stringResource(R.string.pair_005),
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
@@ -103,10 +104,10 @@ fun PairingScreen(
                 Button(onClick = {
                     showPairConfirm = false
                     onQrPairing(qr.relayUrl, qr.accountId, qr.pairingToken, qr.desktopName)
-                }) { Text("确认配对") }
+                }) { Text(stringResource(R.string.pair_001)) }
             },
             dismissButton = {
-                TextButton(onClick = { showPairConfirm = false }) { Text("取消") }
+                TextButton(onClick = { showPairConfirm = false }) { Text(stringResource(R.string.pair_006)) }
             }
         )
     }
@@ -152,7 +153,7 @@ fun PairingScreen(
         )
 
         Text(
-            text = "双模支持 · 电脑远程控制 / 云端免机运行",
+            text = stringResource(R.string.pair_007),
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f)
         )
@@ -173,7 +174,7 @@ fun PairingScreen(
                     selectedTab = 0
                     onSwitchMode(AppMode.DESKTOP_RELAY)
                 },
-                text = { Text("💻 电脑中继模式", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                text = { Text(stringResource(R.string.pair_008), fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
             )
             Tab(
                 selected = selectedTab == 1,
@@ -181,7 +182,7 @@ fun PairingScreen(
                     selectedTab = 1
                     onSwitchMode(AppMode.CLOUD_HOSTED)
                 },
-                text = { Text("☁️ 云端工作区", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+                text = { Text(stringResource(R.string.pair_009), fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
             )
         }
 
@@ -297,8 +298,8 @@ fun PairingScreen(
             OutlinedTextField(
                 value = accountId,
                 onValueChange = { accountId = it },
-                label = { Text("账号或房间名 (Account ID)") },
-                placeholder = { Text("如: user_dev_001") },
+                label = { Text(stringResource(R.string.pair_010)) },
+                placeholder = { Text(stringResource(R.string.pair_011)) },
                 leadingIcon = {
                     Icon(Icons.Default.Badge, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 },
@@ -312,8 +313,8 @@ fun PairingScreen(
             OutlinedTextField(
                 value = secret,
                 onValueChange = { secret = it },
-                label = { Text("配对安全密钥 (Secret)") },
-                placeholder = { Text("电脑端启动时显示的 32 字节密钥") },
+                label = { Text(stringResource(R.string.pair_012)) },
+                placeholder = { Text(stringResource(R.string.pair_013)) },
                 leadingIcon = {
                     Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 },
@@ -327,7 +328,7 @@ fun PairingScreen(
                         }) {
                             Icon(
                                 imageVector = Icons.Default.ContentPaste,
-                                contentDescription = "粘贴密钥",
+                                contentDescription = stringResource(R.string.pair_014),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -351,8 +352,8 @@ fun PairingScreen(
             OutlinedTextField(
                 value = relayUrl,
                 onValueChange = { relayUrl = it },
-                label = { Text("中继服务地址 (Relay Server URL)") },
-                placeholder = { Text("如: wss://relay.yourdomain.com 或 ws://192.168.1.x:8765") },
+                label = { Text(stringResource(R.string.pair_015)) },
+                placeholder = { Text(stringResource(R.string.pair_016)) },
                 leadingIcon = {
                     Icon(Icons.Default.Sensors, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                 },
@@ -371,7 +372,7 @@ fun PairingScreen(
                 ) {
                     Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("连通性检测", fontSize = 13.sp)
+                    Text(stringResource(R.string.pair_017), fontSize = 13.sp)
                 }
 
                 Button(
@@ -382,7 +383,7 @@ fun PairingScreen(
                 ) {
                     Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("连接电脑端", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.pair_018), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -396,7 +397,7 @@ fun PairingScreen(
             ) {
                 Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("📷 扫码配对（一键连接）", fontSize = 14.sp)
+                Text(stringResource(R.string.pair_019), fontSize = 14.sp)
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -408,16 +409,16 @@ fun PairingScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "💡 电脑中继使用指引：",
+                        text = stringResource(R.string.pair_020),
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "在电脑端依次启动：\n" +
+                        text = stringResource(R.string.pair_021) +
                                 "1. `opencode serve --port 4096`\n" +
                                 "2. `python desktop_agent/agent.py $accountId`\n" +
-                                "将终端打印的 Secret 填入上方即可连线。",
+                                stringResource(R.string.pair_022),
                         fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace,
                         lineHeight = 17.sp,
@@ -431,7 +432,7 @@ fun PairingScreen(
             OutlinedTextField(
                 value = cloudUrl,
                 onValueChange = { cloudUrl = it },
-                label = { Text("云端 OpenCode 实例地址") },
+                label = { Text(stringResource(R.string.pair_023)) },
                 placeholder = { Text("https://opencode.yourdomain.com:4096") },
                 leadingIcon = {
                     Icon(Icons.Default.Cloud, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -446,8 +447,8 @@ fun PairingScreen(
             OutlinedTextField(
                 value = cloudKey,
                 onValueChange = { cloudKey = it },
-                label = { Text("云端访问 Token / API Key (可选)") },
-                placeholder = { Text("部署时设置的鉴权 Token") },
+                label = { Text(stringResource(R.string.pair_024)) },
+                placeholder = { Text(stringResource(R.string.pair_025)) },
                 leadingIcon = {
                     Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 },
@@ -461,7 +462,7 @@ fun PairingScreen(
                         }) {
                             Icon(
                                 imageVector = Icons.Default.ContentPaste,
-                                contentDescription = "粘贴密码",
+                                contentDescription = stringResource(R.string.pair_026),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -485,7 +486,7 @@ fun PairingScreen(
             OutlinedTextField(
                 value = cloudWorkspace,
                 onValueChange = { cloudWorkspace = it },
-                label = { Text("云端工作区挂载目录") },
+                label = { Text(stringResource(R.string.pair_027)) },
                 placeholder = { Text("/workspace") },
                 leadingIcon = {
                     Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
@@ -505,7 +506,7 @@ fun PairingScreen(
                 ) {
                     Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("连通性检测", fontSize = 13.sp)
+                    Text(stringResource(R.string.pair_017), fontSize = 13.sp)
                 }
 
                 Button(
@@ -516,7 +517,7 @@ fun PairingScreen(
                 ) {
                     Icon(Icons.Default.CloudDone, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("连入云工作区", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.pair_028), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -529,15 +530,15 @@ fun PairingScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "☁️ 什么是云端工作区模式？",
+                        text = stringResource(R.string.pair_029),
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "该模式完全不依赖本地电脑开机！\n" +
-                                "OpenCode 7x24 小时运行在您的云服务器（VPS/Docker）上。\n" +
-                                "手机随时随地通过 HTTPS/SSE 直连云端写代码、跑测试。",
+                        text = stringResource(R.string.pair_030) +
+                                stringResource(R.string.pair_031) +
+                                stringResource(R.string.pair_032),
                         fontSize = 12.sp,
                         lineHeight = 17.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
@@ -554,7 +555,7 @@ fun PairingScreen(
         ) {
             Icon(Icons.Default.BatteryAlert, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("设置后台忽略电池优化（防系统杀进程）", fontSize = 12.sp)
+            Text(stringResource(R.string.pair_033), fontSize = 12.sp)
         }
 
         Spacer(modifier = Modifier.height(28.dp))

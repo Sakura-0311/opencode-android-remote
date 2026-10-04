@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,10 +71,10 @@ fun TaskCenterDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.TaskAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("任务中心", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.task_001), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭")
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.task_002))
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -85,17 +86,17 @@ fun TaskCenterDialog(
                     // ---- 当前任务 ----
                     item {
                         TaskSectionCard(
-                            title = "当前任务",
+                            title = stringResource(R.string.task_003),
                             status = uiState.taskStatus,
                             detail = uiState.taskStatusDetail.ifBlank {
                                 when (uiState.taskStatus) {
-                                    TaskStatus.IDLE -> "暂无运行中的任务"
-                                    TaskStatus.RUNNING -> "AI 正在执行"
-                                    TaskStatus.WAITING_INPUT -> "等待你输入"
-                                    TaskStatus.APPROVAL_REQUIRED -> "等待工具权限审批"
-                                    TaskStatus.FAILED -> "任务执行失败"
-                                    TaskStatus.COMPLETED -> "任务已完成"
-                                    TaskStatus.DISCONNECTED -> "连接已断开"
+                                    TaskStatus.IDLE -> stringResource(R.string.task_004)
+                                    TaskStatus.RUNNING -> stringResource(R.string.task_005)
+                                    TaskStatus.WAITING_INPUT -> stringResource(R.string.task_006)
+                                    TaskStatus.APPROVAL_REQUIRED -> stringResource(R.string.task_007)
+                                    TaskStatus.FAILED -> stringResource(R.string.task_008)
+                                    TaskStatus.COMPLETED -> stringResource(R.string.task_009)
+                                    TaskStatus.DISCONNECTED -> stringResource(R.string.task_010)
                                 }
                             },
                             sessionTitle = uiState.availableSessions
@@ -135,7 +136,7 @@ fun TaskCenterDialog(
                     // ---- 会话任务列表 ----
                     item {
                         Text(
-                            "会话",
+                            stringResource(R.string.task_011),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -145,7 +146,7 @@ fun TaskCenterDialog(
                     if (sessions.isEmpty()) {
                         item {
                             Text(
-                                "暂无会话",
+                                stringResource(R.string.task_012),
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(vertical = 8.dp)
@@ -209,7 +210,7 @@ private fun TaskSectionCard(
                     color = statusColor(status).copy(alpha = 0.15f)
                 ) {
                     Text(
-                        text = status.label,
+                        text = stringResource(status.labelRes),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = statusColor(status),
@@ -221,14 +222,14 @@ private fun TaskSectionCard(
             Text(detail, fontSize = 13.sp)
             if (sessionTitle != null) {
                 Text(
-                    "会话：$sessionTitle",
+                    stringResource(R.string.task_013, sessionTitle),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             if (elapsedMs != null) {
                 Text(
-                    "已耗时：${formatElapsed(elapsedMs)}",
+                    stringResource(R.string.task_014, formatElapsed(elapsedMs)),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -236,10 +237,10 @@ private fun TaskSectionCard(
             if (status != TaskStatus.IDLE) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onJump) { Text("进入会话") }
+                    TextButton(onClick = onJump) { Text(stringResource(R.string.task_015)) }
                     if (showCancel) {
                         TextButton(onClick = onCancel) {
-                            Text("取消任务", color = MaterialTheme.colorScheme.error)
+                            Text(stringResource(R.string.task_016), color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -260,9 +261,9 @@ private fun ApprovalCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text("等待审批", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE68900))
+            Text(stringResource(R.string.task_017), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE68900))
             Spacer(modifier = Modifier.height(4.dp))
-            Text("工具：${approval.toolName}", fontSize = 13.sp)
+            Text(stringResource(R.string.task_018, approval.toolName), fontSize = 13.sp)
             val approvalSummary = approval.summary ?: approval.filePath
             if (!approvalSummary.isNullOrBlank()) {
                 Text(
@@ -273,9 +274,9 @@ private fun ApprovalCard(
             }
             Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onApprove) { Text("批准") }
+                Button(onClick = onApprove) { Text(stringResource(R.string.task_019)) }
                 TextButton(onClick = onReject) {
-                    Text("拒绝", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.task_020), color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -304,7 +305,7 @@ private fun SessionRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    session.title.ifBlank { "未命名会话" },
+                    session.title.ifBlank { stringResource(R.string.task_021) },
                     fontSize = 14.sp,
                     fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1
@@ -323,24 +324,25 @@ private fun SessionRow(
                     color = statusColor(taskStatus).copy(alpha = 0.15f)
                 ) {
                     Text(
-                        taskStatus.label,
+                        stringResource(taskStatus.labelRes),
                         fontSize = 10.sp,
                         color = statusColor(taskStatus),
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
             } else if (isCurrent) {
-                Text("当前", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.task_022), fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
             }
         }
     }
 }
 
+@Composable
 private fun formatElapsed(ms: Long): String {
     val s = ms / 1000
     return when {
-        s < 60 -> "${s}秒"
-        s < 3600 -> "${s / 60}分${s % 60}秒"
-        else -> "${s / 3600}小时${(s % 3600) / 60}分"
+        s < 60 -> stringResource(R.string.task_023, s)
+        s < 3600 -> stringResource(R.string.task_024, s / 60, s % 60)
+        else -> stringResource(R.string.task_025, s / 3600, (s % 3600) / 60)
     }
 }

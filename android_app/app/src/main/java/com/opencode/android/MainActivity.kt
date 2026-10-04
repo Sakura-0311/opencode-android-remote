@@ -1,6 +1,7 @@
 package com.opencode.android
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -12,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,10 +41,20 @@ import com.opencode.android.ui.screens.ProfileManagerDialog
 import com.opencode.android.ui.screens.ConfigExportDialog
 import com.opencode.android.ui.screens.ConfigImportDialog
 import com.opencode.android.ui.screens.OpLogDialog
+import com.opencode.android.ui.screens.LanguageDialog
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: OpenCodeViewModel by viewModels()
+
+    /**
+     * v4.3 多语言：在 Activity 创建前按用户选择的语言包一层 locale，
+     * 使 getString()/stringResource() 取到对应语言。跟随系统时不包裹。
+     */
+    override fun attachBaseContext(newBase: Context) {
+        val tag = com.opencode.android.util.LocaleHelper.readSavedLocaleTag(newBase)
+        super.attachBaseContext(com.opencode.android.util.LocaleHelper.wrapContext(newBase, tag))
+    }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -99,6 +111,8 @@ class MainActivity : ComponentActivity() {
                 var showDiagnose by remember { mutableStateOf(false) }
                 // 对外分发：隐私说明
                 var showPrivacy by remember { mutableStateOf(false) }
+                // v4.3: 语言切换对话框
+                var showLanguage by remember { mutableStateOf(false) }
                 // 对外分发：崩溃上报开关状态
                 var crashReportEnabled by remember { mutableStateOf(CrashReporting.isOptedIn(this@MainActivity)) }
                 // v4.2: E2EE 运行时开关
@@ -187,7 +201,7 @@ class MainActivity : ComponentActivity() {
                         // B-12: 检查更新
                         onCheckUpdate = {
                             checkingUpdate = true
-                            UpdateChecker.checkForUpdate { info ->
+                            UpdateChecker.checkForUpdate(this@MainActivity) { info ->
                                 checkingUpdate = false
                                 updateInfo = info
                             }
@@ -235,6 +249,10 @@ class MainActivity : ComponentActivity() {
                         onShowPrivacy = {
                             showPrivacy = true
                         },
+                        // v4.3: 语言切换
+                        onShowLanguage = {
+                            showLanguage = true
+                        },
                         // 对外分发：崩溃上报开关
                         crashReportEnabled = crashReportEnabled,
                         e2eeEnabled = e2eeEnabled,
@@ -243,7 +261,7 @@ class MainActivity : ComponentActivity() {
                             e2eeEnabled = enabled
                             Toast.makeText(
                                 this@MainActivity,
-                                if (enabled) "端到端加密已开启，需重新配对以交换密钥" else "端到端加密已关闭",
+                                if (enabled) getString(R.string.main_001) else getString(R.string.main_002),
                                 Toast.LENGTH_LONG
                             ).show()
                         },
@@ -252,7 +270,7 @@ class MainActivity : ComponentActivity() {
                             crashReportEnabled = enabled
                             Toast.makeText(
                                 this@MainActivity,
-                                if (enabled) "崩溃上报已开启，重启应用后生效" else "崩溃上报已关闭",
+                                if (enabled) getString(R.string.main_003) else getString(R.string.main_004),
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -263,26 +281,26 @@ class MainActivity : ComponentActivity() {
                 if (checkingUpdate) {
                     AlertDialog(
                         onDismissRequest = {},
-                        title = { Text("检查更新") },
-                        text = { Text("正在检查新版本…") },
+                        title = { Text(stringResource(R.string.main_005)) },
+                        text = { Text(stringResource(R.string.main_006)) },
                         confirmButton = {}
                     )
                 }
                 updateInfo?.let { info ->
                     AlertDialog(
                         onDismissRequest = { updateInfo = null },
-                        title = { Text(if (info.hasUpdate) "发现新版本" else "检查更新") },
+                        title = { Text(if (info.hasUpdate) stringResource(R.string.main_007) else stringResource(R.string.main_005)) },
                         text = {
                             Text(
                                 when {
                                     info.error != null -> info.error!!
-                                    info.hasUpdate -> "当前版本 ${info.currentVersion}\n最新版本 ${info.latestVersion}\n\n${info.releaseNotes ?: ""}\n\n请前往 GitHub Releases 下载 APK 更新。"
-                                    else -> "当前已是最新版本 (${info.currentVersion})。"
+                                    info.hasUpdate -> stringResource(R.string.main_008, info.currentVersion, info.latestVersion, info.releaseNotes ?: "")
+                                    else -> stringResource(R.string.main_009, info.currentVersion)
                                 }
                             )
                         },
                         confirmButton = {
-                            TextButton(onClick = { updateInfo = null }) { Text("知道了") }
+                            TextButton(onClick = { updateInfo = null }) { Text(stringResource(R.string.main_010)) }
                         }
                     )
                 }
@@ -339,10 +357,10 @@ class MainActivity : ComponentActivity() {
                 if (uiState.showSecureMigrationNotice) {
                     AlertDialog(
                         onDismissRequest = { viewModel.dismissSecureMigrationNotice() },
-                        title = { Text("安全存储提示") },
-                        text = { Text("安全存储升级到 Tink 时迁移失败，已自动回退到旧版加密存储，您的配对凭据不受影响。可在「连接诊断」中查看存储状态。") },
+                        title = { Text(stringResource(R.string.main_011)) },
+                        text = { Text(stringResource(R.string.main_012)) },
                         confirmButton = {
-                            Button(onClick = { viewModel.dismissSecureMigrationNotice() }) { Text("知道了") }
+                            Button(onClick = { viewModel.dismissSecureMigrationNotice() }) { Text(stringResource(R.string.main_010)) }
                         }
                     )
                 }
@@ -351,10 +369,10 @@ class MainActivity : ComponentActivity() {
                 if (uiState.showOldRelayWarning) {
                     AlertDialog(
                         onDismissRequest = { viewModel.dismissOldRelayWarning() },
-                        title = { Text("建议升级服务端") },
-                        text = { Text("当前连接的是 v3 旧版 relay，功能可用但建议升级到 v4.0+（先升级 relay_server 与 agent.py，再升级 App）。") },
+                        title = { Text(stringResource(R.string.main_013)) },
+                        text = { Text(stringResource(R.string.main_014)) },
                         confirmButton = {
-                            Button(onClick = { viewModel.dismissOldRelayWarning() }) { Text("知道了") }
+                            Button(onClick = { viewModel.dismissOldRelayWarning() }) { Text(stringResource(R.string.main_010)) }
                         }
                     )
                 }
@@ -363,13 +381,13 @@ class MainActivity : ComponentActivity() {
                 uiState.pendingTargetSwitch?.let { pending ->
                     AlertDialog(
                         onDismissRequest = { viewModel.cancelTargetSwitch() },
-                        title = { Text("切换目标电脑") },
-                        text = { Text("当前会话正在进行中，切换后新消息将发送到另一台电脑。确定切换吗？") },
+                        title = { Text(stringResource(R.string.main_015)) },
+                        text = { Text(stringResource(R.string.main_016)) },
                         confirmButton = {
-                            Button(onClick = { viewModel.confirmTargetSwitch() }) { Text("切换") }
+                            Button(onClick = { viewModel.confirmTargetSwitch() }) { Text(stringResource(R.string.main_017)) }
                         },
                         dismissButton = {
-                            TextButton(onClick = { viewModel.cancelTargetSwitch() }) { Text("取消") }
+                            TextButton(onClick = { viewModel.cancelTargetSwitch() }) { Text(stringResource(R.string.main_018)) }
                         }
                     )
                 }
@@ -451,6 +469,20 @@ class MainActivity : ComponentActivity() {
                 // 对外分发：隐私说明
                 if (showPrivacy) {
                     PrivacyDialog(onDismiss = { showPrivacy = false })
+                }
+
+                // v4.3: 语言切换（选择后保存偏好并 recreate 即时生效；API 33+ 同步系统应用语言设置）
+                if (showLanguage) {
+                    LanguageDialog(
+                        currentTag = viewModel.prefsManager.appLocale,
+                        onSelect = { tag ->
+                            viewModel.prefsManager.appLocale = tag
+                            com.opencode.android.util.LocaleHelper.syncToSystem(this@MainActivity, tag)
+                            showLanguage = false
+                            recreate()
+                        },
+                        onDismiss = { showLanguage = false }
+                    )
                 }
             }
         }

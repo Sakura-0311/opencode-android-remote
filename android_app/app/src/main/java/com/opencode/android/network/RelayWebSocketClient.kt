@@ -1,6 +1,7 @@
 package com.opencode.android.network
 
 import android.content.SharedPreferences
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.opencode.android.data.model.DiffLine
@@ -151,7 +152,7 @@ data class FileEntry(
     val mtime: Long = 0L
 )
 
-class RelayWebSocketClient {
+class RelayWebSocketClient(private val appContext: Context) {
 
     private val client = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
@@ -430,10 +431,10 @@ class RelayWebSocketClient {
                     if (code == 4401 && !helloAckReceived) {
                         listener?.onAppError(
                             "PROTOCOL_MISMATCH",
-                            "服务端版本过旧（v2 不支持 v4 hello 握手），请将 relay_server 升级到 v4.0+"
+                            appContext.getString(R.string.relay_001)
                         )
                     }
-                    listener?.onDisconnected("连接已断开: $reason ($code)")
+                    listener?.onDisconnected(appContext.getString(R.string.relay_002, reason, code))
                     // v2.3: 不可重试错误（鉴权失败/被封禁）绝不重连
                     if (!isExplicitDisconnect && !Backoff.isNonRetryableCloseCode(code)) {
                         if (networkPaused) {
@@ -452,10 +453,10 @@ class RelayWebSocketClient {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 mainHandler.post {
                     if (isStale()) return@post
-                    val errMsg = t.localizedMessage ?: "网络连接异常"
+                    val errMsg = t.localizedMessage ?: appContext.getString(R.string.relay_003)
                     AppLog.w("Relay", "ws failure: $errMsg")
                     listener?.onError(errMsg)
-                    listener?.onDisconnected("连接失败: $errMsg")
+                    listener?.onDisconnected(appContext.getString(R.string.relay_004, errMsg))
                     if (!isExplicitDisconnect) {
                         if (networkPaused) {
                             setState(RelayConnectionState.DISCONNECTED)
@@ -530,7 +531,7 @@ class RelayWebSocketClient {
                     }
                 } else {
                     AppLog.w("Relay", "v4.1 E2EE: 解密失败，丢弃该消息")
-                    listener?.onError("E2EE 解密失败，消息已丢弃（可能密钥已更换，请重新配对）")
+                    listener?.onError(appContext.getString(R.string.relay_005))
                     return
                 }
             }
@@ -572,7 +573,7 @@ class RelayWebSocketClient {
                 "hello_required" -> {
                     listener?.onAppError(
                         "PROTOCOL_MISMATCH",
-                        "服务端要求 v4 hello 握手：${json.optString("message")}"
+                        appContext.getString(R.string.relay_006, json.optString("message"))
                     )
                     return
                 }
@@ -583,13 +584,13 @@ class RelayWebSocketClient {
                     // v2.3: 走 onResyncRequired
                     if (checkEpoch(json)) {
                         AppLog.i("Relay", "room_epoch changed, seq reset")
-                        listener?.onResyncRequired("服务器已重启，消息序号已重置，正在重新同步。")
+                        listener?.onResyncRequired(appContext.getString(R.string.relay_007))
                     }
                 }
                 // v1.6 P0: 缓冲已过期，明确告知需要重同步而非静默丢失
                 // v2.3: 走 onResyncRequired，不再按任务失败处理
                 "resync_required" -> {
-                    val msg = json.optString("message", "需要重新同步会话状态")
+                    val msg = json.optString("message", appContext.getString(R.string.relay_008))
                     AppLog.i("Relay", "resync_required: $msg")
                     listener?.onResyncRequired(msg)
                 }
@@ -600,12 +601,12 @@ class RelayWebSocketClient {
                     // v2.3: 走 onResyncRequired
                     if (checkEpoch(json)) {
                         AppLog.i("Relay", "room_epoch changed on auth_ok, seq reset")
-                        listener?.onResyncRequired("服务器已重启，消息序号已重置，正在重新同步。")
+                        listener?.onResyncRequired(appContext.getString(R.string.relay_007))
                     }
                     listener?.onAuthenticated()
                 }
                 "auth_error" -> {
-                    val msg = json.optString("message", "认证失败，请检查 Secret 是否正确")
+                    val msg = json.optString("message", appContext.getString(R.string.relay_009))
                     isExplicitDisconnect = true
                     listener?.onAuthError(msg)
                     disconnect()
@@ -673,9 +674,9 @@ class RelayWebSocketClient {
                         for (i in 0 until dataArray.length()) {
                             val itemObj = dataArray.getJSONObject(i)
                             val id = itemObj.optString("id", "")
-                            val title = itemObj.optString("title", itemObj.optString("name", "会话 $id"))
+                            val title = itemObj.optString("title", itemObj.optString("name", appContext.getString(R.string.relay_010, id)))
                             if (id.isNotEmpty()) {
-                                list.add(SessionItem(id = id, title = title, tag = "默认"))
+                                list.add(SessionItem(id = id, title = title, tag = appContext.getString(R.string.relay_011)))
                             }
                         }
                     }
@@ -862,7 +863,7 @@ class RelayWebSocketClient {
                 // P1-4: 错误协议处理
                 "error" -> {
                     val code = json.optString("code", "UNKNOWN_ERROR")
-                    val message = json.optString("message", "发生未知错误")
+                    val message = json.optString("message", appContext.getString(R.string.relay_012))
                     // v3.1: 目标电脑离线 → 针对性提示，而非笼统错误
                     val targetId = json.optString("target_device_id", "")
                     if (code == "DESKTOP_OFFLINE" && targetId.isNotEmpty()) {
@@ -906,7 +907,7 @@ class RelayWebSocketClient {
                     setState(RelayConnectionState.DISCONNECTED)
                 }
             } catch (_: Exception) { }
-            try { listener?.onError("数据解析错误: ${e.message}") } catch (_: Exception) { }
+            try { listener?.onError(appContext.getString(R.string.relay_013, e.message)) } catch (_: Exception) { }
         }
     }
 

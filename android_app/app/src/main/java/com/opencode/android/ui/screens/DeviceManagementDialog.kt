@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,13 +48,13 @@ fun DeviceManagementDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("设备管理", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.dev_001), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Row {
                         IconButton(onClick = onRefresh) {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.dev_002))
                         }
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "关闭")
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.dev_003))
                         }
                     }
                 }
@@ -64,14 +65,14 @@ fun DeviceManagementDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "${devices.size} 台已配对设备",
+                        stringResource(R.string.dev_004, devices.size),
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                     // v3.1: 在线 desktop 列表入口
                     if (onOpenDesktopList != null) {
                         TextButton(onClick = onOpenDesktopList) {
-                            Text("目标电脑", fontSize = 12.sp)
+                            Text(stringResource(R.string.dev_005), fontSize = 12.sp)
                         }
                     }
                 }
@@ -79,7 +80,7 @@ fun DeviceManagementDialog(
 
                 if (devices.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("暂无配对设备", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                        Text(stringResource(R.string.dev_006), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                     }
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -103,8 +104,8 @@ fun DeviceManagementDialog(
     revokeTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { revokeTarget = null },
-            title = { Text("撤销设备") },
-            text = { Text("确定撤销「${target.deviceName}」的配对授权吗？撤销后该设备将立即断开且无法重连。") },
+            title = { Text(stringResource(R.string.dev_007)) },
+            text = { Text(stringResource(R.string.dev_008, target.deviceName)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -112,10 +113,10 @@ fun DeviceManagementDialog(
                         revokeTarget = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text("撤销") }
+                ) { Text(stringResource(R.string.dev_009)) }
             },
             dismissButton = {
-                TextButton(onClick = { revokeTarget = null }) { Text("取消") }
+                TextButton(onClick = { revokeTarget = null }) { Text(stringResource(R.string.dev_010)) }
             }
         )
     }
@@ -124,12 +125,12 @@ fun DeviceManagementDialog(
     renameTarget?.let { device ->
         AlertDialog(
             onDismissRequest = { renameTarget = null },
-            title = { Text("重命名设备") },
+            title = { Text(stringResource(R.string.dev_011)) },
             text = {
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it.take(32) },
-                    label = { Text("设备名称") },
+                    label = { Text(stringResource(R.string.dev_012)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -140,10 +141,10 @@ fun DeviceManagementDialog(
                         onRename(device.deviceId, device.deviceName, newName.trim())
                     }
                     renameTarget = null
-                }) { Text("保存") }
+                }) { Text(stringResource(R.string.dev_013)) }
             },
             dismissButton = {
-                TextButton(onClick = { renameTarget = null }) { Text("取消") }
+                TextButton(onClick = { renameTarget = null }) { Text(stringResource(R.string.dev_010)) }
             }
         )
     }
@@ -178,7 +179,7 @@ private fun DeviceRow(
                             shape = MaterialTheme.shapes.small
                         ) {
                             Text(
-                                "在线",
+                                stringResource(R.string.dev_014),
                                 fontSize = 11.sp,
                                 color = Color(0xFF4CAF50),
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -187,22 +188,22 @@ private fun DeviceRow(
                     }
                 }
                 val lastActive = if (device.lastActive > 0)
-                    "最近活动 ${dateFmt.format(Date(device.lastActive))}" else ""
+                    stringResource(R.string.dev_015, dateFmt.format(Date(device.lastActive))) else ""
                 val created = if (device.createdAt > 0)
-                    "配对于 ${dateFmt.format(Date(device.createdAt))}" else ""
+                    stringResource(R.string.dev_016, dateFmt.format(Date(device.createdAt))) else ""
                 Text(
-                    listOf(lastActive, created).filter { it.isNotBlank() }.joinToString(" · "),
+                    listOf(lastActive, created).filter { it.isNotBlank() }.joinToString(stringResource(R.string.dev_017)),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                 )
             }
             IconButton(onClick = onRename) {
-                Icon(Icons.Default.Edit, contentDescription = "重命名", modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.dev_018), modifier = Modifier.size(20.dp))
             }
             IconButton(onClick = onRevoke) {
                 Icon(
                     Icons.Default.Delete,
-                    contentDescription = "撤销",
+                    contentDescription = stringResource(R.string.dev_009),
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(20.dp)
                 )

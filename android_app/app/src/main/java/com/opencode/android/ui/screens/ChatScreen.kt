@@ -1,6 +1,8 @@
 package com.opencode.android.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.Composable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -39,6 +41,16 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Composable
+private fun tagDisplay(tag: String): String = when (tag) {
+    "全部" -> stringResource(R.string.tag_all)
+    "默认" -> stringResource(R.string.tag_default)
+    "代码调试" -> stringResource(R.string.tag_debug)
+    "自动化任务" -> stringResource(R.string.tag_auto)
+    "脚本生成" -> stringResource(R.string.tag_script)
+    else -> tag
+}
+
 fun ChatScreen(
     uiState: OpenCodeUiState,
     onSendMessage: (String) -> Unit,
@@ -84,6 +96,8 @@ fun ChatScreen(
     onShowOpLog: () -> Unit = {},
     // 对外分发：隐私说明
     onShowPrivacy: () -> Unit = {},
+    // v4.3: 语言切换
+    onShowLanguage: () -> Unit = {},
     // 对外分发：崩溃上报开关
     crashReportEnabled: Boolean = false,
     onToggleCrashReport: (Boolean) -> Unit = {},
@@ -169,10 +183,11 @@ fun ChatScreen(
                             }
                             val currentSession = uiState.availableSessions.find { it.id == uiState.currentSessionId }
                             val sessionTag = currentSession?.tag ?: "默认"
+                            val sessionTagDisplay = tagDisplay(sessionTag)
                             val statusText = if (uiState.appMode == AppMode.CLOUD_HOSTED) {
-                                "☁️ [${sessionTag}] ${currentSession?.title ?: "云端任务"}"
+                                stringResource(R.string.chat_status_cloud, sessionTagDisplay, currentSession?.title ?: stringResource(R.string.chat_task_cloud))
                             } else {
-                                "💻 [${sessionTag}] ${currentSession?.title ?: "本地任务"}"
+                                stringResource(R.string.chat_status_desktop, sessionTagDisplay, currentSession?.title ?: stringResource(R.string.chat_task_desktop))
                             }
                             Text(
                                 text = statusText,
@@ -194,7 +209,7 @@ fun ChatScreen(
                             onDismissRequest = { showMoreMenu = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("管理会话与标签") },
+                                text = { Text(stringResource(R.string.chat_002)) },
                                 onClick = {
                                     showMoreMenu = false
                                     showSessionsModal = true
@@ -202,7 +217,7 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Default.FolderSpecial, contentDescription = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text("导出为 Markdown") },
+                                text = { Text(stringResource(R.string.chat_003)) },
                                 onClick = {
                                     showMoreMenu = false
                                     val md = onExportMarkdown()
@@ -212,7 +227,7 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text("复制完整 Markdown") },
+                                text = { Text(stringResource(R.string.chat_004)) },
                                 onClick = {
                                     showMoreMenu = false
                                     val md = onExportMarkdown()
@@ -221,7 +236,7 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text("模拟 Diff 审批弹窗 (测试)") },
+                                text = { Text(stringResource(R.string.chat_005)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onTriggerTestApproval()
@@ -229,7 +244,7 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Default.Gavel, contentDescription = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text("清空当前聊天记录") },
+                                text = { Text(stringResource(R.string.chat_006)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onClearChat()
@@ -239,7 +254,7 @@ fun ChatScreen(
                             Divider()
                             // B-12: 检查更新
                             DropdownMenuItem(
-                                text = { Text("检查更新") },
+                                text = { Text(stringResource(R.string.chat_007)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onCheckUpdate()
@@ -248,7 +263,7 @@ fun ChatScreen(
                             )
                             // v2.5: 连接配置 / 导入导出 / 操作记录
                             DropdownMenuItem(
-                                text = { Text("连接配置") },
+                                text = { Text(stringResource(R.string.chat_008)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowProfiles()
@@ -256,7 +271,7 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Default.SwitchAccount, contentDescription = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text("导出配置") },
+                                text = { Text(stringResource(R.string.chat_009)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowConfigExport()
@@ -264,7 +279,7 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Default.Upload, contentDescription = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text("导入配置") },
+                                text = { Text(stringResource(R.string.chat_010)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowConfigImport()
@@ -272,7 +287,7 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text("操作记录") },
+                                text = { Text(stringResource(R.string.chat_011)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowOpLog()
@@ -282,7 +297,7 @@ fun ChatScreen(
                             Divider()
                             // v1.6 P0 多设备管理
                             DropdownMenuItem(
-                                text = { Text("设备管理") },
+                                text = { Text(stringResource(R.string.chat_012)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowDeviceManager()
@@ -300,7 +315,7 @@ fun ChatScreen(
                             )
                             // v1.6 P1 项目管理中心
                             DropdownMenuItem(
-                                text = { Text("项目中心") },
+                                text = { Text(stringResource(R.string.chat_013)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowProjectCenter()
@@ -309,7 +324,7 @@ fun ChatScreen(
                             )
                             // P2-12: 文件浏览器
                             DropdownMenuItem(
-                                text = { Text("文件浏览器") },
+                                text = { Text(stringResource(R.string.chat_014)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowFileBrowser()
@@ -318,7 +333,7 @@ fun ChatScreen(
                             )
                             // P2-13: 任务中心
                             DropdownMenuItem(
-                                text = { Text("任务中心") },
+                                text = { Text(stringResource(R.string.chat_015)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowTaskCenter()
@@ -327,7 +342,7 @@ fun ChatScreen(
                             )
                             // P2-15: 连接诊断
                             DropdownMenuItem(
-                                text = { Text("连接诊断") },
+                                text = { Text(stringResource(R.string.chat_016)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowDiagnose()
@@ -336,12 +351,21 @@ fun ChatScreen(
                             )
                             // 对外分发：隐私说明
                             DropdownMenuItem(
-                                text = { Text("隐私说明") },
+                                text = { Text(stringResource(R.string.chat_017)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowPrivacy()
                                 },
                                 leadingIcon = { Icon(Icons.Default.PrivacyTip, contentDescription = null) }
+                            )
+                            // v4.3: 语言切换
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.lang_title)) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onShowLanguage()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Language, contentDescription = null) }
                             )
                             // v4.2: E2EE 端到端加密开关（默认关闭；开启后需重新配对交换密钥）
                             DropdownMenuItem(
@@ -351,7 +375,7 @@ fun ChatScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text("端到端加密")
+                                        Text(stringResource(R.string.chat_018))
                                         Switch(
                                             checked = e2eeEnabled,
                                             onCheckedChange = { onToggleE2ee(it) }
@@ -369,7 +393,7 @@ fun ChatScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text("崩溃上报")
+                                        Text(stringResource(R.string.chat_019))
                                         Switch(
                                             checked = crashReportEnabled,
                                             onCheckedChange = { onToggleCrashReport(it) }
@@ -380,7 +404,7 @@ fun ChatScreen(
                                 leadingIcon = { Icon(Icons.Default.BugReport, contentDescription = null) }
                             )
                             DropdownMenuItem(
-                                text = { Text("断开连接", color = MaterialTheme.colorScheme.error) },
+                                text = { Text(stringResource(R.string.chat_020), color = MaterialTheme.colorScheme.error) },
                                 onClick = {
                                     showMoreMenu = false
                                     onDisconnect()
@@ -409,7 +433,7 @@ fun ChatScreen(
                             OutlinedTextField(
                                 value = uiState.logSearchQuery,
                                 onValueChange = onSearchLog,
-                                placeholder = { Text("在日志与消息中检索关键词...", fontSize = 12.sp) },
+                                placeholder = { Text(stringResource(R.string.chat_021), fontSize = 12.sp) },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f).height(46.dp),
                                 shape = RoundedCornerShape(12.dp)
@@ -441,13 +465,13 @@ fun ChatScreen(
                             val errInfo = remember(uiState.appError.code) { ErrorCodes.lookup(uiState.appError.code) }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "${errInfo.title}：${uiState.appError.message}",
+                                    text = stringResource(R.string.chat_022, stringResource(errInfo.titleRes, uiState.appError.code), uiState.appError.message),
                                     color = MaterialTheme.colorScheme.onErrorContainer,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "建议：${errInfo.suggestion}",
+                                    text = stringResource(R.string.chat_023, stringResource(errInfo.suggestionRes)),
                                     color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
                                     fontSize = 11.sp
                                 )
@@ -490,9 +514,9 @@ fun ChatScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val suggestions = if (uiState.appMode == AppMode.CLOUD_HOSTED) {
-                        listOf("克隆 Git 仓库", "查看工作区文件", "运行项目构建", "运行单元测试", "/help")
+                        listOf(stringResource(R.string.chat_024), stringResource(R.string.chat_025), stringResource(R.string.chat_026), stringResource(R.string.chat_027), "/help")
                     } else {
-                        listOf("查看当前 Git 变更", "运行单元测试", "解释当前模块实现", "/help", "/compact")
+                        listOf(stringResource(R.string.chat_028), stringResource(R.string.chat_027), stringResource(R.string.chat_029), "/help", "/compact")
                     }
                     items(suggestions) { text ->
                         SuggestionChip(
@@ -514,7 +538,7 @@ fun ChatScreen(
                         value = inputText,
                         onValueChange = { inputText = it },
                         placeholder = {
-                            val hint = if (uiState.appMode == AppMode.CLOUD_HOSTED) "给云端 OpenCode 下达指令..." else "给电脑端 OpenCode 下达指令..."
+                            val hint = if (uiState.appMode == AppMode.CLOUD_HOSTED) stringResource(R.string.chat_030) else stringResource(R.string.chat_031)
                             Text(hint)
                         },
                         modifier = Modifier.weight(1f).padding(end = 8.dp),
@@ -579,7 +603,7 @@ fun ChatScreen(
                     )
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
-                        text = if (uiState.logSearchQuery.isNotBlank()) "未找到匹配 \"${uiState.logSearchQuery}\" 的记录" else "暂无聊天记录",
+                        text = if (uiState.logSearchQuery.isNotBlank()) stringResource(R.string.chat_032, uiState.logSearchQuery) else stringResource(R.string.chat_033),
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.onBackground
@@ -623,7 +647,7 @@ fun ChatScreen(
                     ) {
                         Icon(Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("自动滚动已暂停 · 点击回到底部", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.chat_034), fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -689,7 +713,7 @@ fun MessageBubbleWithHighlight(message: ChatMessage, appMode: AppMode, highlight
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = when {
-                                isError -> "系统异常告警"
+                                isError -> stringResource(R.string.chat_035)
                                 appMode == AppMode.CLOUD_HOSTED -> "OpenCode Cloud"
                                 else -> "OpenCode Desktop"
                             },
@@ -748,7 +772,7 @@ fun MessageBubbleWithHighlight(message: ChatMessage, appMode: AppMode, highlight
                 if (message.isStreaming) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (appMode == AppMode.CLOUD_HOSTED) "云端工作区正在执行..." else "正在同步电脑端执行...",
+                        text = if (appMode == AppMode.CLOUD_HOSTED) stringResource(R.string.chat_036) else stringResource(R.string.chat_037),
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -777,7 +801,7 @@ fun SessionsManagementModal(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.FolderSpecial, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("会话分组与标签管理", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.chat_038), fontSize = 17.sp, fontWeight = FontWeight.Bold)
             }
         },
         text = {
@@ -792,7 +816,7 @@ fun SessionsManagementModal(
                         FilterChip(
                             selected = isSelected,
                             onClick = { onSelectTagFilter(if (tag == "全部") null else tag) },
-                            label = { Text(tag, fontSize = 11.sp) },
+                            label = { Text(tagDisplay(tag), fontSize = 11.sp) },
                             shape = RoundedCornerShape(12.dp)
                         )
                     }
@@ -805,7 +829,7 @@ fun SessionsManagementModal(
 
                 if (filteredList.isEmpty()) {
                     Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Text("当前分类下无活跃会话", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.chat_040), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     LazyColumn(
@@ -837,7 +861,7 @@ fun SessionsManagementModal(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(session.title, fontSize = 13.sp, fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal)
-                                        Text("标签: ${session.tag}", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.primary)
+                                        Text(stringResource(R.string.chat_041, tagDisplay(session.tag)), fontSize = 10.5.sp, color = MaterialTheme.colorScheme.primary)
                                     }
                                     IconButton(
                                         onClick = { onArchive(session.id) },
@@ -859,13 +883,13 @@ fun SessionsManagementModal(
                 ) {
                     Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("批量归档旧会话 (保留置顶)", fontSize = 12.sp)
+                    Text(stringResource(R.string.chat_042), fontSize = 12.sp)
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("关闭")
+                Text(stringResource(R.string.chat_043))
             }
         }
     )
@@ -875,24 +899,25 @@ fun SessionsManagementModal(
  * v2.5: 统一连接状态文案。中继模式订阅 relayConnectionState，
  * 云端模式订阅 cloudConnectionState。
  */
+@Composable
 private fun connectionStatusLabel(s: OpenCodeUiState): String {
     return if (s.appMode == AppMode.CLOUD_HOSTED) {
-        "云端·" + when (s.cloudConnectionState) {
-            CloudConnectionState.DISCONNECTED -> "未连接"
-            CloudConnectionState.CONNECTING -> "连接中"
-            CloudConnectionState.STREAMING -> "会话进行中"
-            CloudConnectionState.RECONNECTING -> "重连中"
+        stringResource(R.string.chat_044) + when (s.cloudConnectionState) {
+            CloudConnectionState.DISCONNECTED -> stringResource(R.string.chat_045)
+            CloudConnectionState.CONNECTING -> stringResource(R.string.chat_046)
+            CloudConnectionState.STREAMING -> stringResource(R.string.chat_047)
+            CloudConnectionState.RECONNECTING -> stringResource(R.string.chat_048)
         }
     } else {
-        "中继·" + when (s.relayConnectionState) {
-            RelayConnectionState.DISCONNECTED -> "未连接"
-            RelayConnectionState.CONNECTING -> "连接中"
-            RelayConnectionState.CONNECTED -> "已连接，待鉴权"
-            RelayConnectionState.AUTHENTICATING -> "鉴权中"
-            RelayConnectionState.AUTHENTICATED -> "已鉴权，等 Desktop"
-            RelayConnectionState.DESKTOP_ONLINE -> "Desktop 在线"
-            RelayConnectionState.RECONNECTING -> "重连中"
-            RelayConnectionState.AUTH_FAILED -> "鉴权失败"
+        stringResource(R.string.chat_049) + when (s.relayConnectionState) {
+            RelayConnectionState.DISCONNECTED -> stringResource(R.string.chat_045)
+            RelayConnectionState.CONNECTING -> stringResource(R.string.chat_046)
+            RelayConnectionState.CONNECTED -> stringResource(R.string.chat_050)
+            RelayConnectionState.AUTHENTICATING -> stringResource(R.string.chat_051)
+            RelayConnectionState.AUTHENTICATED -> stringResource(R.string.chat_052)
+            RelayConnectionState.DESKTOP_ONLINE -> stringResource(R.string.chat_053)
+            RelayConnectionState.RECONNECTING -> stringResource(R.string.chat_048)
+            RelayConnectionState.AUTH_FAILED -> stringResource(R.string.chat_054)
         }
     }
 }

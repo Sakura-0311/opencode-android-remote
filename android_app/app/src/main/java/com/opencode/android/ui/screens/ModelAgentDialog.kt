@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,10 +53,10 @@ fun ModelAgentDialog(
                     Text("Model / Agent", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Row {
                         IconButton(onClick = onRefresh) {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.model_001))
                         }
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "关闭")
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.model_002))
                         }
                     }
                 }
@@ -67,7 +68,7 @@ fun ModelAgentDialog(
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            "当前：${selectedAgent?.name ?: "默认 Agent"} · ${selectedModel?.displayName ?: "默认模型"}",
+                            stringResource(R.string.model_003, selectedAgent?.name ?: stringResource(R.string.model_n01), selectedModel?.displayName ?: stringResource(R.string.model_n02)),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -91,8 +92,8 @@ fun ModelAgentDialog(
                 if (tab == 0) {
                     // 默认选项
                     ListItem(
-                        headlineContent = { Text("默认 Agent") },
-                        supportingContent = { Text("使用会话默认配置", fontSize = 12.sp) },
+                        headlineContent = { Text(stringResource(R.string.model_004)) },
+                        supportingContent = { Text(stringResource(R.string.model_005), fontSize = 12.sp) },
                         leadingContent = {
                             RadioButton(
                                 selected = selectedAgent == null,
@@ -122,8 +123,8 @@ fun ModelAgentDialog(
                 } else {
                     // 默认选项
                     ListItem(
-                        headlineContent = { Text("默认模型") },
-                        supportingContent = { Text("使用会话默认配置", fontSize = 12.sp) },
+                        headlineContent = { Text(stringResource(R.string.model_006)) },
+                        supportingContent = { Text(stringResource(R.string.model_005), fontSize = 12.sp) },
                         leadingContent = {
                             RadioButton(
                                 selected = selectedModel == null,
@@ -161,20 +162,20 @@ fun ModelAgentDialog(
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                "拉取失败：$configError",
+                                stringResource(R.string.model_007, configError),
                                 color = MaterialTheme.colorScheme.error,
                                 fontSize = 13.sp
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             TextButton(onClick = onRefresh) {
-                                Text("重试")
+                                Text(stringResource(R.string.model_008))
                             }
                         }
                     }
                 } else if ((tab == 0 && agents.isEmpty()) || (tab == 1 && models.isEmpty())) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            "暂无数据，点击右上角刷新",
+                            stringResource(R.string.model_009),
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                             fontSize = 13.sp
                         )

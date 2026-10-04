@@ -17,8 +17,8 @@ import java.io.File
  */
 class OpenCodeApp : Application() {
 
-    val relayClient: RelayWebSocketClient by lazy { RelayWebSocketClient() }
-    val cloudClient: CloudApiClient by lazy { CloudApiClient() }
+    val relayClient: RelayWebSocketClient by lazy { RelayWebSocketClient(this) }
+    val cloudClient: CloudApiClient by lazy { CloudApiClient(this) }
 
     // v2.3: 网络变化监听（500ms 防抖），驱动 relay 重连
     private var networkMonitor: NetworkMonitor? = null

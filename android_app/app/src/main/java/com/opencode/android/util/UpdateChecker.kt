@@ -1,6 +1,7 @@
 package com.opencode.android.util
 
 import android.os.Handler
+import android.content.Context
 import android.os.Looper
 import com.opencode.android.BuildConfig
 import org.json.JSONObject
@@ -27,7 +28,7 @@ object UpdateChecker {
     /**
      * 在后台线程检查，结果回 main 线程
      */
-    fun checkForUpdate(callback: (UpdateInfo) -> Unit) {
+    fun checkForUpdate(context: Context, callback: (UpdateInfo) -> Unit) {
         val mainHandler = Handler(Looper.getMainLooper())
         Thread {
             val info = try {
@@ -38,7 +39,7 @@ object UpdateChecker {
                 }
                 if (conn.responseCode != 200) {
                     UpdateInfo(false, "", BuildConfig.VERSION_NAME, null, null,
-                        "检查失败: HTTP ${conn.responseCode}")
+                        context.getString(R.string.update_001, conn.responseCode))
                 } else {
                     val body = conn.inputStream.bufferedReader().readText()
                     val json = JSONObject(body)
@@ -56,14 +57,14 @@ object UpdateChecker {
                     val current = BuildConfig.VERSION_NAME
                     UpdateInfo(
                         hasUpdate = isNewer(tag, current),
-                        latestVersion = tag.ifEmpty { "未知" },
+                        latestVersion = tag.ifEmpty { context.getString(R.string.update_002) },
                         currentVersion = current,
                         downloadUrl = dlUrl,
                         releaseNotes = notes.takeIf { it.isNotBlank() }
                     )
                 }
             } catch (e: Exception) {
-                UpdateInfo(false, "", BuildConfig.VERSION_NAME, null, null, "检查失败: ${e.message}")
+                UpdateInfo(false, "", BuildConfig.VERSION_NAME, null, null, context.getString(R.string.update_003, e.message))
             }
             mainHandler.post { callback(info) }
         }.start()

@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,19 +47,19 @@ fun DesktopListDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("选择目标电脑", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.desk_001), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Row {
                         IconButton(onClick = onRefresh) {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.desk_002))
                         }
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "关闭")
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.desk_003))
                         }
                     }
                 }
 
                 Text(
-                    "消息将发送到所选电脑；不选则走主 desktop",
+                    stringResource(R.string.desk_004),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -68,7 +69,7 @@ fun DesktopListDialog(
                     // 「主 desktop（自动）」选项
                     item {
                         DesktopRow(
-                            name = "主 desktop（自动）",
+                            name = stringResource(R.string.desk_005),
                             subId = "",
                             isPrimary = false,
                             lastActiveText = "",
@@ -79,7 +80,7 @@ fun DesktopListDialog(
                     }
                     items(desktops, key = { it.deviceId }) { d ->
                         val lastActiveText = if (d.lastActive > 0)
-                            "最近活动 ${dateFmt.format(Date(d.lastActive))}" else ""
+                            stringResource(R.string.desk_006, dateFmt.format(Date(d.lastActive))) else ""
                         DesktopRow(
                             name = d.deviceName.ifBlank { "Desktop" },
                             subId = DesktopRoutingPolicy.shortId(d.deviceId),
@@ -94,7 +95,7 @@ fun DesktopListDialog(
 
                 if (desktops.isEmpty()) {
                     Text(
-                        "暂无在线电脑",
+                        stringResource(R.string.desk_007),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.CenterHorizontally).padding(16.dp)
@@ -137,7 +138,7 @@ private fun DesktopRow(
                         color = MaterialTheme.colorScheme.primaryContainer
                     ) {
                         Text(
-                            "主",
+                            stringResource(R.string.desk_008),
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -148,7 +149,7 @@ private fun DesktopRow(
             val sub = listOf(
                 subId.takeIf { it.isNotEmpty() }?.let { "ID $it" } ?: "",
                 lastActiveText
-            ).filter { it.isNotBlank() }.joinToString(" · ")
+            ).filter { it.isNotBlank() }.joinToString(stringResource(R.string.desk_009))
             if (sub.isNotEmpty()) {
                 Text(sub, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -156,7 +157,7 @@ private fun DesktopRow(
         if (selected) {
             Icon(
                 Icons.Default.Check,
-                contentDescription = "已选",
+                contentDescription = stringResource(R.string.desk_010),
                 tint = MaterialTheme.colorScheme.primary
             )
         }

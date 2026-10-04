@@ -1,6 +1,7 @@
 package com.opencode.android.network
 
 import android.content.SharedPreferences
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.opencode.android.util.AppLog
@@ -22,7 +23,7 @@ interface CloudStreamListener {
     fun onSseStateChanged(retrying: Boolean, attempt: Int) {}
 }
 
-class CloudApiClient {
+class CloudApiClient(private val appContext: Context) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
@@ -104,7 +105,7 @@ class CloudApiClient {
             override fun onFailure(call: Call, e: IOException) {
                 val latency = System.currentTimeMillis() - startTime
                 mainHandler.post {
-                    callback(false, "无法连通云端 OpenCode (${latency}ms): ${e.message ?: "连接被拒绝或超时"}")
+                    callback(false, appContext.getString(R.string.cloud_001, latency, e.message ?: appContext.getString(R.string.cloud_n01)))
                 }
             }
 
@@ -116,11 +117,11 @@ class CloudApiClient {
 
                 mainHandler.post {
                     when (code) {
-                        200 -> callback(true, "云端 OpenCode 真实服务就绪 (${latency}ms, HTTP 200)")
-                        401 -> callback(false, "认证失败 (HTTP 401): 密码错误，请检查云端访问密码")
-                        404 -> callback(false, "接口不存在 (HTTP 404): 未检测到 OpenCode 真实端点 (/global/health)")
-                        502, 521 -> callback(false, "网关/隧道异常 (HTTP $code): 穿透隧道或反向代理未连通后端")
-                        else -> callback(false, "云端实例响应异常 HTTP $code (${latency}ms)")
+                        200 -> callback(true, appContext.getString(R.string.cloud_002, latency))
+                        401 -> callback(false, appContext.getString(R.string.cloud_003))
+                        404 -> callback(false, appContext.getString(R.string.cloud_004))
+                        502, 521 -> callback(false, appContext.getString(R.string.cloud_005, code))
+                        else -> callback(false, appContext.getString(R.string.cloud_006, code, latency))
                     }
                 }
             }
@@ -187,7 +188,7 @@ class CloudApiClient {
             override fun onFailure(call: Call, e: IOException) {
                 if (call.isCanceled()) return
                 // P1-8: 非主动取消的失败走指数退避重连，而非直接报错
-                scheduleSseRetry("云端 SSE 事件流连接中断: ${e.message ?: "未知网络错误"}")
+                scheduleSseRetry(appContext.getString(R.string.cloud_007, e.message ?: appContext.getString(R.string.cloud_n02)))
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -196,11 +197,11 @@ class CloudApiClient {
                     response.close()
                     // P1-8: 5xx/网络类错误可重连；4xx（鉴权/路径）直接报错
                     if (code >= 500 && sseStreamActive) {
-                        scheduleSseRetry("无法订阅云端事件流 (HTTP $code)")
+                        scheduleSseRetry(appContext.getString(R.string.cloud_008, code))
                     } else {
                         sseStreamActive = false
                         mainHandler.post {
-                            listener.onError("HTTP_$code", "无法订阅云端事件流 (HTTP $code)")
+                            listener.onError("HTTP_$code", appContext.getString(R.string.cloud_008, code))
                         }
                     }
                     return
@@ -277,7 +278,7 @@ class CloudApiClient {
                 } catch (e: Exception) {
                     if (!call.isCanceled() && sseStreamActive) {
                         // P1-8: 读取异常走指数退避重连（Last-Event-ID 自动续传）
-                        scheduleSseRetry("读取云端事件流异常: ${e.message}")
+                        scheduleSseRetry(appContext.getString(R.string.cloud_009, e.message))
                     }
                 } finally {
                     response.close()
@@ -320,7 +321,7 @@ class CloudApiClient {
         client.newCall(requestBuilder.build()).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 mainHandler.post {
-                    listener.onError("SEND_FAILED", "发送指令失败: ${e.message}")
+                    listener.onError("SEND_FAILED", appContext.getString(R.string.cloud_010, e.message))
                 }
             }
 
@@ -330,7 +331,7 @@ class CloudApiClient {
                     val errBody = response.body?.string() ?: ""
                     response.close()
                     mainHandler.post {
-                        listener.onError("HTTP_$code", "云端执行失败 (HTTP $code): $errBody")
+                        listener.onError("HTTP_$code", appContext.getString(R.string.cloud_011, code, errBody))
                     }
                 } else {
                     response.close()
@@ -426,9 +427,9 @@ class CloudApiClient {
                         for (i in 0 until jsonArr.length()) {
                             val obj = jsonArr.getJSONObject(i)
                             val id = obj.optString("id")
-                            val title = obj.optString("title", obj.optString("name", "云端会话 $id"))
+                            val title = obj.optString("title", obj.optString("name", appContext.getString(R.string.cloud_012, id)))
                             if (id.isNotEmpty()) {
-                                list.add(com.opencode.android.data.model.SessionItem(id = id, title = title, tag = "默认"))
+                                list.add(com.opencode.android.data.model.SessionItem(id = id, title = title, tag = appContext.getString(R.string.cloud_013)))
                             }
                         }
                     } catch (e: Exception) {}
@@ -455,7 +456,7 @@ class CloudApiClient {
             AppLog.w("Cloud", "SSE retry exhausted after 30min offline")
             mainHandler.post {
                 params.listener.onSseStateChanged(false, sseRetryCount)
-                params.listener.onError("SSE_RETRY_EXHAUSTED", "云端事件流多次重连失败，已停止重试: $reason")
+                params.listener.onError("SSE_RETRY_EXHAUSTED", appContext.getString(R.string.cloud_014, reason))
             }
             return
         }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,25 +57,25 @@ fun ProjectCenterDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("项目中心", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.proj_001), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text(
-                            deviceName.ifBlank { "当前设备" },
+                            deviceName.ifBlank { stringResource(R.string.proj_002) },
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
                     }
                     Row {
                         IconButton(onClick = onRefresh) {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新")
+                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.proj_003))
                         }
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "关闭")
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.proj_004))
                         }
                     }
                 }
 
                 Text(
-                    "${projects.size} 个项目",
+                    stringResource(R.string.proj_005, projects.size),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
@@ -85,13 +86,13 @@ fun ProjectCenterDialog(
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                "拉取失败：$projectsError",
+                                stringResource(R.string.proj_006, projectsError),
                                 color = MaterialTheme.colorScheme.error,
                                 fontSize = 13.sp
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             TextButton(onClick = onRefresh) {
-                                Text("重试")
+                                Text(stringResource(R.string.proj_007))
                             }
                         }
                     }
@@ -106,7 +107,7 @@ fun ProjectCenterDialog(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                "暂无项目，点击右上角刷新",
+                                stringResource(R.string.proj_008),
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                                 fontSize = 13.sp
                             )
@@ -160,7 +161,7 @@ private fun ProjectRow(
                             shape = MaterialTheme.shapes.small
                         ) {
                             Text(
-                                "当前",
+                                stringResource(R.string.proj_009),
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -196,12 +197,12 @@ private fun ProjectRow(
             IconButton(onClick = onToggleFavorite) {
                 Icon(
                     if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-                    contentDescription = "收藏",
+                    contentDescription = stringResource(R.string.proj_010),
                     tint = if (isFavorite) Color(0xFFFFC107)
                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                 )
             }
-            Icon(Icons.Default.ChevronRight, contentDescription = "进入")
+            Icon(Icons.Default.ChevronRight, contentDescription = stringResource(R.string.proj_011))
         }
     }
 }

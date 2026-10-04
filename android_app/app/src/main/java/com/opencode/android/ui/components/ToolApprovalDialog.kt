@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material3.*
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,12 +46,12 @@ fun ToolApprovalDialog(
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
                     Text(
-                        text = "工具执行审批",
+                        text = stringResource(R.string.approval_001),
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "工具: ${request.toolName}",
+                        text = stringResource(R.string.approval_002, request.toolName),
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold
@@ -118,7 +119,7 @@ fun ToolApprovalDialog(
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.height(44.dp)
             ) {
-                Text("同意执行", fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                Text(stringResource(R.string.approval_003), fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
             }
         },
         dismissButton = {
@@ -128,7 +129,7 @@ fun ToolApprovalDialog(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 modifier = Modifier.height(44.dp)
             ) {
-                Text("拒绝", fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                Text(stringResource(R.string.approval_004), fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
             }
         }
     )

@@ -1,5 +1,7 @@
 package com.opencode.android.util
 
+import androidx.annotation.StringRes
+
 import android.content.Context
 import org.json.JSONObject
 import java.io.File
@@ -15,14 +17,14 @@ import java.util.Locale
  */
 object OpLog {
 
-    enum class OpType(val label: String) {
-        APPROVE("审批通过"),
-        REJECT("审批拒绝"),
-        ABORT("中断任务"),
-        REVOKE("撤销设备"),
-        PAIR("配对成功"),
-        CONFIG_EXPORT("导出配置"),
-        CONFIG_IMPORT("导入配置")
+    enum class OpType(@StringRes val labelRes: Int) {
+        APPROVE(R.string.op_approve),
+        REJECT(R.string.op_reject),
+        ABORT(R.string.op_abort),
+        REVOKE(R.string.op_revoke),
+        PAIR(R.string.op_pair),
+        CONFIG_EXPORT(R.string.op_export),
+        CONFIG_IMPORT(R.string.op_import)
     }
 
     data class Entry(val ts: Long, val type: OpType, val detail: String) {

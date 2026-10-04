@@ -1,6 +1,8 @@
 package com.opencode.android.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.Composable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,7 +57,7 @@ fun CompactDiffView(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "改动概览: ",
+                    text = stringResource(R.string.diff_001),
                     fontSize = 11.5.sp,
                     color = Color.LightGray
                 )
@@ -84,7 +86,7 @@ fun CompactDiffView(
                 modifier = Modifier.height(28.dp)
             ) {
                 Text(
-                    text = if (showFullContext) "收起未变动行" else "展开完整文件",
+                    text = if (showFullContext) stringResource(R.string.diff_002) else stringResource(R.string.diff_003),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -200,6 +202,7 @@ private fun DiffLineItem(line: DiffLine) {
 /**
  * 精简过滤器：保留修改行及其前后 1 行上下文，多余连续无变动行折叠提示
  */
+@Composable
 private fun compactDiffFilter(lines: List<DiffLine>): List<DiffLine> {
     if (lines.isEmpty()) return emptyList()
 
@@ -222,7 +225,7 @@ private fun compactDiffFilter(lines: List<DiffLine>): List<DiffLine> {
                 result.add(
                     DiffLine(
                         DiffLineType.HEADER,
-                        "··· [折叠 $skippedCount 行无变动上下文] ···"
+                        stringResource(R.string.diff_004, skippedCount)
                     )
                 )
                 inFoldedGap = false
@@ -239,7 +242,7 @@ private fun compactDiffFilter(lines: List<DiffLine>): List<DiffLine> {
         result.add(
             DiffLine(
                 DiffLineType.HEADER,
-                "··· [折叠 $skippedCount 行尾部无变动代码] ···"
+                stringResource(R.string.diff_005, skippedCount)
             )
         )
     }

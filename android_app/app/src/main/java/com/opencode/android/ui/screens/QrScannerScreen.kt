@@ -13,6 +13,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,17 +83,17 @@ fun QrScannerScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("扫描配对二维码", style = MaterialTheme.typography.titleLarge)
-            TextButton(onClick = onCancel) { Text("取消") }
+            Text(stringResource(R.string.qr_001), style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.qr_002)) }
         }
 
         if (!hasPermission) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("需要相机权限才能扫描配对二维码")
+                    Text(stringResource(R.string.qr_003))
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                        Text("授权相机")
+                        Text(stringResource(R.string.qr_004))
                     }
                 }
             }
@@ -158,7 +159,7 @@ fun QrScannerScreen(
                             analysis
                         )
                     } catch (e: Exception) {
-                        errorMsg = "相机启动失败：${e.message}"
+                        errorMsg = stringResource(R.string.qr_005, e.message)
                     }
                 }, ContextCompat.getMainExecutor(ctx))
                 previewView

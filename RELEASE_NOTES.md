@@ -1,3 +1,25 @@
+# OpenCode Android Remote - Release v4.3.0（多语言）
+
+## 内容
+
+- **多语言界面**：菜单 → 语言，可切换 10 种语言 + 跟随系统（中文简体默认置顶）
+  - 中文（简体）、English、日本語、한국어、Español、Français、Deutsch、Русский、Português、العربية
+  - 选择后即时生效；API 33+ 同步到系统「应用语言」设置页；阿拉伯语 RTL 已开
+- 561 条界面文案全部抽取到 `values/strings.xml`（另有 9 个语言目录）；硬编码中文清零（日志/数据键除外）
+- 多语言翻译由 AI 生成，欢迎校对
+
+## 兼容性
+
+- 非破坏性；默认跟随系统，无行为变化
+- 新增偏好 `app_locale`（明文，空=跟随系统）
+
+## 验证
+
+- CI 全绿；aapt 校验各语言占位符一致性
+- 真机：切换 3 种语言无崩溃、无缺字（待验证，见 TESTING_CHECKLIST.md）
+
+---
+
 # OpenCode Android Remote - Release v4.2.0（E2EE 运行时开关）
 
 ## 内容

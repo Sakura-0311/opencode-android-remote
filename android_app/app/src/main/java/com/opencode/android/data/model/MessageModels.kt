@@ -1,5 +1,7 @@
 package com.opencode.android.data.model
 
+import androidx.annotation.StringRes
+
 import com.opencode.android.network.AgentInfo
 import com.opencode.android.network.DesktopInfo
 import com.opencode.android.network.DeviceInfo
@@ -24,14 +26,14 @@ enum class AppMode {
  * v1.6 P0 后台保活：任务状态机
  * 异常情况下明确显示：运行中、等待输入、权限审批、失败、已完成、已断开
  */
-enum class TaskStatus(val label: String) {
-    IDLE("空闲"),
-    RUNNING("运行中"),
-    WAITING_INPUT("等待输入"),
-    APPROVAL_REQUIRED("权限审批"),
-    FAILED("失败"),
-    COMPLETED("已完成"),
-    DISCONNECTED("已断开")
+enum class TaskStatus(@StringRes val labelRes: Int) {
+    IDLE(R.string.msg_status_idle),
+    RUNNING(R.string.msg_status_running),
+    WAITING_INPUT(R.string.msg_status_waiting_input),
+    APPROVAL_REQUIRED(R.string.msg_status_approval),
+    FAILED(R.string.msg_status_failed),
+    COMPLETED(R.string.msg_status_completed),
+    DISCONNECTED(R.string.msg_status_disconnected)
 }
 
 data class ChatMessage(

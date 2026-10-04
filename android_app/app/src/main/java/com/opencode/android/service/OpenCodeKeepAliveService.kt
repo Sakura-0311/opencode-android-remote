@@ -26,7 +26,7 @@ class OpenCodeKeepAliveService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var taskStartTimeMs: Long = 0L
-    private var currentStep: String = "正在执行任务..."
+    private var currentStep: String = getString(R.string.svc_001)
     private var currentSessionId: String = ""
     private var isTaskRunning = false
 
@@ -69,7 +69,7 @@ class OpenCodeKeepAliveService : Service() {
             s = s.replace(Regex("(?i)(api[_-]?key|token|secret|password|passwd|sk-)\\s*[:=]\\s*\\S+"), "$1=***")
             s = s.replace(Regex("sk-[A-Za-z0-9-_]{8,}"), "sk-***")
             s = s.replace(Regex("ghp_[A-Za-z0-9]{8,}"), "ghp_***")
-            return s.take(maxLen).trim().ifBlank { "（无）" }
+            return s.take(maxLen).trim().ifBlank { getString(R.string.svc_002) }
         }
 
         private fun sessionDeepLinkIntent(context: Context, sessionId: String): PendingIntent {
@@ -96,15 +96,15 @@ class OpenCodeKeepAliveService : Service() {
             vibrateStatic(context, longArrayOf(0, 120, 80, 120))
             val mins = durationMs / 60000
             val secs = (durationMs % 60000) / 1000
-            val duration = if (mins > 0) "${mins} 分 ${secs} 秒" else "${secs} 秒"
+            val duration = if (mins > 0) getString(R.string.svc_003, mins, secs) else getString(R.string.svc_004, secs)
             val safeName = sanitizeForNotification(taskName, 40)
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val n = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
                 .setSmallIcon(android.R.drawable.checkbox_on_background)
-                .setContentTitle("OpenCode「$safeName」任务已完成")
-                .setContentText("耗时 $duration｜修改 $fileCount 个文件｜查看结果")
+                .setContentTitle(getString(R.string.svc_005, safeName))
+                .setContentText(getString(R.string.svc_006, duration, fileCount))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(
-                    "任务「$safeName」已完成\n耗时：$duration\n修改文件：$fileCount 个\n点击进入会话查看结果。"
+                    getString(R.string.svc_007, safeName, duration, fileCount)
                 ))
                 .setAutoCancel(true)
                 .setContentIntent(sessionDeepLinkIntent(context, sessionId))
@@ -122,10 +122,10 @@ class OpenCodeKeepAliveService : Service() {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val n = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle("OpenCode 任务失败")
+                .setContentTitle(getString(R.string.svc_008))
                 .setContentText(safeErr)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(
-                    "任务执行失败：\n$safeErr\n点击进入会话查看详情。"
+                    getString(R.string.svc_009, safeErr)
                 ))
                 .setAutoCancel(true)
                 .setContentIntent(sessionDeepLinkIntent(context, sessionId))
@@ -143,10 +143,10 @@ class OpenCodeKeepAliveService : Service() {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val n = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("OpenCode 等待你的输入")
+                .setContentTitle(getString(R.string.svc_010))
                 .setContentText(safePrompt)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(
-                    "AI 需要你确认或补充信息：\n$safePrompt\n点击进入会话回复。"
+                    getString(R.string.svc_011, safePrompt)
                 ))
                 .setAutoCancel(true)
                 .setContentIntent(sessionDeepLinkIntent(context, sessionId))
@@ -272,7 +272,7 @@ class OpenCodeKeepAliveService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                currentStep = intent.getStringExtra(EXTRA_STEP) ?: "正在初始化任务..."
+                currentStep = intent.getStringExtra(EXTRA_STEP) ?: getString(R.string.svc_012)
                 currentSessionId = intent.getStringExtra(EXTRA_SESSION) ?: ""
                 taskStartTimeMs = System.currentTimeMillis()
                 isTaskRunning = true
@@ -300,7 +300,7 @@ class OpenCodeKeepAliveService : Service() {
                 stopSelf()
             }
             ACTION_APPROVAL -> {
-                val toolName = intent.getStringExtra(EXTRA_TOOL) ?: "敏感工具调用"
+                val toolName = intent.getStringExtra(EXTRA_TOOL) ?: getString(R.string.svc_013)
                 triggerApprovalNotificationAndVibration(toolName)
             }
         }
@@ -344,12 +344,12 @@ class OpenCodeKeepAliveService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID_PROGRESS)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("OpenCode 任务执行中 [$durationFormatted]")
+            .setContentTitle(getString(R.string.svc_014, durationFormatted))
             .setContentText(currentStep)
             .setStyle(NotificationCompat.BigTextStyle().bigText(
-                "已运行: $durationFormatted\n" +
-                (if (currentSessionId.isNotBlank()) "会话: ${currentSessionId.take(8)}…\n" else "") +
-                "当前进度: $currentStep"
+                getString(R.string.svc_015, durationFormatted) +
+                (if (currentSessionId.isNotBlank()) getString(R.string.svc_016, currentSessionId.take(8)) else "") +
+                getString(R.string.svc_017, currentStep)
             ))
             .setOngoing(true)
             .setContentIntent(pendingIntent)
@@ -375,8 +375,8 @@ class OpenCodeKeepAliveService : Service() {
 
         val completedNotification = NotificationCompat.Builder(this, CHANNEL_ID_ALERT)
             .setSmallIcon(android.R.drawable.checkbox_on_background)
-            .setContentTitle("OpenCode 任务执行完毕")
-            .setContentText("云端指令已顺利完成，点击查看完整结果。")
+            .setContentTitle(getString(R.string.svc_018))
+            .setContentText(getString(R.string.svc_019))
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -401,9 +401,9 @@ class OpenCodeKeepAliveService : Service() {
 
         val approvalNotification = NotificationCompat.Builder(this, CHANNEL_ID_ALERT)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("⚠️ OpenCode 需要工具审批")
-            .setContentText("AI 申请执行: $toolName，锁屏点击快速审核改动。")
-            .setStyle(NotificationCompat.BigTextStyle().bigText("AI 正在申请修改代码或执行敏感工具: $toolName。\n请进入应用审查精简 Diff 并审批。"))
+            .setContentTitle(getString(R.string.svc_020))
+            .setContentText(getString(R.string.svc_021, toolName))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.svc_022, toolName)))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
@@ -439,19 +439,19 @@ class OpenCodeKeepAliveService : Service() {
 
             val progressChannel = NotificationChannel(
                 CHANNEL_ID_PROGRESS,
-                "任务执行常驻进度",
+                getString(R.string.svc_023),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "在云端/电脑执行长时间任务时展示常驻运行进度"
+                description = getString(R.string.svc_024)
                 enableVibration(false)
             }
 
             val alertChannel = NotificationChannel(
                 CHANNEL_ID_ALERT,
-                "任务通知与审批提醒",
+                getString(R.string.svc_025),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "工具调用审批请求与长任务完成强震动通知"
+                description = getString(R.string.svc_026)
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 250, 100, 250)
             }

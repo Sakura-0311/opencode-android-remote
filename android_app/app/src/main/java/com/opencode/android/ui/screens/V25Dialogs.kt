@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,10 +43,10 @@ fun ProfileManagerDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("连接配置", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(stringResource(R.string.v25_001), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "切换不同服务器/账号。密钥按配置单独保存，切换后需重新连接。",
+                    stringResource(R.string.v25_002),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
@@ -68,20 +69,20 @@ fun ProfileManagerDialog(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(p.name, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
+                                Text(p.name.ifBlank { stringResource(R.string.profile_unnamed) }, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
                                 Text(
-                                    if (p.mode == AppMode.DESKTOP_RELAY) "电脑中继 · ${p.relayUrl.ifBlank { "未配置" }}"
-                                    else "云端直连 · ${p.cloudUrl.ifBlank { "未配置" }}",
+                                    if (p.mode == AppMode.DESKTOP_RELAY) stringResource(R.string.v25_003, p.relayUrl.ifBlank { stringResource(R.string.diag_n01) })
+                                    else stringResource(R.string.v25_004, p.cloudUrl.ifBlank { stringResource(R.string.diag_n01) }),
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                                 )
                             }
                             IconButton(onClick = { renameTarget = p }) {
-                                Icon(Icons.Default.Edit, contentDescription = "重命名", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.v25_005), modifier = Modifier.size(18.dp))
                             }
                             if (profiles.size > 1) {
                                 IconButton(onClick = { onDelete(p.id) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "删除", modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.v25_006), modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
@@ -93,16 +94,16 @@ fun ProfileManagerDialog(
                     OutlinedButton(onClick = { showAdd = true }, modifier = Modifier.weight(1f)) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("新建配置")
+                        Text(stringResource(R.string.v25_007))
                     }
-                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("关闭") }
+                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.v25_008)) }
                 }
             }
         }
     }
     if (showAdd) {
         ProfileEditDialog(
-            title = "新建连接配置",
+            title = stringResource(R.string.v25_009),
             onConfirm = { onAdd(it); showAdd = false },
             onDismiss = { showAdd = false }
         )
@@ -111,11 +112,11 @@ fun ProfileManagerDialog(
         var name by remember { mutableStateOf(target.name) }
         AlertDialog(
             onDismissRequest = { renameTarget = null },
-            title = { Text("重命名") },
+            title = { Text(stringResource(R.string.v25_005)) },
             text = {
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
-                    label = { Text("配置名称") }, singleLine = true,
+                    label = { Text(stringResource(R.string.v25_010)) }, singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
             },
@@ -123,9 +124,9 @@ fun ProfileManagerDialog(
                 TextButton(onClick = {
                     if (name.isNotBlank()) onRename(target.id, name.trim())
                     renameTarget = null
-                }) { Text("确定") }
+                }) { Text(stringResource(R.string.v25_011)) }
             },
-            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("取消") } }
+            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text(stringResource(R.string.v25_012)) } }
         )
     }
 }
@@ -149,7 +150,7 @@ private fun ProfileEditDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
-                    label = { Text("配置名称（如：家里电脑）") }, singleLine = true,
+                    label = { Text(stringResource(R.string.v25_013)) }, singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -158,42 +159,42 @@ private fun ProfileEditDialog(
                         selected = mode == AppMode.DESKTOP_RELAY,
                         onClick = { mode = AppMode.DESKTOP_RELAY }
                     )
-                    Text("电脑中继", modifier = Modifier.clickable { mode = AppMode.DESKTOP_RELAY })
+                    Text(stringResource(R.string.v25_014), modifier = Modifier.clickable { mode = AppMode.DESKTOP_RELAY })
                     Spacer(modifier = Modifier.width(16.dp))
                     RadioButton(
                         selected = mode == AppMode.CLOUD_HOSTED,
                         onClick = { mode = AppMode.CLOUD_HOSTED }
                     )
-                    Text("云端直连", modifier = Modifier.clickable { mode = AppMode.CLOUD_HOSTED })
+                    Text(stringResource(R.string.v25_015), modifier = Modifier.clickable { mode = AppMode.CLOUD_HOSTED })
                 }
                 if (mode == AppMode.DESKTOP_RELAY) {
                     OutlinedTextField(
                         value = relayUrl, onValueChange = { relayUrl = it },
-                        label = { Text("Relay 地址（ws://…）") }, singleLine = true,
+                        label = { Text(stringResource(R.string.v25_016)) }, singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = accountId, onValueChange = { accountId = it },
-                        label = { Text("Account ID（配对后自动填）") }, singleLine = true,
+                        label = { Text(stringResource(R.string.v25_017)) }, singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 } else {
                     OutlinedTextField(
                         value = cloudUrl, onValueChange = { cloudUrl = it },
-                        label = { Text("云端地址（https://…）") }, singleLine = true,
+                        label = { Text(stringResource(R.string.v25_018)) }, singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = cloudWorkspace, onValueChange = { cloudWorkspace = it },
-                        label = { Text("工作区路径") }, singleLine = true,
+                        label = { Text(stringResource(R.string.v25_019)) }, singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "密钥不在此处填写：电脑中继用扫码配对，云端在连接时填写 API Key。",
+                    stringResource(R.string.v25_020),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
                 )
@@ -211,8 +212,8 @@ private fun ProfileEditDialog(
                         },
                         modifier = Modifier.weight(1f),
                         enabled = name.isNotBlank()
-                    ) { Text("保存") }
-                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("取消") }
+                    ) { Text(stringResource(R.string.v25_021)) }
+                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.v25_012)) }
                 }
             }
         }
@@ -228,10 +229,10 @@ fun ConfigExportDialog(json: String, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("导出配置", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(stringResource(R.string.v25_022), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "不含任何密钥。导入到新设备后需重新配对。",
+                    stringResource(R.string.v25_023),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
@@ -256,8 +257,8 @@ fun ConfigExportDialog(json: String, onDismiss: () -> Unit) {
                             copied = true
                         },
                         modifier = Modifier.weight(1f)
-                    ) { Text(if (copied) "已复制" else "复制") }
-                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("关闭") }
+                    ) { Text(if (copied) stringResource(R.string.v25_024) else stringResource(R.string.v25_025)) }
+                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.v25_008)) }
                 }
             }
         }
@@ -276,22 +277,22 @@ fun ConfigImportDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("导入配置", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(stringResource(R.string.v25_026), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "粘贴导出的配置 JSON。导入后密钥为空，需重新配对。",
+                    stringResource(R.string.v25_027),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = text, onValueChange = { text = it; error = false },
-                    label = { Text("配置 JSON") },
+                    label = { Text(stringResource(R.string.v25_028)) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 300.dp),
                     isError = error
                 )
                 if (error) {
-                    Text("JSON 无效或版本不匹配，未导入。", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                    Text(stringResource(R.string.v25_029), color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -301,8 +302,8 @@ fun ConfigImportDialog(
                             else onDismiss()
                         },
                         modifier = Modifier.weight(1f)
-                    ) { Text("导入") }
-                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("取消") }
+                    ) { Text(stringResource(R.string.v25_030)) }
+                    TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.v25_012)) }
                 }
             }
         }
@@ -319,19 +320,19 @@ fun OpLogDialog(onDismiss: () -> Unit) {
         Surface(shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("本地操作记录", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.v25_031), fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
                     if (entries.isNotEmpty()) {
-                        TextButton(onClick = { OpLog.clear(context); onDismiss() }) { Text("清空") }
+                        TextButton(onClick = { OpLog.clear(context); onDismiss() }) { Text(stringResource(R.string.v25_032)) }
                     }
                 }
                 Text(
-                    "仅本机保存：审批/中断/撤销/配对等，不含对话内容。",
+                    stringResource(R.string.v25_033),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 if (entries.isEmpty()) {
-                    Text("暂无记录", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Text(stringResource(R.string.v25_034), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                 } else {
                     LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
                         items(entries, key = { it.ts }) { e ->
@@ -342,7 +343,7 @@ fun OpLogDialog(onDismiss: () -> Unit) {
                                     modifier = Modifier.width(76.dp)
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(e.type.label, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                    Text(stringResource(e.type.labelRes), fontSize = 13.sp, fontWeight = FontWeight.Medium)
                                     if (e.detail.isNotBlank()) {
                                         Text(
                                             e.detail, fontSize = 11.sp,
@@ -356,7 +357,7 @@ fun OpLogDialog(onDismiss: () -> Unit) {
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.v25_008)) }
             }
         }
     }

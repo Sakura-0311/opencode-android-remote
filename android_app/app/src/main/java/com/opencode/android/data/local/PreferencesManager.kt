@@ -77,7 +77,7 @@ class PreferencesManager(context: Context) {
         if (tink == null) {
             return Triple(
                 SecureBackend.LEGACY,
-                if (legacy != null) "旧版加密存储（Tink 不可用）" else "不可用",
+                if (legacy != null) appContext.getString(R.string.prefs_001) else appContext.getString(R.string.prefs_002),
                 false
             )
         }
@@ -87,7 +87,7 @@ class PreferencesManager(context: Context) {
                     appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                         .edit().putBoolean(KEY_TINK_MIGRATED, true).apply()
                     val n = r.migratedKeys.size
-                    val extra = if (n > 0) "（本次迁移 $n 项）" else "（已迁移）"
+                    val extra = if (n > 0) appContext.getString(R.string.prefs_003, n) else appContext.getString(R.string.prefs_004)
                     return Triple(SecureBackend.TINK, "Tink ${TinkKeyManager.TINK_VERSION}$extra", false)
                 }
                 is SecureMigration.Result.Failure -> {
@@ -98,12 +98,12 @@ class PreferencesManager(context: Context) {
                             RuntimeException("SecureMigration 失败已回退: ${r.failedKey}", r.cause)
                         )
                     } catch (_: Exception) { }
-                    return Triple(SecureBackend.LEGACY, "旧版加密存储（Tink 迁移失败，已回退）", true)
+                    return Triple(SecureBackend.LEGACY, appContext.getString(R.string.prefs_005), true)
                 }
             }
         }
         // 无旧数据：直接走 Tink
-        return Triple(SecureBackend.TINK, "Tink ${TinkKeyManager.TINK_VERSION}（新设备）", false)
+        return Triple(SecureBackend.TINK, appContext.getString(R.string.prefs_006, TinkKeyManager.TINK_VERSION), false)
     }
 
     /** v3.2: 当前生效的安全存储；null 表示加密不可用（fail-closed） */
@@ -119,6 +119,11 @@ class PreferencesManager(context: Context) {
     var isE2eeEnabled: Boolean
         get() = prefs.getBoolean("e2ee_enabled", false)
         set(v) { prefs.edit().putBoolean("e2ee_enabled", v).apply() }
+
+    // v4.3: 界面语言 locale tag（非敏感，明文存储；空字符串=跟随系统）
+    var appLocale: String
+        get() = prefs.getString("app_locale", "") ?: ""
+        set(v) { prefs.edit().putString("app_locale", v).apply() }
 
     // v4.1: E2EE 密钥材料（敏感，只走 secure()；不可用时返回 null / 抛异常由调用方降级）
     fun getE2eePrivateKey(): String? = secure()?.get("e2ee_privkey")
@@ -483,7 +488,7 @@ class PreferencesManager(context: Context) {
     // ============ v2.5: 多连接 profiles ============
 
     /**
-     * 获取全部 profiles。首次调用时把旧单配置迁移为第一个 profile（名为"默认连接"），
+     * 获取全部 profiles。首次调用时把旧单配置迁移为第一个 profile（名为appContext.getString(R.string.prefs_008)），
      * 并把旧密钥复制到该 profile 的密钥槽；旧 key 保留一个版本作为读取保底。
      * 迁移失败时返回空列表，调用方应继续使用旧单配置读写（失败保底）。
      */
@@ -496,7 +501,7 @@ class PreferencesManager(context: Context) {
         return try {
             val legacy = ConnectionProfile(
                 id = "legacy_default",
-                name = "默认连接",
+                name = appContext.getString(R.string.prefs_008),
                 mode = getAppMode(),
                 relayUrl = getRelayUrl(),
                 accountId = getAccountId(),
