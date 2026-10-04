@@ -142,6 +142,58 @@ async def test_multi_desktop():
         await w.close()
 
 
+async def test_primary_fallback_by_auth_time():
+    """v3.0.2/B2: 主 desktop 掉线后，回退到最近认证的在线 desktop（而非字典第一项）"""
+    dA = await new_ws("desktop")
+    await hello_auth(dA, "desktop", "desk-A")
+    await asyncio.sleep(0.05)
+    dB = await new_ws("desktop")
+    await hello_auth(dB, "desktop", "desk-B")
+    await asyncio.sleep(0.05)
+    dC = await new_ws("desktop")
+    await hello_auth(dC, "desktop", "desk-C")
+    await asyncio.sleep(0.3)
+
+    # 主是最后认证的 C：mobile 消息应到 C
+    m = await new_ws("mobile")
+    await hello_auth(m, "mobile", "mobile-fb")
+    await m.send(json.dumps({"type": "send_prompt", "session_id": "s1", "prompt": "who"}))
+    got = None
+    for ws_cand, name in ((dA, "A"), (dB, "B"), (dC, "C")):
+        try:
+            raw = await asyncio.wait_for(ws_cand.recv(), timeout=3)
+            if json.loads(raw).get("type") in ("prompt_received", "send_prompt", "task_update"):
+                got = name
+                break
+        except asyncio.TimeoutError:
+            continue
+    check("主 desktop 为最后认证的 C", got == "C", f"got={got}")
+
+    # C 断开：回退应到 B（最近认证的剩余者），而非 A（字典第一项）
+    await dC.close()
+    await asyncio.sleep(0.5)
+    # 排空 B 上可能残留的旧帧
+    for _ in range(3):
+        try:
+            await asyncio.wait_for(dB.recv(), timeout=0.3)
+        except asyncio.TimeoutError:
+            break
+    await m.send(json.dumps({"type": "send_prompt", "session_id": "s2", "prompt": "who2"}))
+    got2 = None
+    for ws_cand, name in ((dA, "A"), (dB, "B")):
+        try:
+            raw = await asyncio.wait_for(ws_cand.recv(), timeout=3)
+            if json.loads(raw).get("type") in ("prompt_received", "send_prompt", "task_update"):
+                got2 = name
+                break
+        except asyncio.TimeoutError:
+            continue
+    check("主掉线后回退到最近认证的 B", got2 == "B", f"got={got2}")
+
+    for w in (dA, dB, m):
+        await w.close()
+
+
 async def main():
     env = dict(os.environ)
     proc = subprocess.Popen(
@@ -160,6 +212,7 @@ async def main():
         await test_hello()
         await test_v2_legacy_auth()
         await test_multi_desktop()
+        await test_primary_fallback_by_auth_time()
     finally:
         proc.terminate()
         proc.wait(timeout=10)

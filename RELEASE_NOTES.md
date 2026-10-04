@@ -1,3 +1,49 @@
+# OpenCode Android Remote - Release v3.0.2（补丁：CI 与文档）
+
+## 内容
+
+- **CI 接入 v3 契约测试**：`scripts/test_contract_v3.py` 正式进入 CI（此前只在手动跑），hello 协商 / 多 desktop 共存 / 主回退有自动回归保护
+- **主 desktop 掉线回退修正**：按「最近认证时间」回退（此前取字典第一项，与文档语义不一致）；契约测试新增对应用例，本地实测 12/12 通过
+- **文档补齐**：COMPATIBILITY 的 versionCode 表补到 30002，RELEASE_NOTES 补 v3.0.0/v3.0.1 条目；核对签名指纹与 applicationId 无变化
+
+## 兼容性
+
+- 协议、存储、App 逻辑都不变；v3.0.0 ↔ v3.0.1 ↔ v3.0.2 可互相覆盖安装
+- 回滚：重装 v3.0.1 APK；relay 回退到 v3.0.1 的 server.py 即可
+
+---
+
+# OpenCode Android Remote - Release v3.0.1（热修：启动闪退）
+
+## 内容
+
+- **修复启动闪退**：v2.1 引入的 WS 状态机让 `setListener` 同步回调 `onConnectionStateChanged`，而 `OpenCodeViewModel` init 先调 `setListener`、后初始化 `_uiState` → NPE。v2.1~v3.0 全版本启动即闪退。修复：`_uiState` 就绪后再 `setListener`
+- **验证**：GitHub Actions 云端模拟器（API 36/Android 16）跑 v3.0.0 复现崩溃、跑 v3.0.1 零 FATAL 且进程存活
+- 教训：`setListener` 这类同步回调必须在依赖就绪后调用；以后加回调先查调用时机
+
+## 兼容性
+
+- 与 v3.0.0 完全兼容，可直接覆盖安装；签名证书、applicationId 不变
+
+---
+
+# OpenCode Android Remote - Release v3.0.0（架构）
+
+## 内容
+
+- **hello/hello_ack 能力协商**：协议 v=3，server_capabilities 含 `multi_desktop` / `device_id_revoke` / `room_buffer` / `pairing`；v2 客户端无 hello 仍可直接 auth（向后兼容）
+- **relay 多 desktop 共存**：按 `device_id` 区分，同 `device_id` 才顶替；主 desktop=最近认证
+- **Android Transport 抽象**：`Transport` 接口 + `RelayTransport` / `CloudTransport` + `TransportFactory`，ViewModel 保持 `RelayListener` / `CloudStreamListener` 身份
+- **PROTOCOL_MISMATCH 错误码**：v3 App 连 v2 relay 时明确提示
+- **docs/MIGRATION_V3.md**：升级与回滚指南
+
+## 兼容性
+
+- 升级顺序：先 relay/agent 到 v3，再覆盖装 APK（同签名，数据保留）
+- 签名证书与 applicationId 不变
+
+---
+
 # OpenCode Android Remote - Release v2.6.0（工程化）
 
 ## 内容

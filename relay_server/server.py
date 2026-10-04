@@ -146,6 +146,8 @@ class ClientSession:
         self.client_ip = client_ip
         self.last_pong_time = time.time()
         self.is_authenticated = False
+        # v3.0.2/B2: 本次认证时间（主 desktop 掉线回退时选最近认证者）
+        self.auth_time = 0.0
         # v2.4: 设备身份（设备密钥登录时填充）
         self.device_id = ""
         self.device_name = str()
@@ -338,6 +340,8 @@ class ConnectionManager:
             session.device_id = device_info.get("device_id", "")
 
         session.is_authenticated = True
+        # v3.0.2/B2: 记录认证时间，供主 desktop 回退排序
+        session.auth_time = time.time()
         self.sessions[session.websocket] = session
 
         if session.client_type == "desktop":
@@ -545,8 +549,11 @@ class ConnectionManager:
                 if room.get("desktop") == session:
                     # 主 desktop 断开：推举另一个在线 desktop 为主
                     remaining = list(room.get("desktops", {}).values())
+                    # v3.0.2/B2: 按最近认证时间回退（此前取字典第一项，语义不一致）
+                    remaining.sort(key=lambda s: getattr(s, "auth_time", 0.0), reverse=True)
                     room["desktop"] = remaining[0] if remaining else None
-                    logger.info(f"Desktop disconnected from room: {account_id} (remaining={len(remaining)})")
+                    new_primary = getattr(room["desktop"], "device_id", "") if room["desktop"] else ""
+                    logger.info(f"Desktop disconnected from room: {account_id} (remaining={len(remaining)}, new_primary={new_primary})")
                 if not room.get("desktops"):
                     asyncio.create_task(self.broadcast_status(account_id, desktop_online=False))
             else:
