@@ -42,7 +42,6 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Composable
 private fun tagDisplay(tag: String): String = when (tag) {
     "全部" -> stringResource(R.string.tag_all)
     "默认" -> stringResource(R.string.tag_default)
@@ -52,6 +51,7 @@ private fun tagDisplay(tag: String): String = when (tag) {
     else -> tag
 }
 
+@Composable
 fun ChatScreen(
     uiState: OpenCodeUiState,
     onSendMessage: (String) -> Unit,

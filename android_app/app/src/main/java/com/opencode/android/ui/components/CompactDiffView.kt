@@ -123,12 +123,14 @@ fun CompactDiffView(
             }
         } else {
             // 根据精简模式过滤或显示
-            val displayLines = remember(diffLines, showFullContext) {
+            val foldMidFmt = stringResource(R.string.diff_004)
+            val foldTailFmt = stringResource(R.string.diff_005)
+            val displayLines = remember(diffLines, showFullContext, foldMidFmt, foldTailFmt) {
                 if (showFullContext) {
                     diffLines
                 } else {
                     // 精简模式：高亮修改行，折叠无变动行（仅保留修改行附近 1 行上下文）
-                    compactDiffFilter(diffLines)
+                    compactDiffFilter(diffLines, foldMidFmt, foldTailFmt)
                 }
             }
 
@@ -203,8 +205,7 @@ private fun DiffLineItem(line: DiffLine) {
 /**
  * 精简过滤器：保留修改行及其前后 1 行上下文，多余连续无变动行折叠提示
  */
-@Composable
-private fun compactDiffFilter(lines: List<DiffLine>): List<DiffLine> {
+private fun compactDiffFilter(lines: List<DiffLine>, foldMidFmt: String, foldTailFmt: String): List<DiffLine> {
     if (lines.isEmpty()) return emptyList()
 
     val keepIndices = mutableSetOf<Int>()
@@ -226,7 +227,7 @@ private fun compactDiffFilter(lines: List<DiffLine>): List<DiffLine> {
                 result.add(
                     DiffLine(
                         DiffLineType.HEADER,
-                        stringResource(R.string.diff_004, skippedCount)
+                        String.format(foldMidFmt, skippedCount)
                     )
                 )
                 inFoldedGap = false
@@ -243,7 +244,7 @@ private fun compactDiffFilter(lines: List<DiffLine>): List<DiffLine> {
         result.add(
             DiffLine(
                 DiffLineType.HEADER,
-                stringResource(R.string.diff_005, skippedCount)
+                String.format(foldTailFmt, skippedCount)
             )
         )
     }
