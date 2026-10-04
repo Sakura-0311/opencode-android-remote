@@ -24,7 +24,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install websockets cryptography
+        run: pip install websockets cryptography fastapi uvicorn
 
       - name: Start relay
         run: |
