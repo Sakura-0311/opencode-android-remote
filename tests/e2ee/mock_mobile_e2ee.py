@@ -58,6 +58,7 @@ def http_get(path: str) -> str:
 async def main():
     try:
         import websockets
+from websockets.asyncio.client import connect as ws_connect
     except ImportError:
         print("E2EE_FAIL: websockets not installed", flush=True)
         sys.exit(1)
@@ -81,7 +82,7 @@ async def main():
 
     # 3. Claim pairing via relay HTTP (pairing endpoint)
     # The relay exposes pairing via WebSocket; use a temp WS to claim
-    async with websockets.connect(RELAY_WS) as ws:
+    async with ws_connect(RELAY_WS) as ws:
         await ws.send(json.dumps({
             "type": "pair_claim",
             "pairing_token": token,
@@ -119,7 +120,7 @@ async def main():
 
         # 6. Auth to relay as mobile device (pair_claim 后需重连再 auth)
         await ws.close()
-        async with websockets.connect(RELAY_WS) as ws2:
+        async with ws_connect(RELAY_WS) as ws2:
             ws = ws2
             await ws.send(json.dumps({
                 "type": "auth",
