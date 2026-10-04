@@ -101,6 +101,8 @@ class MainActivity : ComponentActivity() {
                 var showPrivacy by remember { mutableStateOf(false) }
                 // 对外分发：崩溃上报开关状态
                 var crashReportEnabled by remember { mutableStateOf(CrashReporting.isOptedIn(this@MainActivity)) }
+                // v4.2: E2EE 运行时开关
+                var e2eeEnabled by remember { mutableStateOf(viewModel.prefsManager.isE2eeEnabled) }
 
                 if (!uiState.isPaired) {
                     PairingScreen(
@@ -235,6 +237,16 @@ class MainActivity : ComponentActivity() {
                         },
                         // 对外分发：崩溃上报开关
                         crashReportEnabled = crashReportEnabled,
+                        e2eeEnabled = e2eeEnabled,
+                        onToggleE2ee = { enabled ->
+                            viewModel.setE2eeEnabled(enabled)
+                            e2eeEnabled = enabled
+                            Toast.makeText(
+                                this@MainActivity,
+                                if (enabled) "端到端加密已开启，需重新配对以交换密钥" else "端到端加密已关闭",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        },
                         onToggleCrashReport = { enabled ->
                             CrashReporting.setOptedIn(this@MainActivity, enabled)
                             crashReportEnabled = enabled

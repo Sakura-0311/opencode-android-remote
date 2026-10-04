@@ -56,7 +56,7 @@ import java.util.UUID
 
 class OpenCodeViewModel(application: Application) : AndroidViewModel(application), RelayListener, CloudStreamListener {
 
-    private val prefsManager = PreferencesManager(application.applicationContext)
+    val prefsManager = PreferencesManager(application.applicationContext)
     // v1.6 P0 后台保活：连接由 Application 持有，与 ViewModel 生命周期解耦
     private val app = application as OpenCodeApp
     private val relayClient: RelayWebSocketClient = app.relayClient
@@ -1167,6 +1167,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         if (!prefsManager.wasOldRelayWarnDismissed(url)) {
             _uiState.update { it.copy(showOldRelayWarning = true) }
         }
+    }
+
+    /** v4.2: E2EE 运行时开关 */
+    fun setE2eeEnabled(enabled: Boolean) {
+        prefsManager.isE2eeEnabled = enabled
+        AppLog.i("E2EE", "开关: $enabled")
     }
 
     /** v4.0: 关闭 v3 旧服务端提示（每个 relayUrl 只提示一次） */

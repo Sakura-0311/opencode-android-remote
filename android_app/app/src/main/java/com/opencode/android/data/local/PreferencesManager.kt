@@ -115,6 +115,11 @@ class PreferencesManager(context: Context) {
     /** 加密存储是否可用；为 false 时禁止保存任何敏感凭据 */
     val isSecureStorageAvailable: Boolean get() = secure() != null
 
+    // v4.2: E2EE 运行时开关（非敏感，明文存储；默认关闭）
+    var isE2eeEnabled: Boolean
+        get() = prefs.getBoolean("e2ee_enabled", false)
+        set(v) { prefs.edit().putBoolean("e2ee_enabled", v).apply() }
+
     // v4.1: E2EE 密钥材料（敏感，只走 secure()；不可用时返回 null / 抛异常由调用方降级）
     fun getE2eePrivateKey(): String? = secure()?.get("e2ee_privkey")
     fun setE2eePrivateKey(privateKeyB64: String) {

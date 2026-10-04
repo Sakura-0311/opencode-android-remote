@@ -8,6 +8,7 @@ object FeatureFlags {
     /** v3.1: 多 desktop 定向路由。false 时保持 v3.0 的主 desktop 路由行为 */
     const val ENABLE_DESKTOP_ROUTING = false
 
-    /** v4.1: E2EE 端到端加密（mobile ↔ desktop，relay 盲转发）。默认关闭 */
-    const val ENABLE_E2EE = false
+    /** v4.1: E2EE 端到端加密（mobile ↔ desktop，relay 盲转发）。
+     * v4.2 起改为运行时开关（PreferencesManager.isE2eeEnabled），此处保留常量仅作默认值语义。 */
+    const val ENABLE_E2EE_DEFAULT = false
 }

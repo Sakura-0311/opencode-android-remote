@@ -3,7 +3,6 @@ package com.opencode.android.security
 import android.util.Base64
 import com.opencode.android.data.local.PreferencesManager
 import com.opencode.android.util.AppLog
-import com.opencode.android.util.FeatureFlags
 
 /**
  * v4.1: E2EE 会话管理（mobile 侧）。
@@ -15,9 +14,9 @@ import com.opencode.android.util.FeatureFlags
  */
 class E2eeManager(private val prefs: PreferencesManager) {
 
-    /** E2EE 是否可用（开关开 + 安全存储可用）。 */
+    /** E2EE 是否可用（运行时开关开 + 安全存储可用）。 */
     fun isAvailable(): Boolean =
-        FeatureFlags.ENABLE_E2EE && prefs.isSecureStorageAvailable
+        prefs.isE2eeEnabled && prefs.isSecureStorageAvailable
 
     /** 本机公钥（base64）；不存在则生成并持久化私钥。 */
     fun ownPublicKeyB64(): String? {

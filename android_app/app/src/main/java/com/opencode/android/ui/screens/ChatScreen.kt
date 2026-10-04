@@ -86,7 +86,9 @@ fun ChatScreen(
     onShowPrivacy: () -> Unit = {},
     // 对外分发：崩溃上报开关
     crashReportEnabled: Boolean = false,
-    onToggleCrashReport: (Boolean) -> Unit = {}
+    onToggleCrashReport: (Boolean) -> Unit = {},
+    e2eeEnabled: Boolean = false,
+    onToggleE2ee: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -340,6 +342,24 @@ fun ChatScreen(
                                     onShowPrivacy()
                                 },
                                 leadingIcon = { Icon(Icons.Default.PrivacyTip, contentDescription = null) }
+                            )
+                            // v4.2: E2EE 端到端加密开关（默认关闭；开启后需重新配对交换密钥）
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("端到端加密")
+                                        Switch(
+                                            checked = e2eeEnabled,
+                                            onCheckedChange = { onToggleE2ee(it) }
+                                        )
+                                    }
+                                },
+                                onClick = { onToggleE2ee(!e2eeEnabled) },
+                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) }
                             )
                             // 对外分发：崩溃上报开关（默认关闭，重启生效）
                             DropdownMenuItem(

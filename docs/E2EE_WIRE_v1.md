@@ -53,5 +53,6 @@
 
 ## 降级与开关
 
-- `FeatureFlags.ENABLE_E2EE`（Android，默认 false）；desktop `E2EE_ENABLED` 环境变量（默认 0）。
+- Android：`PreferencesManager.isE2eeEnabled` 运行时开关（菜单可切，默认 false）；
+  desktop `E2EE_ENABLED` 环境变量（默认 0）。
 - 任一端未启用/未协商 → 明文互通（原有行为）。
