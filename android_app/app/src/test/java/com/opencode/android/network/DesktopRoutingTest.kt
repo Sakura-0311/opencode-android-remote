@@ -83,7 +83,7 @@ class DesktopRoutingTest {
 
     @Test
     fun `shortId takes first 8 chars`() {
-        assertEquals("desk-ABC1", DesktopRoutingPolicy.shortId("desk-ABC123"))
+        assertEquals("desk-ABC", DesktopRoutingPolicy.shortId("desk-ABC123"))
         assertEquals("abc", DesktopRoutingPolicy.shortId("abc"))
     }
 }
