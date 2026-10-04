@@ -1,3 +1,24 @@
+# OpenCode Android Remote - Release v3.4.0（稳定性二期）
+
+## 内容
+
+- **数据驱动结论**：检查 GitHub Issues（零）/ 用户反馈（无）/ ACRA（默认关闭，无上报）——
+  本版无已知真实稳定性问题，不编造问题，只做防御性加固
+- **防御性小改**（minimal）：
+  - A. 消息分发未知异常兜底：记 AppLog、状态机回 DISCONNECTED（触发重连）、每步独立 guard，不向上传播崩溃
+  - B. 空值防御：`sendPrompt` 空 prompt/sessionId 直接丢弃不发送；`switchSession` 空 sessionId 忽略不清空当前会话
+
+## 兼容性
+
+- 无协议变更，无数据迁移；覆盖安装即可
+
+## 验证
+
+- 契约测试 19/19；单测全过；CI 全绿
+- 真机验证：未验证
+
+---
+
 # OpenCode Android Remote - Release v3.3.0（R8 + CI 扩展）
 
 ## 内容

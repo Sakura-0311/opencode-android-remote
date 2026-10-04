@@ -845,7 +845,17 @@ class RelayWebSocketClient {
             // v2.3: 消息处理成功后才落盘 seq
             if (newSeqSeen) flushSeq()
         } catch (e: Exception) {
-            listener?.onError("数据解析错误: ${e.message}")
+            // v3.4: 未知异常兜底——记日志、状态机回 DISCONNECTED（触发重连），不向上传播崩溃。
+            // 每步独立 guard，避免兜底逻辑自身抛异常。
+            try { AppLog.e("RelayWS", "消息分发异常兜底: ${e.message}") } catch (_: Exception) { }
+            try {
+                if (connectionState != RelayConnectionState.DISCONNECTED &&
+                    connectionState != RelayConnectionState.AUTH_FAILED
+                ) {
+                    setState(RelayConnectionState.DISCONNECTED)
+                }
+            } catch (_: Exception) { }
+            try { listener?.onError("数据解析错误: ${e.message}") } catch (_: Exception) { }
         }
     }
 
@@ -993,6 +1003,11 @@ class RelayWebSocketClient {
         // v3.1: 定向路由目标 desktop（可选；为空则服务端走主 desktop）
         targetDeviceId: String? = null
     ) {
+        // v3.4: 空值防御——空 prompt/空 sessionId 直接丢弃，不组装发送
+        if (prompt.isBlank() || sessionId.isBlank()) {
+            AppLog.w("RelayWS", "sendPrompt 丢弃空消息 promptBlank=${prompt.isBlank()} sessionBlank=${sessionId.isBlank()}")
+            return
+        }
         val clientMsgId = newClientMsgId()
         val payload = JSONObject().apply {
             put("prompt", prompt)

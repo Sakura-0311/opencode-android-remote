@@ -231,6 +231,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun switchSession(sessionId: String) {
+        // v3.4: 空值防御——空 sessionId 忽略，不清空当前会话
+        if (sessionId.isBlank()) return
         _uiState.update { it.copy(currentSessionId = sessionId, messages = emptyList()) }
     }
 
