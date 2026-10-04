@@ -119,7 +119,7 @@ async def main():
         try:
             while True:
                 msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=180))
-                if msg.get("type") != "send_prompt":
+                if msg.get("action") != "send_prompt" and msg.get("type") != "send_prompt":
                     continue
                 print(f"[mock-desktop] got send_prompt e2ee={msg.get('e2ee')}", flush=True)
                 if not msg.get("e2ee"):

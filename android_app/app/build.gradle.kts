@@ -163,7 +163,6 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     // v4.3.1: E2EE 模拟器联调 instrumentation 测试
-    androidTestImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test:core:1.5.0")
+    // 注：E2EE 集成测试走 tests/e2ee/ 纯 Python 协议级联调（见 .github/workflows/emulator-e2ee.yml），不依赖 androidTest
     // 注：不用 kotlinx-coroutines-test（会引入未锁定的 kotlin-reflect 2.4.10）；runBlocking 走主依赖的 coroutines-core
 }
