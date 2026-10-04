@@ -24,7 +24,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install "websockets==11.0" cryptography fastapi uvicorn
+        run: pip install websocket-client cryptography fastapi uvicorn
 
       - name: Start relay
         run: |
@@ -34,29 +34,12 @@ jobs:
           sleep 3
           curl -sf http://127.0.0.1:8765/api/stats > /dev/null && echo "relay up"
 
-      - name: Start host coordinator
+      - name: Run E2EE protocol test
         run: |
-          python3 tests/e2ee/host_coordinator.py > /tmp/coord.log 2>&1 &
-          sleep 2
-          curl -sf http://127.0.0.1:8080/token && echo "coordinator up"
-
-      - name: Start mock desktop
-        run: |
-          PYTHONPATH=$PWD/desktop_agent/modules python3 tests/e2ee/mock_desktop_e2ee.py > /tmp/mock-desktop.log 2>&1 &
-          sleep 5
-          echo "--- mock-desktop log ---"
-          cat /tmp/mock-desktop.log
-          echo "--- token ---"
-          cat /tmp/mock-pairing-token.txt
-
-      - name: Run mock mobile (E2EE handshake + encrypted prompt)
-        run: |
-          timeout 120 python3 tests/e2ee/mock_mobile_e2ee.py
-        # 成功时输出 E2EE_PASS；失败时输出 E2EE_FAIL 并以非零退出
+          timeout 120 python3 tests/e2ee/e2ee_protocol_test.py
+        # 成功输出 E2EE_PASS；失败输出 E2EE_FAIL 并以非零退出
 
       - name: Collect logs on failure
         if: failure()
         run: |
           echo "=== relay ==="; tail -30 /tmp/relay.log
-          echo "=== mock desktop ==="; tail -30 /tmp/mock-desktop.log
-          echo "=== coordinator ==="; tail -10 /tmp/coord.log
