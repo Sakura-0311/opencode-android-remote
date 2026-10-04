@@ -160,7 +160,7 @@ fun QrScannerScreen(
                             analysis
                         )
                     } catch (e: Exception) {
-                        errorMsg = stringResource(R.string.qr_005, e.message ?: "")
+                        errorMsg = ctx.getString(R.string.qr_005, e.message)
                     }
                 }, ContextCompat.getMainExecutor(ctx))
                 previewView

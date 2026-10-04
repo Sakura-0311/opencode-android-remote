@@ -508,17 +508,15 @@ fun ChatScreen(
                     .padding(bottom = 8.dp)
             ) {
                 // 快捷提示 Chip
+                val cloudSuggestions = listOf(stringResource(R.string.chat_024), stringResource(R.string.chat_025), stringResource(R.string.chat_026), stringResource(R.string.chat_027), "/help")
+                val desktopSuggestions = listOf(stringResource(R.string.chat_028), stringResource(R.string.chat_027), stringResource(R.string.chat_029), "/help", "/compact")
                 LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    val suggestions = if (uiState.appMode == AppMode.CLOUD_HOSTED) {
-                        listOf(stringResource(R.string.chat_024), stringResource(R.string.chat_025), stringResource(R.string.chat_026), stringResource(R.string.chat_027), "/help")
-                    } else {
-                        listOf(stringResource(R.string.chat_028), stringResource(R.string.chat_027), stringResource(R.string.chat_029), "/help", "/compact")
-                    }
+                    val suggestions = if (uiState.appMode == AppMode.CLOUD_HOSTED) cloudSuggestions else desktopSuggestions
                     items(suggestions) { text ->
                         SuggestionChip(
                             onClick = { onSendMessage(text) },
