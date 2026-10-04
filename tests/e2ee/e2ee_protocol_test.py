@@ -139,6 +139,13 @@ def main():
                           "session_id": session_id, "e2ee": True,
                           "encrypted_payload": enc, "sender_id": "mock-mobile-1"}))
     print(f"[test] mobile sent E2EE prompt", flush=True)
+    # 检查 mobile 是否收到错误回包（如 DESKTOP_OFFLINE）
+    ws_m.settimeout(5)
+    try:
+        err = json.loads(ws_m.recv())
+        print(f"[test] mobile got response: {err}", flush=True)
+    except Exception as e:
+        print(f"[test] mobile no immediate response (ok): {e}", flush=True)
 
     # Desktop 收到并解密（跳过 relay 的 ping）
     ws_d.settimeout(30)
