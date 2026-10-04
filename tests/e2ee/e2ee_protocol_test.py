@@ -134,9 +134,15 @@ def main():
                           "encrypted_payload": enc, "sender_id": "mock-mobile-1"}))
     print(f"[test] mobile sent E2EE prompt", flush=True)
 
-    # Desktop 收到并解密
+    # Desktop 收到并解密（跳过 relay 的 ping）
     ws_d.settimeout(30)
-    r = json.loads(ws_d.recv())
+    r = None
+    for _ in range(10):
+        r = json.loads(ws_d.recv())
+        if r.get("type") == "ping":
+            ws_d.send(json.dumps({"type": "pong"}))
+            continue
+        break
     assert r.get("action") == "send_prompt" or r.get("type") == "send_prompt", f"unexpected: {r}"
     dec = decrypt(m2d_d, r["encrypted_payload"], "mock-mobile-1", session_id)
     assert "hello e2ee" in dec, f"decrypt mismatch: {dec}"
