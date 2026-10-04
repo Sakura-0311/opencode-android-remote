@@ -162,4 +162,9 @@ dependencies {
     // v2.3: 本地单测（Backoff / AppLog 脱敏等纯 Kotlin 逻辑）
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    // v4.3.1: E2EE 模拟器联调 instrumentation 测试
+    androidTestImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test:rules:1.5.0")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
 }

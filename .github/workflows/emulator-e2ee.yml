@@ -1,0 +1,87 @@
+name: Emulator E2EE Integration
+
+# v4.3.1: 云端模拟器 E2EE 联调——用模拟器代替真机，验证 Android↔relay↔desktop 全链路加密。
+# 手动触发（workflow_dispatch），或每周定时跑一次。
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 0"  # 每周日 10:00 CST
+
+jobs:
+  e2ee-integration:
+    name: E2EE end-to-end on emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Python deps
+        run: |
+          pip install -q -r relay_server/requirements.txt
+          pip list 2>/dev/null | grep -i "^cryptography" || pip install -q "cryptography>=50.0.0"
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build debug + androidTest APKs
+        working-directory: android_app
+        run: |
+          gradle :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --console=plain -q
+          ls app/build/outputs/apk/debug/app-debug.apk
+          ls app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+
+      - name: Start relay + coordinator + mock desktop
+        run: |
+          # relay（8765）
+          nohup python3 relay_server/server.py --port 8765 > /tmp/relay.log 2>&1 &
+          echo $! > /tmp/relay.pid
+          # 协调服务（8080：/token /secret /result）
+          E2EE_TEST_SECRET=testsecret nohup python3 tests/e2ee/host_coordinator.py > /tmp/coord.log 2>&1 &
+          echo $! > /tmp/coord.pid
+          sleep 3
+          # mock desktop（后台跑，输出 token 到文件）
+          E2EE_ENABLED=1 nohup python3 tests/e2ee/mock_desktop_e2ee.py \
+            --relay ws://127.0.0.1:8765 --account test --secret testsecret \
+            --expect "hello e2ee" --device-id mock-desktop-1 > /tmp/mock-desktop.log 2>&1 &
+          echo $! > /tmp/mock-desktop.pid
+          sleep 5
+          echo "--- relay log ---"; tail -5 /tmp/relay.log
+          echo "--- mock desktop log ---"; tail -8 /tmp/mock-desktop.log
+          test -f /tmp/mock-pairing-token.txt && echo "pairing token ready"
+
+      - name: Run E2EE integration test on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          target: default
+          arch: x86_64
+          profile: pixel_4
+          script: |
+            adb install android_app/app/build/outputs/apk/debug/app-debug.apk
+            adb install android_app/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb shell am instrument -w -e class com.opencode.android.e2ee.E2eeIntegrationTest \
+              com.opencode.android.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tail -30
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== relay ==="; tail -30 /tmp/relay.log
+          echo "=== mock desktop ==="; tail -30 /tmp/mock-desktop.log
+          echo "=== coordinator ==="; tail -10 /tmp/coord.log
+
+      - name: Stop background services
+        if: always()
+        run: |
+          kill $(cat /tmp/relay.pid) $(cat /tmp/coord.pid) $(cat /tmp/mock-desktop.pid) 2>/dev/null || true
