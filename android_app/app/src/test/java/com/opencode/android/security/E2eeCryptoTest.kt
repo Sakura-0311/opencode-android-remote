@@ -74,6 +74,26 @@ class E2eeCryptoTest {
         }
     }
 
+    /**
+     * v4.1: 跨语言互操作——Python（cryptography）生成的测试向量，
+     * Kotlin（Tink）必须能解开。向量生成脚本见仓库（固定密钥/nonce，仅测试用）。
+     * 覆盖：X25519 ECDH、HKDF（salt=32零、info）、ChaCha20Poly1305、AAD、base64。
+     */
+    @Test
+    fun `interop - decrypt Python-produced ciphertext`() {
+        val mobilePrivB64 = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
+        val desktopPubB64 = "WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns="
+        val sender = "desk-test-1"
+        val session = "sess-test-1"
+        val expectedPlaintext = "{\"chunk\":\"Hello E2EE interop\"}"
+        val payloadB64 = "AAECAwQFBgcICQoLYDWhy5gZ8uf43fjipjFeEuuLE4dwB6AlJrXjEtfMNHpxE5GhZAHuFi08GK0/nw=="
+
+        // mobile 侧：由己方私钥 + desktop 公钥派生 d2m（desktop→mobile 方向）
+        val keys = E2eeCrypto.deriveMessageKeys(mobilePrivB64, desktopPubB64)
+        val recovered = E2eeCrypto.decrypt(payloadB64, keys.d2m, sender, session)
+        assertEquals(expectedPlaintext, recovered)
+    }
+
     @Test
     fun `tampered AAD fails decrypt`() {
         val mobile = E2eeCrypto.generateKeypair()
