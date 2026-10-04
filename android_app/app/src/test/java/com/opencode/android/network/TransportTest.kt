@@ -51,8 +51,8 @@ class TransportTest {
     }
 
     @Test
-    fun `protocol constants are v3`() {
-        assertEquals(3, RelayWebSocketClient.PROTOCOL_VERSION)
+    fun `protocol constants are v4`() {
+        assertEquals(4, RelayWebSocketClient.PROTOCOL_VERSION)
         assertTrue(RelayWebSocketClient.CLIENT_CAPABILITIES.contains("hello"))
         assertTrue(RelayWebSocketClient.CLIENT_CAPABILITIES.contains("write_idempotency"))
     }
