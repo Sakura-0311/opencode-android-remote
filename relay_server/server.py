@@ -625,7 +625,6 @@ class ConnectionManager:
                     pass
 
     async def route_message(self, sender_session: ClientSession, message_str: str):
-        logger.info(f"[E2EE-TEST] route_message called, client_type={sender_session.client_type}, auth={sender_session.is_authenticated}, msg={message_str[:80]}")
         if not sender_session.is_authenticated:
             return
 
@@ -654,7 +653,6 @@ class ConnectionManager:
             desktop = None
             if target_id:
                 cand = room.get("desktops", {}).get(target_id)
-                logger.info(f"[E2EE-TEST] routing to target_id={target_id}, found={bool(cand)}, desktops={list(room.get('desktops', {}).keys())}")
                 if cand and getattr(cand, "websocket", None):
                     desktop = cand
                 else:
