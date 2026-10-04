@@ -277,18 +277,6 @@ jobs:
           target: default
           arch: x86_64
           profile: pixel_4
+          # 注：runner 将 script 逐行以 sh -c 执行，故必须写成单行；变量跨行不保留
           script: |
-            adb install /tmp/smoke-apk/app-release.apk
-            adb shell am start -n com.opencode.android/.MainActivity
-            sleep 30
-            if adb logcat -d | grep -q "FATAL EXCEPTION"; then
-              echo "::error::模拟器启动出现 FATAL 崩溃"
-              adb logcat -d | grep -A20 "FATAL EXCEPTION" | head -40
-              exit 1
-            fi
-            PID=$(adb shell pidof com.opencode.android | tr -d '\r')
-            if [ -z "$PID" ]; then
-              echo "::error::应用进程不存在（可能闪退）"
-              exit 1
-            fi
-            echo "smoke OK：进程存活 pid=$PID，无 FATAL"
+            adb install /tmp/smoke-apk/app-release.apk && adb shell am start -n com.opencode.android/.MainActivity && sleep 30 && { adb logcat -d | grep -q "FATAL EXCEPTION" && { echo "::error::模拟器启动出现 FATAL 崩溃"; adb logcat -d | grep -A15 "FATAL EXCEPTION" | head -30; echo "FATAL_FOUND"; } || echo "NO_FATAL"; } | grep -q "NO_FATAL" && test -n "$(adb shell pidof com.opencode.android | tr -d '\r')" && echo "smoke OK：进程存活，无 FATAL"
