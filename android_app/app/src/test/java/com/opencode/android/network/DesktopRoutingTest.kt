@@ -73,14 +73,14 @@ class DesktopRoutingTest {
     fun `offline hint contains target identity`() {
         val hint = DesktopRoutingPolicy.offlineHint(
             "书房电脑", "desk-ABC123", "目标电脑（desk-ABC1…）当前不在线",
-            "未命名设备", "无服务端消息", "目标电脑「%1$s」(%2$s)：%3$s")
+            "未命名设备", "无服务端消息", "目标电脑「%1\$s」(%2\$s)：%3\$s")
         assertTrue(hint.contains("书房电脑"))
         assertTrue(hint.contains("desk-ABC123"))
 
         // 无名称时用 device_id 缩写，文案仍含完整标识
         val hint2 = DesktopRoutingPolicy.offlineHint(
             "", "desk-XYZ789", "",
-            "未命名设备", "无服务端消息", "目标电脑「%1$s」(%2$s)：%3$s")
+            "未命名设备", "无服务端消息", "目标电脑「%1\$s」(%2\$s)：%3\$s")
         assertTrue(hint2.contains("desk-XYZ789"))
         assertTrue(hint2.contains("desk-XYZ7"))
     }
