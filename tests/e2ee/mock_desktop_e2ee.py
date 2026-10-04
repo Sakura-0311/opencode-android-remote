@@ -41,7 +41,7 @@ async def main():
     args = ap.parse_args()
 
     import websockets
-from websockets.asyncio.client import connect as ws_connect
+    from websockets.asyncio.client import connect as ws_connect
 
     # 独立密钥目录，避免污染真实 desktop 密钥
     os.environ["OPENCODE_REMOTE_CONFIG_DIR"] = "/tmp/mock-desktop-config"

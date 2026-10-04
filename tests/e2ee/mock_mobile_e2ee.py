@@ -58,7 +58,7 @@ def http_get(path: str) -> str:
 async def main():
     try:
         import websockets
-from websockets.asyncio.client import connect as ws_connect
+        from websockets.asyncio.client import connect as ws_connect
     except ImportError:
         print("E2EE_FAIL: websockets not installed", flush=True)
         sys.exit(1)
