@@ -104,9 +104,15 @@ def main():
     assert hmac.compare_digest(exp_sig, r.get("e2ee_pubkey_sig", "")), "HMAC sig mismatch"
     print(f"[test] mobile paired, HMAC verified", flush=True)
 
-    # Desktop 收到 device_paired（含 mobile 公钥）
+    # Desktop 收到 device_paired（含 mobile 公钥，跳过 ping）
     ws_d.settimeout(30)
-    r = json.loads(ws_d.recv())
+    r = None
+    for _ in range(10):
+        r = json.loads(ws_d.recv())
+        if r.get("type") == "ping":
+            ws_d.send(json.dumps({"type": "pong"}))
+            continue
+        break
     assert r.get("type") == "device_paired", f"expected device_paired: {r}"
     mob_pub_recv = r["e2ee_pubkey"]
     assert mob_pub_recv == mob_pub_b64, "mobile pubkey mismatch"
