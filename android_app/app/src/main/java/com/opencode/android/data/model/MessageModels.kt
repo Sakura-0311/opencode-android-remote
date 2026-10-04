@@ -1,5 +1,6 @@
 package com.opencode.android.data.model
 
+import com.opencode.android.R
 import androidx.annotation.StringRes
 
 import com.opencode.android.network.AgentInfo

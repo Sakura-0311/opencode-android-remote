@@ -1,5 +1,6 @@
 package com.opencode.android.util
 
+import com.opencode.android.R
 import androidx.annotation.StringRes
 
 /**

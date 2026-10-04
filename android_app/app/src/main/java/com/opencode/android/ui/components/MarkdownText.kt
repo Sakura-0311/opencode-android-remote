@@ -1,5 +1,6 @@
 package com.opencode.android.ui.components
 
+import com.opencode.android.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement

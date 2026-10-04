@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screens
 
+import com.opencode.android.R
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context

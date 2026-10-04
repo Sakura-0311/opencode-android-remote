@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screens
 
+import com.opencode.android.R
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri

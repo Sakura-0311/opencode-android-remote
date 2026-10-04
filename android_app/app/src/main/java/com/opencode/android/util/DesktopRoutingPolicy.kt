@@ -1,5 +1,6 @@
 package com.opencode.android.util
 
+import com.opencode.android.R
 /**
  * v3.1: 多 desktop 定向路由的纯决策逻辑（无 Android 依赖，可 JVM 单测）。
  */

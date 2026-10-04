@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screens
 
+import com.opencode.android.R
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities

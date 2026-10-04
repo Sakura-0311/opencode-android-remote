@@ -1,5 +1,6 @@
 package com.opencode.android.ui.components
 
+import com.opencode.android.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable

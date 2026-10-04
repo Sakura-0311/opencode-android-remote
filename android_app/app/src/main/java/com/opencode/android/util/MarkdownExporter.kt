@@ -1,5 +1,6 @@
 package com.opencode.android.util
 
+import com.opencode.android.R
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context

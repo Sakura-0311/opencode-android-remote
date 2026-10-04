@@ -1,5 +1,6 @@
 package com.opencode.android.data.local
 
+import com.opencode.android.R
 import android.content.Context
 import android.content.SharedPreferences
 import com.opencode.android.data.model.AppMode

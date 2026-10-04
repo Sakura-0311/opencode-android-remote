@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screens
 
+import com.opencode.android.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

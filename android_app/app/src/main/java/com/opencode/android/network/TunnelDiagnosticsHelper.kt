@@ -1,5 +1,6 @@
 package com.opencode.android.network
 
+import com.opencode.android.R
 import android.os.Handler
 import android.content.Context
 import android.os.Looper

@@ -1,5 +1,6 @@
 package com.opencode.android.network
 
+import com.opencode.android.R
 import android.content.SharedPreferences
 import android.content.Context
 import android.os.Handler
