@@ -382,7 +382,8 @@ class ConnectionManager:
     # v1.6 P0 扫码配对
     # ==========================================================================
     def create_pairing(self, account_id: str, desktop_name: str,
-                       e2ee_pubkey: str = "", desktop_device_id: str = "") -> Tuple[bool, dict]:
+                       e2ee_pubkey: str = "", desktop_device_id: str = "",
+                       e2ee_pubkey_sig: str = "") -> Tuple[bool, dict]:
         """
         桌面端创建一次性配对会话。
         返回的 pairing_token 有效期短（默认 120s）、一次性使用，
@@ -406,6 +407,8 @@ class ConnectionManager:
             "e2ee_pubkey": (e2ee_pubkey or "")[:256],
             # E2EE: 建配对的 desktop 的 device_id（auth 时上报），mobile 用它绑定公钥
             "desktop_device_id": (desktop_device_id or "")[:64],
+            # v4.3 M-2: desktop 公钥 HMAC 签名，只透传，不校验、不落盘
+            "e2ee_pubkey_sig": (e2ee_pubkey_sig or "")[:128],
         }
         logger.info(f"v1.6: pairing session created for room {account_id} (ttl={self.pairing_ttl}s)")
         return True, {
@@ -456,6 +459,8 @@ class ConnectionManager:
             "e2ee_pubkey": ps.get("e2ee_pubkey", "") or "",
             # E2EE: 建配对的 desktop 的 device_id，mobile 用它绑定公钥
             "desktop_device_id": ps.get("desktop_device_id", "") or "",
+            # v4.3 M-2: desktop 公钥 HMAC 签名（create_pairing 时上报）
+            "e2ee_pubkey_sig": ps.get("e2ee_pubkey_sig", "") or "",
             # E2EE: mobile 公钥（本次认领上报，只透传）
             "mobile_e2ee_pubkey": (e2ee_pubkey or "")[:256],
         }
@@ -1139,7 +1144,9 @@ async def websocket_endpoint(
                         session.account_id, parsed.get("desktop_name", "Desktop"),
                         # E2EE: desktop 公钥只收下存内存，不校验内容
                         e2ee_pubkey=str(parsed.get("e2ee_pubkey", "") or ""),
-                        desktop_device_id=getattr(session, "device_id", "") or "")
+                        desktop_device_id=getattr(session, "device_id", "") or "",
+                        # v4.3 M-2: HMAC 签名只透传，不校验
+                        e2ee_pubkey_sig=str(parsed.get("e2ee_pubkey_sig", "") or ""))
                     await websocket.send_text(json.dumps({
                         "type": "pairing_created" if ok else "pairing_error",
                         **result
