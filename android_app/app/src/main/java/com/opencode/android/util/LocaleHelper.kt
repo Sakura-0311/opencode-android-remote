@@ -60,7 +60,7 @@ object LocaleHelper {
             try {
                 val lm = context.getSystemService(LocaleManager::class.java) ?: return
                 lm.applicationLocales = if (localeTag.isBlank()) {
-                    LocaleList.getEmpty()
+                    LocaleList()
                 } else {
                     LocaleList.forLanguageTags(localeTag)
                 }

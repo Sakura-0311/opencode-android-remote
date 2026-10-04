@@ -64,13 +64,13 @@ class OpenCodeKeepAliveService : Service() {
         /**
          * v1.6 P0: 通知内容脱敏——避免泄露代码、Token、Secret。
          */
-        fun sanitizeForNotification(text: String, maxLen: Int = 80): String {
+        fun sanitizeForNotification(context: Context, text: String, maxLen: Int = 80): String {
             var s = text
             // 脱敏常见密钥模式
             s = s.replace(Regex("(?i)(api[_-]?key|token|secret|password|passwd|sk-)\\s*[:=]\\s*\\S+"), "$1=***")
             s = s.replace(Regex("sk-[A-Za-z0-9-_]{8,}"), "sk-***")
             s = s.replace(Regex("ghp_[A-Za-z0-9]{8,}"), "ghp_***")
-            return s.take(maxLen).trim().ifBlank { getString(R.string.svc_002) }
+            return s.take(maxLen).trim().ifBlank { context.getString(R.string.svc_002) }
         }
 
         private fun sessionDeepLinkIntent(context: Context, sessionId: String): PendingIntent {
@@ -97,15 +97,15 @@ class OpenCodeKeepAliveService : Service() {
             vibrateStatic(context, longArrayOf(0, 120, 80, 120))
             val mins = durationMs / 60000
             val secs = (durationMs % 60000) / 1000
-            val duration = if (mins > 0) getString(R.string.svc_003, mins, secs) else getString(R.string.svc_004, secs)
-            val safeName = sanitizeForNotification(taskName, 40)
+            val duration = if (mins > 0) context.getString(R.string.svc_003, mins, secs) else context.getString(R.string.svc_004, secs)
+            val safeName = sanitizeForNotification(context, taskName, 40)
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val n = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
                 .setSmallIcon(android.R.drawable.checkbox_on_background)
-                .setContentTitle(getString(R.string.svc_005, safeName))
-                .setContentText(getString(R.string.svc_006, duration, fileCount))
+                .setContentTitle(context.getString(R.string.svc_005, safeName))
+                .setContentText(context.getString(R.string.svc_006, duration, fileCount))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(
-                    getString(R.string.svc_007, safeName, duration, fileCount)
+                    context.getString(R.string.svc_007, safeName, duration, fileCount)
                 ))
                 .setAutoCancel(true)
                 .setContentIntent(sessionDeepLinkIntent(context, sessionId))
@@ -119,14 +119,14 @@ class OpenCodeKeepAliveService : Service() {
          */
         fun notifyTaskFailed(context: Context, errorSummary: String, sessionId: String) {
             vibrateStatic(context, longArrayOf(0, 200, 100, 200))
-            val safeErr = sanitizeForNotification(errorSummary, 100)
+            val safeErr = sanitizeForNotification(context, errorSummary, 100)
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val n = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(getString(R.string.svc_008))
+                .setContentTitle(context.getString(R.string.svc_008))
                 .setContentText(safeErr)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(
-                    getString(R.string.svc_009, safeErr)
+                    context.getString(R.string.svc_009, safeErr)
                 ))
                 .setAutoCancel(true)
                 .setContentIntent(sessionDeepLinkIntent(context, sessionId))
@@ -140,14 +140,14 @@ class OpenCodeKeepAliveService : Service() {
          */
         fun notifyWaitingInput(context: Context, promptSummary: String, sessionId: String) {
             vibrateStatic(context, longArrayOf(0, 250, 100, 250, 100, 250))
-            val safePrompt = sanitizeForNotification(promptSummary, 100)
+            val safePrompt = sanitizeForNotification(context, promptSummary, 100)
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val n = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(getString(R.string.svc_010))
+                .setContentTitle(context.getString(R.string.svc_010))
                 .setContentText(safePrompt)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(
-                    getString(R.string.svc_011, safePrompt)
+                    context.getString(R.string.svc_011, safePrompt)
                 ))
                 .setAutoCancel(true)
                 .setContentIntent(sessionDeepLinkIntent(context, sessionId))

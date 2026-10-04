@@ -82,11 +82,11 @@ object TunnelDiagnosticsHelper {
                 val bodySnippet = try { response.body?.string()?.take(500) ?: "" } catch (e: Exception) { "" }
                 response.close()
 
-                analyzeHttpResponse(code, latency, isCloudflare, isSakuraFrp, bodySnippet, callback)
+                analyzeHttpResponse(context, code, latency, isCloudflare, isSakuraFrp, bodySnippet, callback)
 
             } catch (e: Exception) {
                 val latency = System.currentTimeMillis() - startTime
-                analyzeException(e, latency, trimmedUrl, isSakuraFrpDomain(httpUrl), callback)
+                analyzeException(context, e, latency, trimmedUrl, isSakuraFrpDomain(httpUrl), callback)
             }
         }.start()
     }
@@ -112,6 +112,7 @@ object TunnelDiagnosticsHelper {
     }
 
     private fun analyzeHttpResponse(
+        context: Context,
         code: Int,
         latency: Long,
         isCloudflare: Boolean,
@@ -239,6 +240,7 @@ object TunnelDiagnosticsHelper {
     }
 
     private fun analyzeException(
+        context: Context,
         e: Exception,
         latency: Long,
         targetUrl: String,
