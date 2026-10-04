@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
-RELAY_WS = "ws://127.0.0.1:8765"
+RELAY_WS = "ws://127.0.0.1:8765/ws/test/mobile"
 COORD = "http://127.0.0.1:8080"
 
 def b64e(b: bytes) -> str:
@@ -85,7 +85,7 @@ async def main():
         await ws.send(json.dumps({
             "type": "pair_claim",
             "pairing_token": token,
-            "account_id": "test-account",
+            "account_id": "test",
             "device_name": "Mock Mobile",
             "e2ee_pubkey": mobile_pub_b64,
         }))
@@ -123,7 +123,7 @@ async def main():
             ws = ws2
             await ws.send(json.dumps({
                 "type": "auth",
-                "account_id": "test-account",
+                "account_id": "test",
                 "client_type": "mobile",
                 "secret": device_secret,
                 "device_id": "mock-mobile-1",
