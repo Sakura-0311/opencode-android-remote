@@ -26,12 +26,12 @@ on:
         default: 'smoke'
         options: ['smoke', 'rtl', 'manual']
       api_level:
-        description: '模拟器 API'
+        description: '模拟器 API（29 是仓库验证过的配置）'
         type: choice
-        default: '34'
+        default: '29'
         options: ['29', '34']
   schedule:
-    # 每周日 11:00 CST 自动 smoke（默认 release-latest + smoke + API 34）
+    # 每周日 11:00 CST 自动 smoke（默认 release-latest + smoke + API 29）
     - cron: '0 3 * * 0'
 
 env:
@@ -121,8 +121,8 @@ jobs:
         if: ${{ (inputs.mode || 'smoke') != 'manual' }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: ${{ inputs.api_level || '34' }}
-          target: google_apis
+          api-level: ${{ inputs.api_level || '29' }}
+          target: default
           arch: x86_64
           profile: pixel_4
           script: bash /tmp/cloud-test.sh
@@ -142,12 +142,12 @@ jobs:
       - name: Boot emulator (manual)
         if: ${{ inputs.mode == 'manual' }}
         env:
-          API: ${{ inputs.api_level || '34' }}
+          API: ${{ inputs.api_level || '29' }}
         run: |
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator:$PATH"
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager --install "platform-tools" "emulator" "system-images;android-${API};google_apis;x86_64"
-          echo "no" | avdmanager create avd -n cloud -k "system-images;android-${API};google_apis;x86_64" --device "pixel_4" --force
+          sdkmanager --install "platform-tools" "emulator" "system-images;android-${API};default;x86_64"
+          echo "no" | avdmanager create avd -n cloud -k "system-images;android-${API};default;x86_64" --device "pixel_4" --force
           APK=$(ls /tmp/apk/*.apk | head -1)
           echo "APK: $APK" && cp "$APK" /tmp/manual.apk
           nohup "$ANDROID_SDK_ROOT/emulator/emulator" -avd cloud -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot > /tmp/emu.log 2>&1 &
