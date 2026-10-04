@@ -116,6 +116,7 @@ class E2eeIntegrationTest {
             override fun onAuthenticated() { latch.countDown() }
             override fun onAuthError(error: String) { sendError = "auth: $error"; latch.countDown() }
             override fun onDisconnected(reason: String) {}
+            override fun onReconnecting(delayMs: Long) {}
             override fun onDesktopStatusChanged(isOnline: Boolean) {}
             override fun onStreamStart(sessionId: String) {}
             override fun onStreamChunk(sessionId: String, chunk: String) {}
