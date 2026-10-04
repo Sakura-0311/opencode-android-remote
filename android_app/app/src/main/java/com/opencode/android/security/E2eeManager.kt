@@ -74,7 +74,7 @@ class E2eeManager(private val prefs: E2eePrefs) {
                 val expected = try {
                     E2eeCrypto.hmacPubkeySig(secret, deviceId, pubkeyB64)
                 } catch (e: Exception) {
-                    AppLog.e("E2EE", "签名计算失败", e); return false
+                    AppLog.e("E2EE", "签名计算失败: ${e.message}"); return false
                 }
                 if (!constantTimeEq(expected, sig)) {
                     AppLog.e("E2EE", "公钥签名校验失败，拒绝保存（疑似中继篡改）")
@@ -134,7 +134,7 @@ class E2eeManager(private val prefs: E2eePrefs) {
             val keys = E2eeCrypto.deriveMessageKeys(priv, peerPub)
             PayloadResult.Encrypted(E2eeCrypto.encrypt(plaintext, keys.m2d, ownDeviceId, sessionId))
         } catch (e: Exception) {
-            AppLog.e("E2EE", "加密失败（fail-closed，不回退明文）", e)
+            AppLog.e("E2EE", "加密失败（fail-closed，不回退明文）: ${e.message}")
             PayloadResult.Failed(e.message ?: "未知加密错误")
         }
     }
