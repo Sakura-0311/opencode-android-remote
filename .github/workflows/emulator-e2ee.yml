@@ -43,7 +43,10 @@ jobs:
       - name: Start mock desktop
         run: |
           PYTHONPATH=$PWD/desktop_agent/modules python3 tests/e2ee/mock_desktop_e2ee.py > /tmp/mock-desktop.log 2>&1 &
-          sleep 3
+          sleep 5
+          echo "--- mock-desktop log ---"
+          cat /tmp/mock-desktop.log
+          echo "--- token ---"
           cat /tmp/mock-pairing-token.txt
 
       - name: Run mock mobile (E2EE handshake + encrypted prompt)
