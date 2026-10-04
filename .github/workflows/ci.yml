@@ -232,6 +232,27 @@ jobs:
           if [ "$SIZE" -gt 41943040 ]; then
             echo "::warning::release APK 超过 40MB 阈值（$SIZE bytes），请检查依赖膨胀"
           fi
+      # v4.3.1 R-1: tag 发版前版本守卫——tag 必须与 appVersionName 一致，且不得复用已发布过的 tag
+      - name: Verify tag matches versionName and tag is fresh
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          TAG_VERSION="${TAG#v}"
+          APP_VERSION=$(grep -oP 'appVersionName = "\K[^"]+' android_app/app/build.gradle.kts)
+          echo "tag version: $TAG_VERSION / app version: $APP_VERSION"
+          if [ "$TAG_VERSION" != "$APP_VERSION" ]; then
+            echo "::error::tag($TAG_VERSION) 与 appVersionName($APP_VERSION) 不一致，禁止发版"
+            exit 1
+          fi
+          REPO="${GITHUB_REPOSITORY}"
+          EXIST=$(curl -s -H "Authorization: Bearer $GH_TOKEN"             "https://api.github.com/repos/$REPO/releases/tags/$TAG" | jq -r '.id // empty')
+          if [ -n "$EXIST" ]; then
+            echo "::error::tag $TAG 已存在 release，禁止复用标签发版（请 bump 版本号）"
+            exit 1
+          fi
+          echo "tag version guard passed"
       # v3.3: release 产物校验（签名指纹 / 包名 / versionCode 与 tag 一致）
       - name: Verify release artifact
         if: startsWith(github.ref, 'refs/tags/v')
