@@ -1,0 +1,167 @@
+name: Cloud Device（长期保留·云端真机）
+
+# 长期保留的云端真机：GitHub Actions 上的 Android 模拟器，随时手动触发，
+# 代替真机做冒烟 / RTL / 手动交互测试。
+#
+# 诚实说明：Actions 单次运行最多 6 小时，模拟器不能 24/7 常驻。
+# manual 模式就是"把模拟器开机留给你玩几小时"（tmate SSH 连进来 adb 操作）；
+# 要 24 小时常驻得另租一台云服务器。
+#
+# 模式：
+#   smoke  - 装 APK 启动，检查无 FATAL 崩溃、进程存活
+#   rtl    - 切阿拉伯语 + 大字体，重启后启动截图（R-4 验证），无崩溃即过
+#   manual - 开机后 tmate 等你连进来，adb 随便玩，最长 ~5.5 小时
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_source:
+        description: 'APK 来源'
+        type: choice
+        default: 'release-latest'
+        options: ['release-latest', 'build-debug']
+      mode:
+        description: '测试模式'
+        type: choice
+        default: 'smoke'
+        options: ['smoke', 'rtl', 'manual']
+      api_level:
+        description: '模拟器 API'
+        type: choice
+        default: '34'
+        options: ['29', '34']
+  schedule:
+    # 每周日 11:00 CST 自动 smoke（默认 release-latest + smoke + API 34）
+    - cron: '0 3 * * 0'
+
+env:
+  APP_ID: com.opencode.android
+
+jobs:
+  cloud-device:
+    runs-on: ubuntu-latest
+    # manual 模式留足 ~5.5 小时给 tmate；smoke/rtl 45 分钟足够
+    timeout-minutes: ${{ (inputs.mode || 'smoke') == 'manual' && 345 || 45 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get APK (latest release)
+        if: ${{ inputs.apk_source != 'build-debug' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/apk
+          gh release download --pattern 'opencode-remote-*.apk' --dir /tmp/apk \
+            -R Sakura-0311/opencode-android-remote
+          ls /tmp/apk
+
+      - name: Set up JDK 17
+        if: ${{ inputs.apk_source == 'build-debug' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        if: ${{ inputs.apk_source == 'build-debug' }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build debug APK
+        if: ${{ inputs.apk_source == 'build-debug' }}
+        working-directory: android_app
+        run: |
+          # 主 CI 同款构建（verification-metadata 校验保持开启）
+          gradle :app:assembleDebug --no-daemon --console=plain -q
+          mkdir -p /tmp/apk
+          cp app/build/outputs/apk/debug/app-debug.apk /tmp/apk/
+          ls /tmp/apk
+
+      # ---------- smoke / rtl：用 reactivecircus 一键起模拟器 ----------
+      - name: Write test script
+        if: ${{ (inputs.mode || 'smoke') != 'manual' }}
+        run: |
+          MODE="${{ inputs.mode || 'smoke' }}"
+          cat > /tmp/cloud-test.sh << 'SCRIPT'
+          #!/bin/bash
+          set -e
+          APK=$(ls /tmp/apk/*.apk | head -1)
+          echo "APK: $APK"
+          MODE="__MODE__"
+          if [ "$MODE" = "rtl" ]; then
+            echo "切换阿拉伯语 + 大字体..."
+            adb shell "setprop persist.sys.locale ar-SA"
+            adb shell "settings put system font_scale 1.3"
+            adb reboot
+            echo "等待重启完成..."
+            timeout 300 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 5; done'
+            sleep 5
+          fi
+          adb install -r "$APK"
+          adb shell am start -n com.opencode.android/.MainActivity
+          sleep 25
+          if [ "$MODE" = "rtl" ]; then
+            adb exec-out screencap -p > /tmp/rtl-ar.png && echo "截图已保存"
+          fi
+          if adb logcat -d | grep -q "FATAL EXCEPTION"; then
+            echo "::error::模拟器出现 FATAL 崩溃"
+            adb logcat -d | grep -A15 "FATAL EXCEPTION" | head -30
+            exit 1
+          fi
+          PID=$(adb shell pidof com.opencode.android | tr -d '\r')
+          test -n "$PID" || { echo "::error::应用进程不存在"; exit 1; }
+          echo "OK：进程存活($PID)，无 FATAL"
+          SCRIPT
+          sed -i "s/__MODE__/$MODE/" /tmp/cloud-test.sh
+          chmod +x /tmp/cloud-test.sh
+          cat /tmp/cloud-test.sh | head -8
+
+      - name: Boot emulator and run test
+        if: ${{ (inputs.mode || 'smoke') != 'manual' }}
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ inputs.api_level || '34' }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          script: bash /tmp/cloud-test.sh
+
+      - name: Upload RTL screenshot
+        if: ${{ (inputs.mode || 'smoke') == 'rtl' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtl-ar-screenshot
+          path: /tmp/rtl-ar.png
+
+      # ---------- manual：手动起模拟器 + tmate 等你连 ----------
+      - name: Setup Android SDK
+        if: ${{ inputs.mode == 'manual' }}
+        uses: android-actions/setup-android@v3
+
+      - name: Boot emulator (manual)
+        if: ${{ inputs.mode == 'manual' }}
+        env:
+          API: ${{ inputs.api_level || '34' }}
+        run: |
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/emulator:$PATH"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "emulator" "system-images;android-${API};google_apis;x86_64"
+          echo "no" | avdmanager create avd -n cloud -k "system-images;android-${API};google_apis;x86_64" --device "pixel_4" --force
+          APK=$(ls /tmp/apk/*.apk | head -1)
+          echo "APK: $APK" && cp "$APK" /tmp/manual.apk
+          nohup "$ANDROID_SDK_ROOT/emulator/emulator" -avd cloud -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot > /tmp/emu.log 2>&1 &
+          adb wait-for-device
+          timeout 600 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 5; done'
+          adb install -r /tmp/manual.apk
+          adb shell am start -n com.opencode.android/.MainActivity
+          echo "模拟器已开机、APK 已安装启动。用 tmate 连进来后可执行："
+          echo "  adb shell            # 进 shell"
+          echo "  adb logcat           # 看日志"
+
+      - name: tmate session (manual)
+        if: ${{ inputs.mode == 'manual' }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 330
+        with:
+          limit-access-to-actor: true
