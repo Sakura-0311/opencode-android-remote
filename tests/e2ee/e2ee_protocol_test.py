@@ -129,8 +129,15 @@ def main():
                           "client_type": "mobile", "device_id": "mock-mobile-1"}))
     # auth 后 relay 会发 auth_ok + seq_sync（可能还有 resync_required），全部读掉
     ws_m.settimeout(10)
-    for _ in range(5):
-        r = json.loads(ws_m.recv())
+    print(f"[test] mobile auth sent, waiting response...", flush=True)
+    for i in range(5):
+        try:
+            raw = ws_m.recv()
+            print(f"[test] mobile auth recv {i}: {raw[:100]}", flush=True)
+            r = json.loads(raw)
+        except Exception as e:
+            print(f"[test] mobile auth recv {i} failed: {e}", flush=True)
+            continue
         if r.get("type") == "auth_error":
             print(f"E2EE_FAIL: mobile auth failed: {r}"); sys.exit(1)
         if r.get("type") == "seq_sync":
