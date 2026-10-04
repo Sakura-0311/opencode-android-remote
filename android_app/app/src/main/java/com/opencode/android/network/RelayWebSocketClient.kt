@@ -80,6 +80,7 @@ interface RelayListener {
 
     // v1.6 P1 Model/Agent 管理
     fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>, configError: String? = null) {}
+    fun onProjectsDataReceived(projects: List<ProjectInfo>, projectsError: String? = null) {}
 
     // v3.1: 多 desktop 定向路由
     fun onDesktopList(desktops: List<DesktopInfo>) {}
