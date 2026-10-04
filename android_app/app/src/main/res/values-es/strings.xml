@@ -468,7 +468,7 @@
     <string name="tunnel_038">Comprueba la configuración de rutas del servidor, la ruta de la URL o el Token de autenticación de acceso.</string>
     <string name="tunnel_039">Error de verificación del certificado SSL/TLS</string>
     <string name="tunnel_040">Anomalía en el handshake: %1$s</string>
-    <string name="tunnel_041">【Sugerencias de certificado SSL】\n1. Si usas un certificado autofirmado, instala el certificado raíz en las credenciales del sistema Android o cambia a un certificado gratuito de confianza de Let\\'s Encrypt;\n2. Si configuraste Cloudflare SSL, confirma que el modo SSL/TLS esté en Full (Strict) o Flexible.</string>
+    <string name="tunnel_041">【Sugerencias de certificado SSL】\n1. Si usas un certificado autofirmado, instala el certificado raíz en las credenciales del sistema Android o cambia a un certificado gratuito de confianza de Let\'s Encrypt;\n2. Si configuraste Cloudflare SSL, confirma que el modo SSL/TLS esté en Full (Strict) o Flexible.</string>
     <string name="tunnel_042">Error de resolución de dominio (DNS no puede resolver)</string>
     <string name="tunnel_043">Host no encontrado: %1$s</string>
     <string name="tunnel_044">【Sugerencias de DNS】\n1. Comprueba que el dominio esté bien escrito;\n2. Confirma que los registros DNS del dominio ya estén efectivos;\n3. Cambia la red actual del móvil (Wi-Fi/red celular) y reintenta.</string>
