@@ -213,6 +213,9 @@ class ConnectionManager:
         # v1.6 P0 扫码配对：pairing_token -> 配对会话
         self.pairing_sessions: Dict[str, dict] = {}
         self.pairing_ttl = int(os.getenv("RELAY_PAIRING_TTL", "120"))
+        # v3.5: v2 弃用埋点——legacy（无 hello 直接 auth）vs v3 连接计数
+        self.legacy_connections_total: int = 0
+        self.v3_connections_total: int = 0
         # v2.4: 记录近期见过的客户端 IP（用于代理/反代配置提示）
         self.seen_ips: Dict[str, float] = {}
         # v2.2.1-B: 设备密钥持久化（房间销毁/relay 重启后仍可用设备密钥重连）
@@ -769,6 +772,21 @@ def index():
         "version": "1.1.0"
     }
 
+# v3.5: 运行统计（含 v2 弃用埋点）。本机/内网运维用，不含敏感信息。
+@app.get("/api/stats")
+def api_stats():
+    rooms = manager.rooms
+    return {
+        "status": "ok",
+        "protocol_version": PROTOCOL_VERSION,
+        "connections": {
+            "v3_total": manager.v3_connections_total,
+            "legacy_v2_total": manager.legacy_connections_total,
+        },
+        "rooms": len(rooms),
+        "online_sessions": len(manager.sessions),
+    }
+
 # 对外分发：ACRA 崩溃上报接收端（仅收脱敏字段，存本地文件）
 # v2.2.1-E 加固：默认关闭（RELAY_ENABLE_CRASH_REPORT=1 才开）、请求体上限、
 # 按 IP 限流、文件名清洗、目录配额
@@ -949,6 +967,8 @@ async def websocket_endpoint(
         return
 
     # v3.0: hello 能力协商（auth 之前，可选）。v2 客户端直接发 auth，跳过此分支。
+    # v3.5: 标记是否走过 hello，用于 legacy 埋点
+    hello_received = False
     if msg_type == "hello":
         client_v = auth_data.get("v", 0)
         client_caps = auth_data.get("capabilities", [])
@@ -965,6 +985,7 @@ async def websocket_endpoint(
         except Exception:
             await websocket.close(code=4401, reason="hello without auth")
             return
+        hello_received = True
         msg_type = auth_data.get("type")
         account_id = auth_data.get("account_id") or path_account_id
         client_type = auth_data.get("client_type") or path_client_type
@@ -999,6 +1020,15 @@ async def websocket_endpoint(
         return
 
     # 认证成功，清除失败计数
+    # v3.5: legacy 埋点
+    if hello_received:
+        manager.v3_connections_total += 1
+    else:
+        manager.legacy_connections_total += 1
+        logger.warning(
+            f"v3.5: legacy v2 客户端已连接（无 hello）: {client_type}@{account_id} "
+            f"from {client_ip}（累计 legacy={manager.legacy_connections_total}）"
+        )
     rate_limiter.record_auth_success(client_ip)
     await websocket.send_text(json.dumps({
         "type": "auth_ok",

@@ -154,6 +154,7 @@ class PreferencesManager(context: Context) {
         private const val TINK_BACKING_PREFS = "opencode_tink_values"
         private const val KEY_TINK_MIGRATED = "secure_tink_migrated"
         private const val KEY_MIGRATION_NOTICE_DISMISSED = "secure_migration_notice_dismissed"
+        private const val KEY_LEGACY_NOTICE_PREFIX = "legacy_relay_notice_dismissed_"
     }
 
     fun getAppMode(): AppMode {
@@ -530,5 +531,13 @@ class PreferencesManager(context: Context) {
 
     fun dismissSecureMigrationNotice() {
         prefs.edit().putString(KEY_MIGRATION_NOTICE_DISMISSED, "1").apply()
+    }
+
+    /** v3.5: v2 服务端弃用提示（每个 relayUrl 只提示一次） */
+    fun wasLegacyRelayNoticeDismissed(relayUrl: String): Boolean =
+        prefs.getString(KEY_LEGACY_NOTICE_PREFIX + relayUrl.hashCode(), null) != null
+
+    fun dismissLegacyRelayNotice(relayUrl: String) {
+        prefs.edit().putString(KEY_LEGACY_NOTICE_PREFIX + relayUrl.hashCode(), "1").apply()
     }
 }

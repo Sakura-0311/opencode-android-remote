@@ -91,6 +91,32 @@ async def test_v2_legacy_auth():
     await maker.close()
 
 
+async def test_legacy_stats():
+    """v3.5: legacy（无 hello）连接被计数；/api/stats 可查"""
+    maker = await make_room()
+    before = json.loads(urllib.request.urlopen(f"{BASE}/api/stats", timeout=5).read())
+    legacy_before = before["connections"]["legacy_v2_total"]
+    v3_before = before["connections"]["v3_total"]
+    ws = await new_ws("mobile")
+    await ws.send(json.dumps({
+        "type": "auth", "account_id": ACCOUNT, "secret": SECRET,
+        "client_type": "mobile",
+    }))
+    resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+    assert resp.get("type") == "auth_ok"
+    after = json.loads(urllib.request.urlopen(f"{BASE}/api/stats", timeout=5).read())
+    check("legacy 计数 +1", after["connections"]["legacy_v2_total"] == legacy_before + 1,
+          str(after["connections"]))
+    check("v3 计数不变", after["connections"]["v3_total"] == v3_before,
+          str(after["connections"]))
+    ws2 = await new_ws("mobile")
+    await hello_auth(ws2, "mobile", "mobile-v3")
+    after2 = json.loads(urllib.request.urlopen(f"{BASE}/api/stats", timeout=5).read())
+    check("v3 计数 +1", after2["connections"]["v3_total"] == v3_before + 1,
+          str(after2["connections"]))
+    await ws.close(); await ws2.close(); await maker.close()
+
+
 async def test_multi_desktop():
     d1 = await new_ws("desktop")
     ack1, ok1 = await hello_auth(d1, "desktop", "desk-A")
@@ -321,6 +347,7 @@ async def main():
                 time.sleep(0.2)
         await test_hello()
         await test_v2_legacy_auth()
+        await test_legacy_stats()
         await test_multi_desktop()
         await test_primary_fallback_by_auth_time()
         await test_desktop_routing()

@@ -85,6 +85,8 @@ interface RelayListener {
     // v3.1: 多 desktop 定向路由
     fun onDesktopList(desktops: List<DesktopInfo>) {}
     fun onTargetDesktopOffline(targetDeviceId: String, message: String) {}
+    // v3.5: 检测到 v2 旧服务端，已降级 legacy 连接
+    fun onLegacyRelayDetected() {}
 }
 
 /**
@@ -201,6 +203,8 @@ class RelayWebSocketClient {
         private set
     // v3.0: 本次连接是否收到 hello_ack（未收到则对方是 v2 旧服务端）
     private var helloAckReceived: Boolean = false
+    // v3.5: v2 旧服务端降级——跳过 hello 直接 auth（不阻断，一次性提示）
+    private var legacyMode: Boolean = false
     /** 服务端是否支持某能力（v3 服务端必备；旧服务端无 hello_ack 时为空） */
     fun serverSupports(cap: String): Boolean = serverCapabilities.contains(cap)
 
@@ -324,6 +328,7 @@ class RelayWebSocketClient {
         this.listener = listener
         this.isExplicitDisconnect = false
         helloAckReceived = false
+        legacyMode = false
         serverCapabilities = emptyList()
         serverProtocolVersion = 0
         // v1.6: 恢复该房间的已确认序号
@@ -383,15 +388,21 @@ class RelayWebSocketClient {
                     setState(RelayConnectionState.CONNECTED)
                     listener?.onConnected()
 
-                    // v3.0: 先 hello 能力协商，收到 hello_ack 后再发 auth
-                    val hello = JSONObject().apply {
-                        put("type", "hello")
-                        put("v", PROTOCOL_VERSION)
-                        put("capabilities", JSONArray(CLIENT_CAPABILITIES))
-                        put("device_id", deviceUuid())
+                    if (legacyMode) {
+                        // v3.5: v2 旧服务端——跳过 hello，直接 auth（未知字段被旧服务端忽略）
+                        AppLog.i("Relay", "v3.5 legacy mode: sending auth without hello")
+                        sendAuthPacket()
+                    } else {
+                        // v3.0: 先 hello 能力协商，收到 hello_ack 后再发 auth
+                        val hello = JSONObject().apply {
+                            put("type", "hello")
+                            put("v", PROTOCOL_VERSION)
+                            put("capabilities", JSONArray(CLIENT_CAPABILITIES))
+                            put("device_id", deviceUuid())
+                        }
+                        webSocket.send(hello.toString())
+                        AppLog.i("Relay", "v3.0 hello sent, waiting hello_ack")
                     }
-                    webSocket.send(hello.toString())
-                    AppLog.i("Relay", "v3.0 hello sent, waiting hello_ack")
                 }
             }
 
@@ -410,7 +421,16 @@ class RelayWebSocketClient {
                 mainHandler.post {
                     if (isStale()) return@post
                     AppLog.i("Relay", "ws closed code=$code reason=$reason")
-                    // v3.0: 发了 hello 却没收到 hello_ack 就被 4401 → 对方是 v2 旧服务端
+                    // v3.5: 发了 hello 却没收到 hello_ack 就被 4401 → 对方是 v2 旧服务端。
+                    // 降级为 legacy（跳过 hello 直接 auth），不阻断；给一次性弃用提示。
+                    // legacy 模式下仍 4401 → 真实鉴权问题，走原 PROTOCOL_MISMATCH 提示。
+                    if (code == 4401 && !helloAckReceived && !legacyMode) {
+                        legacyMode = true
+                        AppLog.i("Relay", "v3.5: v2 relay detected, falling back to legacy auth")
+                        try { listener?.onLegacyRelayDetected() } catch (_: Exception) { }
+                        initiateConnection()
+                        return@post
+                    }
                     if (code == 4401 && !helloAckReceived) {
                         listener?.onAppError(
                             "PROTOCOL_MISMATCH",

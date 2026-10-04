@@ -335,6 +335,18 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                // v3.5: v2 旧服务端弃用提示（已降级 legacy，不阻断）
+                if (uiState.showLegacyRelayNotice) {
+                    AlertDialog(
+                        onDismissRequest = { viewModel.dismissLegacyRelayNotice() },
+                        title = { Text("服务端版本过旧") },
+                        text = { Text("当前连接的是 v2 旧版 relay，已自动降级兼容。v2 协议进入维护模式，v4.0 发布后将不再兼容，请将 relay_server 与 agent.py 升级到 v3.x。") },
+                        confirmButton = {
+                            Button(onClick = { viewModel.dismissLegacyRelayNotice() }) { Text("知道了") }
+                        }
+                    )
+                }
+
                 // v3.1: 切换目标电脑时有进行中会话 → 确认
                 uiState.pendingTargetSwitch?.let { pending ->
                     AlertDialog(

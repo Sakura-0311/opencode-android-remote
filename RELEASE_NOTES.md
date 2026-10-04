@@ -1,3 +1,27 @@
+# OpenCode Android Remote - Release v3.5.0（v2 弃用准备）
+
+## 内容
+
+- **v2 协议进入维护模式**：见 `docs/DEPRECATION_V2.md`；EOL 计划为 v4.0 发布后 4 周
+  （个人项目，4 周观察期为建议值，执行前会更新确切日期——本版如实标注，未等待观察期）
+- **relay 埋点**：统计 legacy（无 hello）连接数，打 warning 日志；新增 `GET /api/stats`
+ （v3/legacy 计数、房间数、在线会话数）
+- **App 降级不断连**：连 v2 旧 relay 时自动降级 legacy（跳过 hello 直接 auth），不阻断；
+  每个 relayUrl 一次性"服务端版本过旧"提示；v3 功能经 `serverSupports` 自动降级
+- **MIGRATION_V4 草案**：`docs/MIGRATION_V4.md`（破坏性变更清单、升级步骤、回滚方案）
+
+## 兼容性
+
+- 无协议破坏性变更；v2/v3 互通保持
+- 回滚：回到 v3.4.x 即可
+
+## 验证
+
+- 契约测试 22/22（含 3 项新增 legacy 埋点用例）；CI 全绿
+- 真机验证：未验证（需 v2 relay + v3 App 组合验证降级提示）
+
+---
+
 # OpenCode Android Remote - Release v3.4.0（稳定性二期）
 
 ## 内容

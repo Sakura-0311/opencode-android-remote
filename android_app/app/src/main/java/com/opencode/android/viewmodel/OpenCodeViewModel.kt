@@ -1148,6 +1148,20 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(showSecureMigrationNotice = false) }
     }
 
+    // v3.5: 检测到 v2 旧服务端（已降级 legacy）→ 一次性弃用提示（不阻断）
+    override fun onLegacyRelayDetected() {
+        val url = _uiState.value.relayUrl
+        if (!prefsManager.wasLegacyRelayNoticeDismissed(url)) {
+            _uiState.update { it.copy(showLegacyRelayNotice = true) }
+        }
+    }
+
+    /** v3.5: 关闭 v2 弃用提示（每个 relayUrl 只提示一次） */
+    fun dismissLegacyRelayNotice() {
+        prefsManager.dismissLegacyRelayNotice(_uiState.value.relayUrl)
+        _uiState.update { it.copy(showLegacyRelayNotice = false) }
+    }
+
     fun closeDesktopList() {
         _uiState.update { it.copy(showDesktopList = false) }
     }
