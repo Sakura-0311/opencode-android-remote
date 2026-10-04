@@ -18,3 +18,7 @@
 # 数据模型：保留类名/字段名，崩溃上报与日志可读
 -keepnames class com.opencode.android.data.model.** { *; }
 -keepclassmembers class com.opencode.android.data.model.** { *; }
+
+# v3.3: ACRA 的 auto-service 注解处理器（仅编译时）引用的 Guava 类，
+# 运行时不需要；v2.2 已从依赖中排除 Guava（与 CameraX 冲突），此处消警告
+-dontwarn com.google.auto.service.**
