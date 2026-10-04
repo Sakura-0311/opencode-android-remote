@@ -1,3 +1,26 @@
+# OpenCode Android Remote - Release v3.2.0（Tink 迁移）
+
+## 内容
+
+- **安全存储迁移**：`androidx.security:security-crypto:1.1.0-alpha06`（已弃用）→ `com.google.crypto.tink:tink-android:1.23.0`
+  - AEAD 主密钥由 Android Keystore 保护，keyset 存私有 SharedPreferences；值 AES256-GCM 加密，associatedData 取 key 名
+  - 旧数据自动迁移（读旧 → 写新 → 回读校验），幂等；旧文件保留不删，供回退
+  - 迁移失败自动回退旧实现：ACRA 非致命上报 + 一次性用户提示 + 诊断页「安全存储」层显示 WARN
+  - 旧 EncryptedSharedPreferences 实现保留至少 1 个版本（仍需编译依赖）
+- 诊断页新增「安全存储」层：显示当前后端与状态
+
+## 兼容性
+
+- 纯客户端内部改动，无协议变更；旧版本数据可迁移
+- 回滚：回到 v3.1.x，旧加密文件仍在，数据不丢
+
+## 验证
+
+- 新增 SecureMigrationTest（6 项，纯 JVM）：全量迁移、幂等、失败回滚清理、空存储、TinkAeadStore round-trip、key 隔离
+- 真机验证：未验证（需在真机上覆盖安装，观察迁移提示与诊断页状态）
+
+---
+
 # OpenCode Android Remote - Release v3.1.0（多 desktop 体验）
 
 ## 内容

@@ -13,6 +13,9 @@ class PreferencesManager(context: Context) {
     // P0-3: 加密存储失败时禁止静默降级（fail-closed）。
     // securePrefs 为 null 表示加密不可用：敏感凭据（Secret / API Key / AccountId）
     // 拒绝读写；非敏感偏好仍可用普通存储。
+    //
+    // v3.2: 保留旧 EncryptedSharedPreferences 实现至少 1 个版本（迁移源 + 回退）。
+    // 新实现为 Tink AEAD（tink-android）。后端选择见 initSecureBackend()。
     private val securePrefs: SharedPreferences? = try {
         val masterKey = androidx.security.crypto.MasterKey.Builder(context)
             .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
@@ -29,8 +32,88 @@ class PreferencesManager(context: Context) {
         null
     }
 
+    /** v3.2: 安全存储后端 */
+    enum class SecureBackend { LEGACY, TINK }
+
+    private val appContext: Context = context.applicationContext ?: context
+
+    /** v3.2: Tink 后端（初始化失败则为 null，走旧实现） */
+    private val tinkStore: SecureKvStore? = try {
+        val aead = TinkKeyManager.getOrCreateAead(appContext)
+        val backing = appContext.getSharedPreferences(TINK_BACKING_PREFS, Context.MODE_PRIVATE)
+        TinkAeadStore(aead, backing)
+    } catch (e: Exception) {
+        android.util.Log.e("PrefsManager", "v3.2: Tink 初始化失败，回退旧加密存储", e)
+        null
+    }
+
+    /** v3.2: 本次启动是否发生迁移回退（用户可见提示用） */
+    var secureMigrationRolledBack: Boolean = false
+        private set
+
+    /** v3.2: 当前生效的安全存储后端 */
+    val secureBackend: SecureBackend
+
+    /** v3.2: 诊断页展示的安全存储状态文案 */
+    val secureStorageInfo: String
+
+    init {
+        val (backend, info, rolledBack) = initSecureBackend()
+        secureBackend = backend
+        secureStorageInfo = info
+        secureMigrationRolledBack = rolledBack
+    }
+
+    /**
+     * v3.2: 后端选择 + 迁移。
+     * - Tink 可用：把旧存储数据迁过去（幂等，可补缺失），成功走 TINK；
+     *   迁移失败 → 回退 LEGACY，上报 ACRA，置 rolledBack（旧数据原样保留）。
+     * - Tink 不可用：走 LEGACY。
+     * - 两者都不可用：secure() 返回 null，调用方 fail-closed。
+     */
+    private fun initSecureBackend(): Triple<SecureBackend, String, Boolean> {
+        val legacy = securePrefs?.let { LegacySecureStore(it) }
+        val tink = tinkStore
+        if (tink == null) {
+            return Triple(
+                SecureBackend.LEGACY,
+                if (legacy != null) "旧版加密存储（Tink 不可用）" else "不可用",
+                false
+            )
+        }
+        if (legacy != null) {
+            when (val r = SecureMigration.migrate(legacy, tink)) {
+                is SecureMigration.Result.Success -> {
+                    appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit().putBoolean(KEY_TINK_MIGRATED, true).apply()
+                    val n = r.migratedKeys.size
+                    val extra = if (n > 0) "（本次迁移 $n 项）" else "（已迁移）"
+                    return Triple(SecureBackend.TINK, "Tink ${TinkKeyManager.TINK_VERSION}$extra", false)
+                }
+                is SecureMigration.Result.Failure -> {
+                    android.util.Log.e("PrefsManager", "v3.2: 存储迁移失败 key=${r.failedKey}，回退旧实现", r.cause)
+                    try {
+                        com.opencode.android.util.CrashReporting.reportNonFatal(
+                            appContext,
+                            RuntimeException("SecureMigration 失败已回退: ${r.failedKey}", r.cause)
+                        )
+                    } catch (_: Exception) { }
+                    return Triple(SecureBackend.LEGACY, "旧版加密存储（Tink 迁移失败，已回退）", true)
+                }
+            }
+        }
+        // 无旧数据：直接走 Tink
+        return Triple(SecureBackend.TINK, "Tink ${TinkKeyManager.TINK_VERSION}（新设备）", false)
+    }
+
+    /** v3.2: 当前生效的安全存储；null 表示加密不可用（fail-closed） */
+    private fun secure(): SecureKvStore? = when (secureBackend) {
+        SecureBackend.TINK -> tinkStore
+        SecureBackend.LEGACY -> securePrefs?.let { LegacySecureStore(it) }
+    }
+
     /** 加密存储是否可用；为 false 时禁止保存任何敏感凭据 */
-    val isSecureStorageAvailable: Boolean get() = securePrefs != null
+    val isSecureStorageAvailable: Boolean get() = secure() != null
 
     // 非敏感偏好：加密可用时走加密存储，否则走普通存储（不含敏感数据）
     private val prefs: SharedPreferences =
@@ -67,6 +150,10 @@ class PreferencesManager(context: Context) {
         private const val DEFAULT_RELAY_URL = ""
         private const val DEFAULT_CLOUD_URL = ""
         private const val DEFAULT_CLOUD_WORKSPACE = "/workspace"
+        // v3.2: Tink 存储
+        private const val TINK_BACKING_PREFS = "opencode_tink_values"
+        private const val KEY_TINK_MIGRATED = "secure_tink_migrated"
+        private const val KEY_MIGRATION_NOTICE_DISMISSED = "secure_migration_notice_dismissed"
     }
 
     fun getAppMode(): AppMode {
@@ -83,11 +170,11 @@ class PreferencesManager(context: Context) {
     }
 
     fun getAccountId(): String {
-        return securePrefs?.getString(KEY_ACCOUNT_ID, "") ?: ""
+        return secure()?.get(KEY_ACCOUNT_ID) ?: ""
     }
 
     fun getSecret(): String {
-        return securePrefs?.getString(KEY_SECRET, "") ?: ""
+        return secure()?.get(KEY_SECRET) ?: ""
     }
 
     fun getRelayUrl(): String {
@@ -98,21 +185,19 @@ class PreferencesManager(context: Context) {
      * P0-3: 保存配对敏感凭据。加密存储不可用时返回 false，调用方必须提示用户且不得继续。
      */
     fun savePairingInfo(accountId: String, secret: String, relayUrl: String): Boolean {
-        val sp = securePrefs ?: run {
+        val sp = secure() ?: run {
             android.util.Log.e("PrefsManager", "P0-3: 拒绝保存配对凭据——加密存储不可用")
             return false
         }
-        sp.edit()
-            .putString(KEY_ACCOUNT_ID, accountId)
-            .putString(KEY_SECRET, secret)
-            .apply()
+        sp.put(KEY_ACCOUNT_ID, accountId)
+        sp.put(KEY_SECRET, secret)
         // relayUrl 非敏感，可走普通偏好
         prefs.edit().putString(KEY_RELAY_URL, relayUrl).apply()
         // v2.5: 同步到 active profile（密钥进 profile 槽，旧 key 保留作保底）
         try {
             val pid = getActiveProfileId()
             if (pid.isNotEmpty()) {
-                sp.edit().putString(KEY_PROFILE_SECRET_PREFIX + pid, secret).apply()
+                sp.put(KEY_PROFILE_SECRET_PREFIX + pid, secret)
                 getActiveProfile()?.let { updateProfile(it.copy(relayUrl = relayUrl, accountId = accountId)) }
             }
         } catch (_: Exception) { }
@@ -124,7 +209,7 @@ class PreferencesManager(context: Context) {
     }
 
     fun getCloudApiKey(): String {
-        return securePrefs?.getString(KEY_CLOUD_API_KEY, "") ?: ""
+        return secure()?.get(KEY_CLOUD_API_KEY) ?: ""
     }
 
     fun getCloudWorkspacePath(): String {
@@ -135,13 +220,11 @@ class PreferencesManager(context: Context) {
      * P0-3: 保存云端敏感凭据。加密存储不可用时返回 false，调用方必须提示用户且不得继续。
      */
     fun saveCloudConfig(cloudUrl: String, apiKey: String, workspacePath: String): Boolean {
-        val sp = securePrefs ?: run {
+        val sp = secure() ?: run {
             android.util.Log.e("PrefsManager", "P0-3: 拒绝保存云端凭据——加密存储不可用")
             return false
         }
-        sp.edit()
-            .putString(KEY_CLOUD_API_KEY, apiKey)
-            .apply()
+        sp.put(KEY_CLOUD_API_KEY, apiKey)
         // URL 与工作区路径非敏感，可走普通偏好
         prefs.edit()
             .putString(KEY_CLOUD_SERVER_URL, cloudUrl)
@@ -151,7 +234,7 @@ class PreferencesManager(context: Context) {
         try {
             val pid = getActiveProfileId()
             if (pid.isNotEmpty()) {
-                sp.edit().putString(KEY_PROFILE_CLOUD_KEY_PREFIX + pid, apiKey).apply()
+                sp.put(KEY_PROFILE_CLOUD_KEY_PREFIX + pid, apiKey)
                 getActiveProfile()?.let { updateProfile(it.copy(cloudUrl = cloudUrl, cloudWorkspace = workspacePath)) }
             }
         } catch (_: Exception) { }
@@ -337,14 +420,11 @@ class PreferencesManager(context: Context) {
                 cloudUrl = getCloudServerUrl(),
                 cloudWorkspace = getCloudWorkspacePath()
             )
-            val sp = securePrefs
-            if (sp != null) {
+            secure()?.let { sp ->
                 val oldSecret = getSecret()
                 val oldCloudKey = getCloudApiKey()
-                val ed = sp.edit()
-                if (oldSecret.isNotEmpty()) ed.putString(KEY_PROFILE_SECRET_PREFIX + legacy.id, oldSecret)
-                if (oldCloudKey.isNotEmpty()) ed.putString(KEY_PROFILE_CLOUD_KEY_PREFIX + legacy.id, oldCloudKey)
-                ed.apply()
+                if (oldSecret.isNotEmpty()) sp.put(KEY_PROFILE_SECRET_PREFIX + legacy.id, oldSecret)
+                if (oldCloudKey.isNotEmpty()) sp.put(KEY_PROFILE_CLOUD_KEY_PREFIX + legacy.id, oldCloudKey)
             }
             saveProfiles(listOf(legacy))
             setActiveProfileId(legacy.id)
@@ -383,34 +463,34 @@ class PreferencesManager(context: Context) {
         val list = getProfiles()
         if (list.size <= 1) return false
         saveProfiles(list.filter { it.id != id })
-        securePrefs?.edit()
-            ?.remove(KEY_PROFILE_SECRET_PREFIX + id)
-            ?.remove(KEY_PROFILE_CLOUD_KEY_PREFIX + id)
-            ?.apply()
+        secure()?.let {
+            it.remove(KEY_PROFILE_SECRET_PREFIX + id)
+            it.remove(KEY_PROFILE_CLOUD_KEY_PREFIX + id)
+        }
         if (getActiveProfileId() == id) setActiveProfileId(getProfiles().firstOrNull()?.id ?: "")
         return true
     }
 
     /** profile 密钥：优先读 profile 槽，空则回退旧单配置 key（迁移保底） */
     fun getProfileSecret(profileId: String): String {
-        val sp = securePrefs ?: return ""
-        return sp.getString(KEY_PROFILE_SECRET_PREFIX + profileId, null) ?: getSecret()
+        val sp = secure() ?: return ""
+        return sp.get(KEY_PROFILE_SECRET_PREFIX + profileId) ?: getSecret()
     }
 
     fun saveProfileSecret(profileId: String, s: String): Boolean {
-        val sp = securePrefs ?: return false
-        sp.edit().putString(KEY_PROFILE_SECRET_PREFIX + profileId, s).apply()
+        val sp = secure() ?: return false
+        sp.put(KEY_PROFILE_SECRET_PREFIX + profileId, s)
         return true
     }
 
     fun getProfileCloudApiKey(profileId: String): String {
-        val sp = securePrefs ?: return ""
-        return sp.getString(KEY_PROFILE_CLOUD_KEY_PREFIX + profileId, null) ?: getCloudApiKey()
+        val sp = secure() ?: return ""
+        return sp.get(KEY_PROFILE_CLOUD_KEY_PREFIX + profileId) ?: getCloudApiKey()
     }
 
     fun saveProfileCloudApiKey(profileId: String, k: String): Boolean {
-        val sp = securePrefs ?: return false
-        sp.edit().putString(KEY_PROFILE_CLOUD_KEY_PREFIX + profileId, k).apply()
+        val sp = secure() ?: return false
+        sp.put(KEY_PROFILE_CLOUD_KEY_PREFIX + profileId, k)
         return true
     }
 
@@ -440,5 +520,15 @@ class PreferencesManager(context: Context) {
 
     fun getSessionDesktopBinding(sessionId: String): String {
         return targetDesktopStore.getSessionBinding(sessionId)
+    }
+
+    /**
+     * v3.2: 安全存储迁移回退的一次性用户提示（只弹一次）。
+     */
+    fun wasSecureMigrationNoticeDismissed(): Boolean =
+        prefs.getString(KEY_MIGRATION_NOTICE_DISMISSED, null) != null
+
+    fun dismissSecureMigrationNotice() {
+        prefs.edit().putString(KEY_MIGRATION_NOTICE_DISMISSED, "1").apply()
     }
 }

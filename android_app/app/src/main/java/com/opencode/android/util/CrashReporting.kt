@@ -97,4 +97,21 @@ object CrashReporting {
             Log.w(TAG, "ACRA init failed", e)
         }
     }
+
+    /**
+     * v3.2: 非致命异常上报兜底（如安全存储迁移失败回退）。
+     * 仅在用户已 opt-in 且 ACRA 已初始化时上报；否则只记 log。
+     */
+    fun reportNonFatal(context: Context, e: Throwable) {
+        try {
+            if (!isOptedIn(context)) {
+                Log.i(TAG, "reportNonFatal skipped (not opted in): ${e.message}")
+                return
+            }
+            org.acra.ACRA.getErrorReporter().handleSilentException(e)
+            Log.i(TAG, "reportNonFatal sent: ${e.message}")
+        } catch (re: Exception) {
+            Log.w(TAG, "reportNonFatal failed", re)
+        }
+    }
 }

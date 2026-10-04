@@ -139,7 +139,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 taskStatus = effectiveStatus,
                 taskStatusDetail = effectiveDetail,
                 // v3.1: 恢复已选目标电脑（按 profile 隔离）
-                targetDesktopId = prefsManager.getTargetDesktopId()
+                targetDesktopId = prefsManager.getTargetDesktopId(),
+                // v3.2: 安全存储状态（诊断页展示；迁移回退时用户可见）
+                secureStorageInfo = prefsManager.secureStorageInfo,
+                secureStorageOk = !prefsManager.secureMigrationRolledBack && prefsManager.isSecureStorageAvailable,
+                showSecureMigrationNotice = prefsManager.secureMigrationRolledBack &&
+                    !prefsManager.wasSecureMigrationNoticeDismissed()
             )
         )
 
@@ -1133,6 +1138,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     /** 打开目标电脑选择列表（Dialog 打开时会自动刷新） */
     fun openDesktopList() {
         _uiState.update { it.copy(showDesktopList = true) }
+    }
+
+    /** v3.2: 关闭安全存储迁移回退提示（只提示一次） */
+    fun dismissSecureMigrationNotice() {
+        prefsManager.dismissSecureMigrationNotice()
+        _uiState.update { it.copy(showSecureMigrationNotice = false) }
     }
 
     fun closeDesktopList() {

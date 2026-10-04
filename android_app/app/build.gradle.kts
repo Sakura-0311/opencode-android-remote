@@ -50,7 +50,7 @@ android {
     compileSdk = 34
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000）
-    val appVersionName = "3.1.0"
+    val appVersionName = "3.2.0"
     val appVersionCode = appVersionName.split(".").let { p ->
         p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
     }
@@ -133,6 +133,8 @@ dependencies {
     // OkHttp WebSocket Client
         // Security Crypto for EncryptedSharedPreferences (SEC-05)
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // v3.2: Tink 直连（官方推荐方向）。security-crypto 保留至少 1 个版本：旧实现仍需编译（迁移源+回退）
+    implementation("com.google.crypto.tink:tink-android:1.23.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Kotlin Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

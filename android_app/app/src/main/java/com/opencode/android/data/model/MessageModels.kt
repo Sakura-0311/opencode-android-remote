@@ -123,6 +123,11 @@ data class OpenCodeUiState(
     val showDesktopList: Boolean = false,
     val targetOfflineHint: String? = null,
     val pendingTargetSwitch: String? = null,
+
+    // v3.2: 安全存储状态（诊断页展示；迁移回退时用户可见）
+    val secureStorageInfo: String = "",
+    val secureStorageOk: Boolean = true,
+    val showSecureMigrationNotice: Boolean = false,
     
     // 电脑中继模式参数
     val accountId: String = "",

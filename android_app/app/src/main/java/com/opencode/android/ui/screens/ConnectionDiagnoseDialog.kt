@@ -220,6 +220,12 @@ private fun buildLayers(uiState: OpenCodeUiState, phoneNetOk: Boolean): List<Dia
                 val title = uiState.availableSessions.find { it.id == uiState.currentSessionId }?.title
                 "已选择：${title?.ifBlank { uiState.currentSessionId } ?: uiState.currentSessionId}"
             } else "未选择会话"
+        ),
+        // v3.2: 安全存储状态
+        DiagnoseLayer(
+            name = "安全存储",
+            status = if (uiState.secureStorageOk) LayerStatus.OK else LayerStatus.WARN,
+            detail = uiState.secureStorageInfo.ifBlank { "未知" }
         )
     )
 }

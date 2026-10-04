@@ -323,6 +323,18 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                // v3.2: 安全存储迁移回退 → 一次性用户提示
+                if (uiState.showSecureMigrationNotice) {
+                    AlertDialog(
+                        onDismissRequest = { viewModel.dismissSecureMigrationNotice() },
+                        title = { Text("安全存储提示") },
+                        text = { Text("安全存储升级到 Tink 时迁移失败，已自动回退到旧版加密存储，您的配对凭据不受影响。可在「连接诊断」中查看存储状态。") },
+                        confirmButton = {
+                            Button(onClick = { viewModel.dismissSecureMigrationNotice() }) { Text("知道了") }
+                        }
+                    )
+                }
+
                 // v3.1: 切换目标电脑时有进行中会话 → 确认
                 uiState.pendingTargetSwitch?.let { pending ->
                     AlertDialog(

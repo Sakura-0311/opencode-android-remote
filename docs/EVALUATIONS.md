@@ -18,7 +18,7 @@
 | B. 迁到 Tink 直连 | `com.google.crypto.tink:tink-android`，自管 keyset + Android Keystore；官方推荐方向 |
 | C. 自研 Keystore AES-GCM 封装 | 依赖最少，但自己实现 envelope，易错 |
 
-**结论**：本版**不动**（只出评估结论）。v2.5+ 按方案 B 迁移，
+**结论（v3.2 已执行）**：按方案 B 迁移完成（tink-android 1.23.0）。v2.4 时本版不动，
 迁移必须带：旧数据迁移（读旧 EncryptedSharedPreferences → 写新存储 → 校验后删旧）
 与回滚（保留旧文件至少一个版本，迁移失败自动回退旧实现）。
 
