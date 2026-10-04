@@ -33,6 +33,8 @@ jobs:
           echo $! > /tmp/relay.pid
           sleep 3
           curl -sf http://127.0.0.1:8765/api/stats > /dev/null && echo "relay up"
+          # 调试：检查 WS 路由是否存在
+          curl -s -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: test" http://127.0.0.1:8765/ws/test/desktop | head -5
 
       - name: Run E2EE protocol test
         run: |
