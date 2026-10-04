@@ -1,3 +1,31 @@
+# OpenCode Android Remote - Release v3.3.0（R8 + CI 扩展）
+
+## 内容
+
+- **R8 开启**：release 包 `minify=true`（`shrinkResources=false` 保守）
+  - 评估结论：ACRA 5.11.3 / ML Kit 17.2.0 / tink-android 1.23.0 / OkHttp 4.12.0 的 consumer keep rules
+    已全部实测齐全（v2.4 时的两个 blocker 已消除）；项目无反射、无 Gson 解析
+  - `proguard-rules.pro` 补 keep：security-crypto（legacy 路径，无 consumer rules）、
+    Tink Android 集成、数据模型类名（崩溃上报可读性）
+  - 回滚：`isMinifyEnabled=false` 一行回退
+- **CI 扩展**：
+  - APK 体积回归检查（release 超 40MB 告警）
+  - release 产物校验：签名指纹 / 包名 / versionCode+versionName 与 tag 一致（不一致即失败）
+  - R8 包模拟器启动冒烟（防混淆导致闪退，沿用 v3.0.1 验证模式）
+  - CI 报告 artifact 可下载
+
+## 兼容性
+
+- 无协议变更，无数据迁移；覆盖安装即可
+
+## 验证
+
+- 契约测试 19/19；单测全过；CI 全绿（含新增校验项）
+- 模拟器冒烟：R8 release 包启动无 FATAL、进程存活
+- 真机验证：未验证（R8 包建议在真机走一遍配对/连接/对话核心流程）
+
+---
+
 # OpenCode Android Remote - Release v3.2.0（Tink 迁移）
 
 ## 内容

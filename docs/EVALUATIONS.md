@@ -31,7 +31,12 @@
 - ML Kit barcode-scanning：17.2.0 产物路径在 Maven Central 上 404，
   未能验证其 consumer rules（历史版本一般自带，但本次未证实）
 
-**结论**：评估**未完全通过**——ACRA 缺规则、ML Kit 未证实，
-且无真机可做回归。`isMinifyEnabled` **保持 false**。
-开启条件：补齐 keep 规则 + release 包在真机上跑通核心流程
-（配对/连接/对话/崩溃上报初始化）后再开。
+**结论（v3.3 已重估并开启）**：
+- ACRA 5.11.3：实测 AAR 自带 proguard.txt（含插件反射、枚举、ErrorReporter keep）——v2.4 的"缺规则"结论过时
+- ML Kit barcode-scanning 17.2.0：实测 AAR 自带 proguard.txt（含 proto 字段、native 方法）——已证实
+- tink-android 1.23.0：自带 META-INF/proguard/protobuf.pro（shaded protobuf 反射）
+- OkHttp 4.12.0：自带（v2.4 已确认）
+- 项目无反射、无 Gson 解析（org.json 手动解析），Compose 由 AGP 处理
+- 唯一缺口：security-crypto（legacy 路径）无 consumer rules → 已在 proguard-rules.pro 手写 keep
+- `isMinifyEnabled=true`（`shrinkResources=false` 保守）；CI 加模拟器启动冒烟兜底；
+  真机核心流程回归仍标"未验证"，见 TESTING_CHECKLIST 第 10 节。
