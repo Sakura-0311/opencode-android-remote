@@ -1,6 +1,5 @@
 package com.opencode.android.e2ee
 
-import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.opencode.android.data.local.PreferencesManager
 import com.opencode.android.network.PairingClient
@@ -11,7 +10,6 @@ import com.opencode.android.security.E2eeManager
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
-import org.junit.runner.RunWith
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.CountDownLatch
@@ -29,7 +27,6 @@ import java.util.concurrent.TimeUnit
  * 验签存 desktop 公钥 → 启用 E2EE → RelayWebSocketClient.sendPrompt →
  * mock desktop 解密验证。
  */
-@RunWith(AndroidJUnit4::class)
 class E2eeIntegrationTest {
 
     private val host = "10.0.2.2"
