@@ -28,8 +28,8 @@ jobs:
 
       - name: Start relay
         run: |
-          cd relay
-          python3 relay.py --port 8765 > /tmp/relay.log 2>&1 &
+          cd relay_server
+          python3 server.py --port 8765 > /tmp/relay.log 2>&1 &
           echo $! > /tmp/relay.pid
           sleep 3
           curl -sf http://127.0.0.1:8765/api/stats > /dev/null && echo "relay up"
