@@ -15,7 +15,7 @@ class E2eeFailClosedTest {
         override var isE2eeEnabled: Boolean = false
         override val isSecureStorageAvailable: Boolean = true
         override var secretIsMaster: Boolean = false
-        var secret: String = ""
+        var pairingSecret: String = ""
         private var priv: String? = null
         private val peers = mutableMapOf<String, String>()
         override fun getE2eePrivateKey(): String? = priv
@@ -23,7 +23,7 @@ class E2eeFailClosedTest {
         override fun getE2eePeerPubkey(deviceId: String): String? = peers[deviceId]
         override fun setE2eePeerPubkey(deviceId: String, b64: String) { peers[deviceId] = b64 }
         override fun removeE2eePeerPubkey(deviceId: String) { peers.remove(deviceId) }
-        override fun getSecret(): String = secret
+        override fun getSecret(): String = pairingSecret
     }
 
     @Before
@@ -101,7 +101,7 @@ class E2eePubkeySigTest {
         prefs.isE2eeEnabled = true
         prefs.secretIsMaster = true
         // FakePrefs 继承 E2eePrefs，需要 getSecret；这里直接用匿名实现
-        prefs.secret = "test-room-secret"
+        prefs.pairingSecret = "test-room-secret"
         val mgr = E2eeManager(prefs)
         val ok = mgr.storePeerPubkey("desktop-abc",
             "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWQ==", "deadbeef".repeat(8))
@@ -113,7 +113,7 @@ class E2eePubkeySigTest {
         val prefs = E2eeFailClosedTest.FakePrefs()
         prefs.isE2eeEnabled = true
         prefs.secretIsMaster = true
-        prefs.secret = "test-room-secret"
+        prefs.pairingSecret = "test-room-secret"
         val mgr = E2eeManager(prefs)
         val ok = mgr.storePeerPubkey("desktop-abc",
             "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWQ==",
