@@ -7,9 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       apk_url:
-        description: "APK 下载地址"
-        required: true
-        default: "https://github.com/Sakura-0311/opencode-android-remote/releases/download/v3.0.0/opencode-remote-v3.0.apk"
+        description: "APK 下载地址（为空则用 run_id 的产物）"
+        required: false
+        default: ""
+      run_id:
+        description: "CI run ID（apk_url 为空时用）"
+        required: false
+        default: "" 
 
 jobs:
   diagnose:
@@ -18,7 +22,13 @@ jobs:
     steps:
       - name: 下载 APK
         run: |
-          curl -sL -o app.apk "${{ inputs.apk_url }}"
+          if [ -n "${{ inputs.apk_url }}" ]; then
+            curl -sL -o app.apk "${{ inputs.apk_url }}"
+          else
+            # 从指定 CI run 的产物下载 release APK
+            gh run download "${{ inputs.run_id }}" --repo "$GITHUB_REPOSITORY" --name app-release-signed --dir apkdir
+            cp apkdir/app-release.apk app.apk
+          fi
           ls -la app.apk
 
       - name: 启用 KVM
