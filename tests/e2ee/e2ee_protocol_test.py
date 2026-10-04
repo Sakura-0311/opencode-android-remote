@@ -129,8 +129,15 @@ def main():
     ws_m = websocket.create_connection(f"{RELAY_WS}/ws", timeout=10)
     ws_m.send(json.dumps({"type": "auth", "account_id": ACCOUNT, "secret": device_secret,
                           "client_type": "mobile", "device_id": "mock-mobile-1"}))
-    r = json.loads(ws_m.recv())
-    assert r.get("type") != "auth_error", f"mobile auth failed: {r}"
+    # auth 后 relay 会发 auth_ok + seq_sync（可能还有 resync_required），全部读掉
+    ws_m.settimeout(10)
+    for _ in range(5):
+        r = json.loads(ws_m.recv())
+        if r.get("type") == "auth_error":
+            print(f"E2EE_FAIL: mobile auth failed: {r}"); sys.exit(1)
+        if r.get("type") == "seq_sync":
+            break
+    print(f"[test] mobile authenticated", flush=True)
 
     session_id = "test-session-1"
     plaintext = "hello e2ee integration test"
