@@ -41,7 +41,6 @@ async def main():
     args = ap.parse_args()
 
     import websockets
-    from websockets.asyncio.client import connect as ws_connect
 
     # 独立密钥目录，避免污染真实 desktop 密钥
     os.environ["OPENCODE_REMOTE_CONFIG_DIR"] = "/tmp/mock-desktop-config"
@@ -54,7 +53,7 @@ async def main():
     ws_url = args.relay.rstrip("/") + f"/ws/{account}/desktop"
     print(f"[mock-desktop] connecting {ws_url}", flush=True)
 
-    async with ws_connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
+    async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as ws:
         # hello
         await ws.send(json.dumps({
             "type": "hello", "v": 4,
