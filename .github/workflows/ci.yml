@@ -222,7 +222,8 @@ jobs:
           APK=android_app/app/build/outputs/apk/release/app-release.apk
           BT=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -1)
           echo "using build-tools: $BT"
-          CERT_SHA256=$( "$BT"/apksigner verify --print-certs "$APK" | grep "SHA-256" | head -1 | awk '{print $2}' )
+          CERT_HEX=$( "$BT"/apksigner verify --print-certs "$APK" | grep "SHA-256 digest" | head -1 | awk '{print $NF}' )
+          CERT_SHA256=$( echo "$CERT_HEX" | sed 's/\(..\)/\1:/g;s/:$//' | tr 'a-f' 'A-F' )
           echo "cert SHA-256: $CERT_SHA256"
           # v2.0 起固定签名，换签名即失败
           echo "$CERT_SHA256" | grep -qi "D9:21:C0:EB:AE:4A:DD:89:73:0B:BD:E7:49:1F:27:FD:26:41:95:0C:E1:19:1F:30:53:A3:E7:66:00:9E:9E:78" \
