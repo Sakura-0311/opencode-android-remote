@@ -107,6 +107,50 @@ async def test_v3_client_accepted():
     await maker.close()
 
 
+async def test_e2ee_passthrough():
+    """v4.1: E2EE 信封（e2ee+encrypted_payload）经 relay 盲转发，不被改动"""
+    maker = await make_room()
+    d = await new_ws("desktop")
+    await hello_auth(d, "desktop", "desk-e2ee")
+    m = await new_ws("mobile")
+    await hello_auth(m, "mobile", "mobile-e2ee")
+    # mobile 发 E2EE 信封（内容为假密文，relay 不应解析）
+    fake_ct = "bm9uY2UxMmJ5dGVz" + "Y2lwaGVydGV4dA=="
+    await m.send(json.dumps({
+        "action": "send_prompt", "session_id": "se2e",
+        "e2ee": True, "encrypted_payload": fake_ct,
+        "client_msg_id": "c1",
+    }))
+    got = None
+    try:
+        got = json.loads(await asyncio.wait_for(d.recv(), timeout=5))
+    except asyncio.TimeoutError:
+        pass
+    check("E2EE 信封原样到达 desktop",
+          got and got.get("e2ee") is True and got.get("encrypted_payload") == fake_ct
+          and "payload" not in got, str(got)[:200] if got else "timeout")
+    # desktop 回 E2EE chunk，mobile 收到原样
+    await d.send(json.dumps({
+        "type": "stream_chunk", "session_id": "se2e",
+        "e2ee": True, "encrypted_payload": fake_ct,
+        "source_device_id": "desk-e2ee",
+    }))
+    got2 = None
+    try:
+        # 跳过 seq_sync 等无关消息，等 stream_chunk
+        for _ in range(5):
+            cand = json.loads(await asyncio.wait_for(m.recv(), timeout=5))
+            if cand.get("type") == "stream_chunk":
+                got2 = cand
+                break
+    except asyncio.TimeoutError:
+        pass
+    check("E2EE chunk 原样到达 mobile",
+          got2 and got2.get("e2ee") is True and got2.get("encrypted_payload") == fake_ct,
+          str(got2)[:200] if got2 else "timeout")
+    await m.close(); await d.close(); await maker.close()
+
+
 async def test_desktop_requires_device_id():
     """v4.0: desktop 无 device_id 的 auth 被拒绝（4401）"""
     maker = await make_room()
@@ -356,6 +400,7 @@ async def main():
         await test_no_hello_rejected()
         await test_v3_client_accepted()
         await test_desktop_requires_device_id()
+        await test_e2ee_passthrough()
         await test_multi_desktop()
         await test_primary_fallback_by_auth_time()
         await test_desktop_routing()

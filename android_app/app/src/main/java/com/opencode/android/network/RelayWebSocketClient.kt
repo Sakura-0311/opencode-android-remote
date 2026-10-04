@@ -8,6 +8,8 @@ import com.opencode.android.data.model.DiffLineType
 import com.opencode.android.data.model.SessionItem
 import com.opencode.android.data.model.ToolApprovalRequest
 import com.opencode.android.util.AppLog
+import com.opencode.android.security.E2eeManager
+import com.opencode.android.util.FeatureFlags
 import com.opencode.android.util.FeatureFlags
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -216,6 +218,16 @@ class RelayWebSocketClient {
         seqPrefs = prefs
     }
 
+    // v4.1: E2EE 管理器（ViewModel 注入；null 表示未启用）
+    private var e2eeManager: E2eeManager? = null
+
+    fun setE2eeManager(manager: E2eeManager?) {
+        e2eeManager = manager
+    }
+
+    // v4.1: 缓存 desktop 列表，用于无显式 target 时解析主 desktop（E2EE 选密钥用）
+    private var cachedDesktops: List<DesktopInfo> = emptyList()
+
     /**
      * v1.6 P0 后台保活：ViewModel 重建时重新挂载监听器，不重建连接。
      */
@@ -388,7 +400,10 @@ class RelayWebSocketClient {
                     val hello = JSONObject().apply {
                         put("type", "hello")
                         put("v", PROTOCOL_VERSION)
-                        put("capabilities", JSONArray(CLIENT_CAPABILITIES))
+                        // v4.1: E2EE 可用时声明 e2ee 能力
+                        val caps = CLIENT_CAPABILITIES.toMutableList()
+                        if (e2eeManager?.isAvailable() == true) caps.add("e2ee")
+                        put("capabilities", JSONArray(caps))
                         put("device_id", deviceUuid())
                     }
                     webSocket.send(hello.toString())
@@ -497,7 +512,29 @@ class RelayWebSocketClient {
 
     private fun parseIncomingMessage(ws: WebSocket, jsonText: String) {
         try {
-            val json = JSONObject(jsonText)
+            var json = JSONObject(jsonText)
+            // v4.1: E2EE——解密内容载荷（路由字段保持明文）
+            if (json.optBoolean("e2ee", false) && json.has("encrypted_payload")) {
+                val srcId = json.optString("source_device_id", "")
+                val sessId = json.optString("session_id", "default")
+                val decrypted = e2eeManager?.decryptFromDesktop(
+                    json.optString("encrypted_payload", ""), srcId, sessId
+                )
+                if (decrypted != null) {
+                    try {
+                        val inner = JSONObject(decrypted)
+                        for (key in inner.keys()) json.put(key, inner.get(key))
+                        AppLog.d("Relay", "v4.1 E2EE: 已解密来自 $srcId 的消息")
+                    } catch (e: Exception) {
+                        AppLog.w("Relay", "v4.1 E2EE: 解密后 JSON 解析失败: ${e.message}")
+                        return
+                    }
+                } else {
+                    AppLog.w("Relay", "v4.1 E2EE: 解密失败，丢弃该消息")
+                    listener?.onError("E2EE 解密失败，消息已丢弃（可能密钥已更换，请重新配对）")
+                    return
+                }
+            }
             // v1.6 P0 断线恢复：幂等去重——服务端补发的消息可能与已收到的重复
             // v2.3: 先 track（内存），处理成功后再 flush 落盘
             var newSeqSeen = false
@@ -852,6 +889,7 @@ class RelayWebSocketClient {
                             )
                         }
                     }
+                    cachedDesktops = list
                     listener?.onDesktopList(list)
                 }
                 else -> {}
@@ -1036,6 +1074,12 @@ class RelayWebSocketClient {
                 put("agent", agent.id)
             }
         }
+        // v4.1: E2EE——目标 desktop 有协商密钥时加密 payload（relay 盲转发）
+        val effectiveTarget = targetDeviceId?.ifEmpty { null }
+            ?: cachedDesktops.firstOrNull { it.isPrimary }?.deviceId?.ifEmpty { null }
+        val encryptedPayload = if (!effectiveTarget.isNullOrEmpty()) {
+            e2eeManager?.encryptForDesktop(payload.toString(), effectiveTarget, deviceUuid(), sessionId)
+        } else null
         val envelope = JSONObject().apply {
             put("action", "send_prompt")
             put("session_id", sessionId)
@@ -1043,8 +1087,14 @@ class RelayWebSocketClient {
             put("client_msg_id", clientMsgId)
             // v3.1: 顶层定向字段，与 action/session_id 同级（旧 relay/agent 忽略未知字段）
             if (!targetDeviceId.isNullOrEmpty()) put("target_device_id", targetDeviceId)
-            put("payload", payload)
+            if (encryptedPayload != null) {
+                put("e2ee", true)
+                put("encrypted_payload", encryptedPayload)
+            } else {
+                put("payload", payload)
+            }
         }
+        if (encryptedPayload != null) AppLog.i("Relay", "v4.1 E2EE: send_prompt 已加密 -> $effectiveTarget")
         sendEnvelope("send_prompt", envelope, clientMsgId)
     }
 

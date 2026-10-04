@@ -115,6 +115,25 @@ class PreferencesManager(context: Context) {
     /** 加密存储是否可用；为 false 时禁止保存任何敏感凭据 */
     val isSecureStorageAvailable: Boolean get() = secure() != null
 
+    // v4.1: E2EE 密钥材料（敏感，只走 secure()；不可用时返回 null / 抛异常由调用方降级）
+    fun getE2eePrivateKey(): String? = secure()?.get("e2ee_privkey")
+    fun setE2eePrivateKey(privateKeyB64: String) {
+        secure()?.put("e2ee_privkey", privateKeyB64)
+            ?: throw IllegalStateException("安全存储不可用，拒绝保存 E2EE 私钥")
+    }
+
+    fun getE2eePeerPubkey(deviceId: String): String? =
+        secure()?.get("e2ee_peer_$deviceId")
+
+    fun setE2eePeerPubkey(deviceId: String, pubkeyB64: String) {
+        secure()?.put("e2ee_peer_$deviceId", pubkeyB64)
+            ?: throw IllegalStateException("安全存储不可用，拒绝保存 E2EE 对端公钥")
+    }
+
+    fun removeE2eePeerPubkey(deviceId: String) {
+        secure()?.remove("e2ee_peer_$deviceId")
+    }
+
     // v4.0: 非敏感偏好统一走明文存储（敏感 key 只走 secure()，绝不进明文）。
     // 旧版本数据由 migratePrefsToPlainIfNeeded() 一次性搬运。
     private val prefs: SharedPreferences =

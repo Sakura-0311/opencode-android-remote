@@ -33,6 +33,12 @@ class OpenCodeApp : Application() {
         relayClient.setSeqPersistence(
             getSharedPreferences("relay_seq_store", MODE_PRIVATE)
         )
+        // v4.1: E2EE 管理器注入（FeatureFlags.ENABLE_E2EE 门控，默认关闭）
+        relayClient.setE2eeManager(
+            com.opencode.android.security.E2eeManager(
+                com.opencode.android.data.local.PreferencesManager(this)
+            )
+        )
         cloudClient.setEventIdPersistence(
             getSharedPreferences("sse_event_store", MODE_PRIVATE)
         )

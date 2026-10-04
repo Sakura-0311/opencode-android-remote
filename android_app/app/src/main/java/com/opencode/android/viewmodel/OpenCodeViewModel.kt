@@ -60,6 +60,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     // v1.6 P0 后台保活：连接由 Application 持有，与 ViewModel 生命周期解耦
     private val app = application as OpenCodeApp
     private val relayClient: RelayWebSocketClient = app.relayClient
+    // v4.1: E2EE（与注入 client 的为同一实例语义；此处用于配对公钥交换）
+    private val e2eeManager = com.opencode.android.security.E2eeManager(prefsManager)
     private val cloudClient: CloudApiClient = app.cloudClient
 
     // v3.0: 传输抽象（ViewModel 仍是 RelayListener/CloudStreamListener，业务回调不变）
@@ -369,10 +371,16 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             _uiState.update {
                 it.copy(statusBanner = "正在与 $desktopName 配对…", appError = null)
             }
+            // v4.1: E2EE 公钥交换（开关关闭时传空，relay/对端跳过）
+            val e2eePubkey = e2eeManager.ownPublicKeyB64() ?: ""
             val result = try {
-                PairingClient.claimPairing(relayUrl, accountId, pairingToken)
+                PairingClient.claimPairing(relayUrl, accountId, pairingToken, e2eePubkey = e2eePubkey)
             } catch (e: Exception) {
                 PairClaimResult(success = false, error = e.message ?: "配对异常")
+            }
+            // v4.1: 保存 desktop 的 E2EE 公钥（按 device_id 绑定）
+            if (result.success && result.e2eePeerPubkey.isNotEmpty() && result.desktopDeviceId.isNotEmpty()) {
+                e2eeManager.storePeerPubkey(result.desktopDeviceId, result.e2eePeerPubkey)
             }
             if (result.success && result.deviceSecret.isNotBlank()) {
                 // v1.6: 设备密钥保存到加密存储；P0-3: 加密不可用时拒绝保存并报错
@@ -1122,6 +1130,11 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onDeviceRevoked(deviceName: String) {
+        // v4.1: 撤销设备时清理其 E2EE 公钥（按 deviceName 查 deviceId）
+        if (deviceName.isNotBlank()) {
+            _uiState.value.pairedDevices.firstOrNull { it.deviceName == deviceName }
+                ?.deviceId?.ifEmpty { null }?.let { e2eeManager.removePeer(it) }
+        }
         // 撤销后刷新列表
         requestDeviceList()
         _uiState.update {

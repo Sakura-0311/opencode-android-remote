@@ -19,7 +19,10 @@ data class PairClaimResult(
     val deviceSecret: String = "",
     val accountId: String = "",
     val desktopName: String = "",
-    val error: String = ""
+    val error: String = "",
+    // v4.1: E2EE——desktop 的 X25519 公钥（base64），缺失则无 E2EE
+    val e2eePeerPubkey: String = "",
+    val desktopDeviceId: String = ""
 )
 
 object PairingClient {
@@ -32,7 +35,9 @@ object PairingClient {
         relayUrl: String,
         accountId: String,
         pairingToken: String,
-        deviceName: String = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Android" }
+        deviceName: String = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Android" },
+        // v4.1: E2EE——本机 X25519 公钥（base64），为空则不交换
+        e2eePubkey: String = ""
     ): PairClaimResult = suspendCancellableCoroutine { cont ->
         val wsEndpoint = if (relayUrl.trim().removeSuffix("/").endsWith("/mobile")) {
             relayUrl.trim().removeSuffix("/")
@@ -56,6 +61,8 @@ object PairingClient {
                     put("account_id", accountId)
                     put("pairing_token", pairingToken)
                     put("device_name", deviceName.take(64))
+                    // v4.1: E2EE 公钥交换（relay 盲转发）
+                    if (e2eePubkey.isNotEmpty()) put("e2ee_pubkey", e2eePubkey)
                 }
                 webSocket.send(claim.toString())
             }
@@ -68,7 +75,9 @@ object PairingClient {
                             success = true,
                             deviceSecret = json.optString("device_secret"),
                             accountId = json.optString("account_id", accountId),
-                            desktopName = json.optString("desktop_name", "Desktop")
+                            desktopName = json.optString("desktop_name", "Desktop"),
+                            e2eePeerPubkey = json.optString("e2ee_pubkey", ""),
+                            desktopDeviceId = json.optString("desktop_device_id", "")
                         ))
                         "pair_error" -> finish(PairClaimResult(
                             success = false,

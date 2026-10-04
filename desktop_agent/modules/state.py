@@ -11,6 +11,25 @@ from typing import Dict, Optional, Any
 import aiohttp
 import websockets
 
+
+_e2ee_mod = None
+_e2ee_tried = False
+
+
+def _e2ee():
+    """E2EE 模块懒加载：仅 E2EE_ENABLED=1 时 import（cryptography 缺失则降级明文）。"""
+    global _e2ee_mod, _e2ee_tried
+    if os.getenv("E2EE_ENABLED", "0") != "1":
+        return None
+    if not _e2ee_tried:
+        _e2ee_tried = True
+        try:
+            from modules import e2ee as _mod
+            _e2ee_mod = _mod
+        except ImportError:
+            _e2ee_mod = None
+    return _e2ee_mod
+
 from opencode_api import (
     DEFAULT_OPENCODE_BASE_URL,
     check_opencode_health,
@@ -240,11 +259,20 @@ async def listen_opencode_events_stream(
                 if event_type in ("message.part.delta", "delta", "stream_chunk"):
                     delta_text = _extract_event_delta(event)
                     if delta_text:
-                        await ws_relay.send(json.dumps({
+                        _out = {
                             "type": "stream_chunk",
                             "session_id": session_id,
                             "chunk": delta_text
-                        }))
+                        }
+                        # E2EE 发消息钩子：已启用且已协商时加密 chunk，
+                        # 明文字段（type/session_id/relay_seq/source_device_id）保留供 relay 路由
+                        _em = _e2ee()
+                        if _em is not None:
+                            try:
+                                _out = _em.encrypt_outgoing(_out)
+                            except Exception as e:
+                                logger.warning(f"E2EE 加密 stream_chunk 失败，走明文: {e}")
+                        await ws_relay.send(json.dumps(_out))
 
                 # 2. 工具权限请求 (permission.asked / tool_approval)
                 elif event_type in ("permission.asked", "permission.request", "permission"):

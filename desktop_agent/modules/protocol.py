@@ -35,6 +35,29 @@ logger = logging.getLogger("DesktopAgent")
 from modules import config
 
 from modules.secrets import get_or_create_secret, print_pairing_banner
+
+_e2ee_mod = None
+_e2ee_tried = False
+
+
+def _e2ee():
+    """E2EE 模块懒加载：仅 E2EE_ENABLED=1 时 import。
+
+    cryptography 未安装时返回 None 并打 warning，旧明文流程不受影响。
+    """
+    global _e2ee_mod, _e2ee_tried
+    if os.getenv("E2EE_ENABLED", "0") != "1":
+        return None
+    if not _e2ee_tried:
+        _e2ee_tried = True
+        try:
+            from modules import e2ee as _mod
+            _e2ee_mod = _mod
+            logger.info("E2EE 已启用（X25519 + ChaCha20-Poly1305）")
+        except ImportError:
+            logger.warning("E2EE_ENABLED=1 但未安装 cryptography，已降级为明文流程")
+            _e2ee_mod = None
+    return _e2ee_mod
 from modules.fileops import (
     _resolve_sandboxed_path, _list_dir_entries, _read_text_file, PathNotAllowedError,
 )
@@ -47,6 +70,13 @@ async def handle_mobile_message(
     ws_relay: websockets.WebSocketClientProtocol,
     http_session: aiohttp.ClientSession
 ):
+    # E2EE 收消息钩子：e2ee 信封 -> 明文还原；未启用/无信封时透传
+    _em = _e2ee()
+    if _em is not None:
+        try:
+            msg_data = _em.decrypt_incoming(msg_data)
+        except Exception as e:
+            logger.warning(f"E2EE 解密 incoming 失败，走明文流程: {e}")
     action = msg_data.get("action") or msg_data.get("type")
     session_id = msg_data.get("session_id", "default")
     payload = msg_data.get("payload", {})
@@ -525,10 +555,20 @@ async def run_pairing_flow(account_id: str, secret: str, relay_url: str):
                 return
 
             # 申请一次性配对码
-            await ws.send(json.dumps({
+            pairing_req = {
                 "type": "create_pairing",
                 "desktop_name": desktop_name,
-            }))
+            }
+            # E2EE v1：公钥交换——本机 X25519 公钥随配对请求发给 relay，
+            # relay 转给扫码的 mobile（relay 只转发，不存储不推导）。字段缺失=旧流程。
+            _em = _e2ee()
+            if _em is not None:
+                try:
+                    _, _pub_b64 = _em.get_or_create_keypair()
+                    pairing_req["e2ee_pubkey"] = _pub_b64
+                except Exception as e:
+                    logger.warning(f"E2EE 公钥生成失败，配对走明文流程: {e}")
+            await ws.send(json.dumps(pairing_req))
             resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10.0))
             if resp.get("type") != "pairing_created":
                 print(f"  ✘ 配对码申请失败: {resp.get('error', resp)}")
@@ -559,6 +599,21 @@ async def run_pairing_flow(account_id: str, secret: str, relay_url: str):
                     if msg.get("type") == "device_paired":
                         print(f"\n  ✔ 配对成功！新设备：{msg.get('device_name')}")
                         print("  该设备已获得独立密钥，可随时在桌面端撤销。")
+                        # E2EE v1：relay 把 mobile 的公钥放在 device_paired.e2ee_pubkey；
+                        # 存对端公钥并预派生 m2d/d2m 密钥。字段缺失则静默跳过。
+                        _em = _e2ee()
+                        if _em is not None:
+                            _peer_b64 = msg.get("e2ee_pubkey")
+                            if _peer_b64:
+                                _peer_id = str(msg.get("device_id")
+                                              or msg.get("device_name")
+                                              or "paired_device")
+                                try:
+                                    _em.save_peer_pubkey(_peer_id, _peer_b64)
+                                    _em.derive_msg_keys_for_peer(_peer_id)
+                                    print("  E2EE 已协商（m2d/d2m 消息密钥就绪）")
+                                except Exception as e:
+                                    print(f"  E2EE 协商失败，不影响明文流程: {e}")
                         break
             except asyncio.TimeoutError:
                 print("\n  ✘ 配对码已过期，请重新运行配对。")

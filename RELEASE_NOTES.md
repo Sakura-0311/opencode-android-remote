@@ -1,3 +1,29 @@
+# OpenCode Android Remote - Release v4.1.0（E2EE 端到端加密，默认关闭）
+
+## 内容
+
+- **E2EE**（暂缓项第一条，正式启动）：mobile ↔ desktop 端到端加密，relay 只盲转发
+  - X25519 ECDH 协商（复用扫码配对流程交换公钥）→ HKDF-SHA256 派生方向隔离密钥 →
+    ChaCha20-Poly1305 加密内容载荷；路由元数据（type/session_id/seq/device_id）保持明文，
+    断线补发不受影响
+  - `FeatureFlags.ENABLE_E2EE`（Android，默认 false）/ `E2EE_ENABLED=1`（desktop）双门控；
+    任一端未启用则走原明文流程
+  - 威胁模型与线格式：`docs/E2EE_THREAT_MODEL.md`、`docs/E2EE_WIRE_v1.md`
+  - 第一版不做密钥轮换/前向安全；relay 可见元数据（谁、何时、多少字节）
+
+## 兼容性
+
+- 非破坏性：全部只加可选字段（`e2ee` capability、`e2ee_pubkey`、`encrypted_payload`）
+- 默认关闭，无行为变化；旧客户端互通不受影响
+
+## 验证
+
+- 契约测试 25/25（含 2 项 E2EE 盲转发）；Python 原语 RFC 向量通过；
+  Android 单测新增 E2eeCryptoTest（6 项）；CI 全绿
+- 真机联调（Python ↔ Kotlin 互操作）：未验证——需两端真实启用后验证
+
+---
+
 # OpenCode Android Remote - Release v4.0.0（协议 v4，唯一破坏性版本）
 
 ## 破坏性变更（本版唯一一次）

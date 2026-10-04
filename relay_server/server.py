@@ -36,6 +36,7 @@ SERVER_CAPABILITIES = [
     "room_buffer",      # 房间消息缓冲与断线补发
     "pairing",          # 扫码配对
     "desktop_routing",  # v3.1: source/target_device_id 定向路由
+    "e2ee",             # E2EE: mobile↔desktop 端到端加密（relay 盲转发）
 ]
 
 # ==============================================================================
@@ -380,11 +381,15 @@ class ConnectionManager:
     # ==========================================================================
     # v1.6 P0 扫码配对
     # ==========================================================================
-    def create_pairing(self, account_id: str, desktop_name: str) -> Tuple[bool, dict]:
+    def create_pairing(self, account_id: str, desktop_name: str,
+                       e2ee_pubkey: str = "", desktop_device_id: str = "") -> Tuple[bool, dict]:
         """
         桌面端创建一次性配对会话。
         返回的 pairing_token 有效期短（默认 120s）、一次性使用，
         二维码中不包含长期 Secret。
+        E2EE: desktop 可在创建时上报 e2ee_pubkey（base64 X25519 公钥），
+        存内存配对会话（随过期丢弃，不落盘、不校验），mobile 认领成功后经
+        pair_success 带回。
         """
         self._cleanup_expired_pairings()
         if account_id not in self.rooms:
@@ -397,6 +402,10 @@ class ConnectionManager:
             "created_at": now,
             "expires_at": now + self.pairing_ttl,
             "claimed": False,
+            # E2EE: desktop 公钥（base64），只透传，不校验、不落盘
+            "e2ee_pubkey": (e2ee_pubkey or "")[:256],
+            # E2EE: 建配对的 desktop 的 device_id（auth 时上报），mobile 用它绑定公钥
+            "desktop_device_id": (desktop_device_id or "")[:64],
         }
         logger.info(f"v1.6: pairing session created for room {account_id} (ttl={self.pairing_ttl}s)")
         return True, {
@@ -405,10 +414,14 @@ class ConnectionManager:
             "ttl_seconds": self.pairing_ttl,
         }
 
-    def claim_pairing(self, account_id: str, pairing_token: str, device_name: str) -> Tuple[bool, dict]:
+    def claim_pairing(self, account_id: str, pairing_token: str, device_name: str,
+                      e2ee_pubkey: str = "") -> Tuple[bool, dict]:
         """
         移动端凭配对码认领，成功后签发设备专用密钥。
         设备密钥与具体设备绑定，避免一个 Secret 无限复用。
+        E2EE: mobile 可在认领时上报 e2ee_pubkey（base64 X25519 公钥），只透传
+        给 desktop（device_paired），不校验、不落盘；desktop 在 create_pairing
+        时上报的公钥经结果带回，由调用方放入 pair_success。
         """
         self._cleanup_expired_pairings()
         ps = self.pairing_sessions.get(pairing_token)
@@ -439,6 +452,12 @@ class ConnectionManager:
             "device_id": dev_entry.get("device_id", ""),
             "account_id": account_id,
             "desktop_name": ps["desktop_name"],
+            # E2EE: desktop 公钥（create_pairing 时上报，若无则为空）
+            "e2ee_pubkey": ps.get("e2ee_pubkey", "") or "",
+            # E2EE: 建配对的 desktop 的 device_id，mobile 用它绑定公钥
+            "desktop_device_id": ps.get("desktop_device_id", "") or "",
+            # E2EE: mobile 公钥（本次认领上报，只透传）
+            "mobile_e2ee_pubkey": (e2ee_pubkey or "")[:256],
         }
 
     def revoke_device(self, account_id: str, device_id: str = "", device_name: str = "") -> tuple:
@@ -931,24 +950,39 @@ async def websocket_endpoint(
     if msg_type == "pair_claim":
         pairing_token = auth_data.get("pairing_token", "")
         device_name = auth_data.get("device_name", "Android")[:64]
-        ok, result = manager.claim_pairing(account_id or "", pairing_token, device_name)
+        # E2EE: mobile 公钥（可选），只透传给 desktop，不校验、不落盘
+        mobile_e2ee_pubkey = str(auth_data.get("e2ee_pubkey", "") or "")[:256]
+        ok, result = manager.claim_pairing(
+            account_id or "", pairing_token, device_name,
+            e2ee_pubkey=mobile_e2ee_pubkey)
         if ok:
-            await websocket.send_text(json.dumps({
+            # E2EE: pair_success 带回 desktop 在 create_pairing 时上报的公钥（若有）
+            pair_success_msg = {
                 "type": "pair_success",
                 "account_id": result["account_id"],
                 "desktop_name": result["desktop_name"],
                 "device_secret": result["device_secret"],
                 "message": "配对成功，请使用设备密钥重新连接。"
-            }))
+            }
+            if result.get("e2ee_pubkey"):
+                pair_success_msg["e2ee_pubkey"] = result["e2ee_pubkey"]
+            # E2EE: desktop 的 device_id，mobile 用它把公钥绑定到设备；缺失则跳过绑定
+            if result.get("desktop_device_id"):
+                pair_success_msg["desktop_device_id"] = result["desktop_device_id"]
+            await websocket.send_text(json.dumps(pair_success_msg))
             # 通知桌面端有新设备配对
             room = manager.rooms.get(account_id or "")
             if room and room.get("desktop"):
                 try:
-                    await room["desktop"].websocket.send_text(json.dumps({
+                    # E2EE: device_paired 带 mobile 公钥（若有），desktop 用它做 ECDH
+                    device_paired_msg = {
                         "type": "device_paired",
                         "device_name": device_name,
                         "message": f"新设备已配对：{device_name}"
-                    }))
+                    }
+                    if result.get("mobile_e2ee_pubkey"):
+                        device_paired_msg["e2ee_pubkey"] = result["mobile_e2ee_pubkey"]
+                    await room["desktop"].websocket.send_text(json.dumps(device_paired_msg))
                 except Exception:
                     pass
         else:
@@ -1099,7 +1133,10 @@ async def websocket_endpoint(
                 # v1.6 P0 扫码配对：桌面端配对管理（已认证）
                 elif parsed.get("type") == "create_pairing" and session.client_type == "desktop":
                     ok, result = manager.create_pairing(
-                        session.account_id, parsed.get("desktop_name", "Desktop"))
+                        session.account_id, parsed.get("desktop_name", "Desktop"),
+                        # E2EE: desktop 公钥只收下存内存，不校验内容
+                        e2ee_pubkey=str(parsed.get("e2ee_pubkey", "") or ""),
+                        desktop_device_id=getattr(session, "device_id", "") or "")
                     await websocket.send_text(json.dumps({
                         "type": "pairing_created" if ok else "pairing_error",
                         **result
