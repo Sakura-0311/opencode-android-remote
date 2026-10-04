@@ -36,15 +36,14 @@ class OpenCodeApp : Application() {
         cloudClient.setEventIdPersistence(
             getSharedPreferences("sse_event_store", MODE_PRIVATE)
         )
-        // v2.3: 网络回调——断网暂停重连，恢复时重建连接（不等 ping 超时）
-        if (FeatureFlags.USE_NETWORK_MONITOR) {
-            networkMonitor = NetworkMonitor(this).also { monitor ->
-                monitor.start(object : NetworkMonitor.Callback {
-                    override fun onNetworkLost() = relayClient.onNetworkLost()
-                    override fun onNetworkAvailable() = relayClient.onNetworkAvailable()
-                })
-            }
-            AppLog.i("App", "NetworkMonitor started")
+        // v4.0: 网络回调常开——断网暂停重连，恢复时重建连接（不等 ping 超时）
+        // （v2.3 引入的 USE_NETWORK_MONITOR 回退开关已移除）
+        networkMonitor = NetworkMonitor(this).also { monitor ->
+            monitor.start(object : NetworkMonitor.Callback {
+                override fun onNetworkLost() = relayClient.onNetworkLost()
+                override fun onNetworkAvailable() = relayClient.onNetworkAvailable()
+            })
         }
+        AppLog.i("App", "NetworkMonitor started")
     }
 }

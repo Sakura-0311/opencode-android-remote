@@ -8,14 +8,11 @@ import android.os.Handler
 import android.os.Looper
 
 /**
- * v2.3: 网络变化监听。
+ * v2.3: 网络变化监听。v4.0 起常开（USE_NETWORK_MONITOR 回退开关已移除）。
  *
  * - 500ms 防抖：短暂抖动不触发重建。
  * - onLost：标记离线，调用方暂停重连计时器（不等 OkHttp ping 超时才发现）。
  * - onAvailable / 能力变化：调用方重建连接。
- *
- * 开关：[com.opencode.android.util.FeatureFlags.USE_NETWORK_MONITOR]，
- * 关闭时回到 v2.2 行为（无监听）。
  */
 class NetworkMonitor(context: Context) {
 

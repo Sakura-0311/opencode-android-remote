@@ -24,11 +24,11 @@ logger = logging.getLogger("OpenCodeRelay")
 app = FastAPI(title="OpenCode Cloud Relay Server", version="1.1.0")
 
 # ==============================================================================
-# v3.0: 协议版本与能力协商
-# 客户端连接后先发 hello（可选），服务端回 hello_ack；之后再走 auth。
-# v2 客户端（无 hello）仍可直接 auth，服务端按旧逻辑处理。
+# v4.0: 协议版本与能力协商（唯一破坏性版本）
+# 客户端连接后必须先发 hello，服务端回 hello_ack；之后再走 auth。
+# 无 hello 的连接（v2 旧客户端）直接被拒绝（4401 + hello_required）。
 # ==============================================================================
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 SERVER_CAPABILITIES = [
     "hello",            # hello/hello_ack 能力协商
     "multi_desktop",    # 多 desktop 共存（按 device_id 区分）
@@ -213,9 +213,6 @@ class ConnectionManager:
         # v1.6 P0 扫码配对：pairing_token -> 配对会话
         self.pairing_sessions: Dict[str, dict] = {}
         self.pairing_ttl = int(os.getenv("RELAY_PAIRING_TTL", "120"))
-        # v3.5: v2 弃用埋点——legacy（无 hello 直接 auth）vs v3 连接计数
-        self.legacy_connections_total: int = 0
-        self.v3_connections_total: int = 0
         # v2.4: 记录近期见过的客户端 IP（用于代理/反代配置提示）
         self.seen_ips: Dict[str, float] = {}
         # v2.2.1-B: 设备密钥持久化（房间销毁/relay 重启后仍可用设备密钥重连）
@@ -310,7 +307,7 @@ class ConnectionManager:
             self.rooms[account_id] = {
                 "secret_hash": secret_hash,
                 "desktop": None,
-                # v3.0: 多 desktop 共存，按 device_id 区分（无 device_id 的旧客户端用 "legacy"）。
+                # v4.0: 多 desktop 共存，按 device_id 区分（desktop 必须上报 device_id）。
                 # "desktop" 保留为"主 desktop"（最近认证/活跃），旧单连接逻辑读它即可。
                 "desktops": {},
                 "mobiles": set(),
@@ -350,8 +347,9 @@ class ConnectionManager:
         self.sessions[session.websocket] = session
 
         if session.client_type == "desktop":
-            # v3.0: 按 device_id 区分多 desktop；同 device_id 重连才顶替旧连接（旧单连接逻辑保留）
-            desk_key = getattr(session, "device_id", "") or "legacy"
+            # v4.0: 按 device_id 区分多 desktop；同 device_id 重连才顶替旧连接（旧单连接逻辑保留）
+            # v4 要求 desktop 必须上报 device_id（auth 时已校验），此处不再设 "legacy" 回退键。
+            desk_key = getattr(session, "device_id", "")
             old_desktop = room["desktops"].get(desk_key)
             if old_desktop and old_desktop.websocket != session.websocket:
                 # 只有携带了有效 secret 的新 desktop 才能顶替旧 desktop
@@ -772,17 +770,13 @@ def index():
         "version": "1.1.0"
     }
 
-# v3.5: 运行统计（含 v2 弃用埋点）。本机/内网运维用，不含敏感信息。
+# v4.0: 运行统计。本机/内网运维用，不含敏感信息。
 @app.get("/api/stats")
 def api_stats():
     rooms = manager.rooms
     return {
         "status": "ok",
         "protocol_version": PROTOCOL_VERSION,
-        "connections": {
-            "v3_total": manager.v3_connections_total,
-            "legacy_v2_total": manager.legacy_connections_total,
-        },
         "rooms": len(rooms),
         "online_sessions": len(manager.sessions),
     }
@@ -966,30 +960,38 @@ async def websocket_endpoint(
         await websocket.close(code=1000, reason="Pairing done")
         return
 
-    # v3.0: hello 能力协商（auth 之前，可选）。v2 客户端直接发 auth，跳过此分支。
-    # v3.5: 标记是否走过 hello，用于 legacy 埋点
-    hello_received = False
-    if msg_type == "hello":
-        client_v = auth_data.get("v", 0)
-        client_caps = auth_data.get("capabilities", [])
-        logger.info(f"v3.0 hello from {client_ip}: client_v={client_v} caps={client_caps}")
+    # v4.0: hello 能力协商为强制。首帧不是 hello 的连接（v2 旧客户端）直接拒绝，
+    # 给出明确的 hello_required 错误与 4401，供客户端报 PROTOCOL_MISMATCH。
+    if msg_type != "hello":
+        logger.warning(f"v4.0: 拒绝无 hello 的连接 from {client_ip} (type={msg_type})")
         await websocket.send_text(json.dumps({
-            "type": "hello_ack",
+            "type": "hello_required",
+            "message": "Protocol v4 requires hello handshake before auth. "
+                       "v2 clients are no longer supported; upgrade relay/agent/app to v4.0+.",
             "v": PROTOCOL_VERSION,
             "server_capabilities": SERVER_CAPABILITIES,
         }))
-        # 等待真正的 auth 帧
-        try:
-            auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
-            auth_data = json.loads(auth_raw)
-        except Exception:
-            await websocket.close(code=4401, reason="hello without auth")
-            return
-        hello_received = True
-        msg_type = auth_data.get("type")
-        account_id = auth_data.get("account_id") or path_account_id
-        client_type = auth_data.get("client_type") or path_client_type
-        secret = auth_data.get("secret", "")
+        await websocket.close(code=4401, reason="v4 requires hello")
+        return
+    client_v = auth_data.get("v", 0)
+    client_caps = auth_data.get("capabilities", [])
+    logger.info(f"v4.0 hello from {client_ip}: client_v={client_v} caps={client_caps}")
+    await websocket.send_text(json.dumps({
+        "type": "hello_ack",
+        "v": PROTOCOL_VERSION,
+        "server_capabilities": SERVER_CAPABILITIES,
+    }))
+    # 等待真正的 auth 帧
+    try:
+        auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
+        auth_data = json.loads(auth_raw)
+    except Exception:
+        await websocket.close(code=4401, reason="hello without auth")
+        return
+    msg_type = auth_data.get("type")
+    account_id = auth_data.get("account_id") or path_account_id
+    client_type = auth_data.get("client_type") or path_client_type
+    secret = auth_data.get("secret", "")
 
     if msg_type != "auth" or not account_id or client_type not in ["desktop", "mobile"] or not secret:
         logger.warning(f"Auth rejected from {client_ip}: missing required auth fields.")
@@ -1002,9 +1004,18 @@ async def websocket_endpoint(
         return
 
     session = ClientSession(websocket, client_type, account_id, client_ip)
-    # v3.0: desktop 在 auth 包中上报 device_id（多 desktop 区分；旧客户端无此字段则为 ""）
+    # v4.0: desktop 必须在 auth 包中上报 device_id（多 desktop 区分键，无回退）。
     if client_type == "desktop":
         session.device_id = str(auth_data.get("device_id", ""))[:64]
+        if not session.device_id:
+            logger.warning(f"v4.0: 拒绝无 device_id 的 desktop from {client_ip}")
+            rate_limiter.record_auth_failure(client_ip)
+            await websocket.send_text(json.dumps({
+                "type": "auth_error",
+                "message": "Protocol v4 requires device_id for desktop clients."
+            }))
+            await websocket.close(code=4401, reason="v4 requires device_id")
+            return
     # B-8: 透传 admin_token 供建房校验
     success, reason = manager.register_authenticated(session, secret, auth_data.get("admin_token", ""))
     if not success:
@@ -1020,15 +1031,6 @@ async def websocket_endpoint(
         return
 
     # 认证成功，清除失败计数
-    # v3.5: legacy 埋点
-    if hello_received:
-        manager.v3_connections_total += 1
-    else:
-        manager.legacy_connections_total += 1
-        logger.warning(
-            f"v3.5: legacy v2 客户端已连接（无 hello）: {client_type}@{account_id} "
-            f"from {client_ip}（累计 legacy={manager.legacy_connections_total}）"
-        )
     rate_limiter.record_auth_success(client_ip)
     await websocket.send_text(json.dumps({
         "type": "auth_ok",

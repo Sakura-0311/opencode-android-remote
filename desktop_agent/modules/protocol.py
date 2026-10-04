@@ -373,14 +373,14 @@ async def handle_mobile_message(
             }))
 
 # ==============================================================================
-# v3.0: hello 能力协商
+# v4.0: hello 能力协商
 # ==============================================================================
 
 async def do_hello_handshake(ws) -> dict:
     """
-    v3.0: 连接建立后先发送 hello，等待 hello_ack。
+    v4.0: 连接建立后先发送 hello，等待 hello_ack。
     返回服务端能力列表。服务端无 hello_ack（v2 旧 relay）时抛异常，
-    调用方记录明确错误并进入重连等待（v3 agent 要求 v3.0+ relay）。
+    调用方记录明确错误并进入重连等待（v4 agent 要求 v3.0+ relay）。
     """
     hello = {
         "type": "hello",
@@ -393,15 +393,15 @@ async def do_hello_handshake(ws) -> dict:
         raw = await asyncio.wait_for(ws.recv(), timeout=8.0)
         resp = json.loads(raw)
     except (asyncio.TimeoutError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"v3.0 hello 无响应（需要 v3.0+ relay）: {e}")
+        raise RuntimeError(f"v4.0 hello 无响应（需要 v3.0+ relay）: {e}")
     except Exception as e:
-        # v2 旧 relay 会直接关闭连接（首包必须为 auth）
-        raise RuntimeError(f"v3.0 hello 失败（需要 v3.0+ relay）: {type(e).__name__}: {e}")
+        # v2 旧 relay 会直接关闭连接（首包必须为 hello）
+        raise RuntimeError(f"v4.0 hello 失败（需要 v3.0+ relay）: {type(e).__name__}: {e}")
     if resp.get("type") != "hello_ack":
         raise RuntimeError(
-            f"v3.0 hello 被拒绝（type={resp.get('type')}，需要 v3.0+ relay）")
+            f"v4.0 hello 被拒绝（type={resp.get('type')}，需要 v3.0+ relay）")
     server_caps = resp.get("server_capabilities", [])
-    logger.info(f"v3.0 hello_ack: server_v={resp.get('v')} caps={server_caps}")
+    logger.info(f"v4.0 hello_ack: server_v={resp.get('v')} caps={server_caps}")
     return server_caps
 
 
@@ -439,7 +439,7 @@ async def run_desktop_agent(account_id: str, secret: str, relay_url: str):
                     ping_timeout=10,
                     close_timeout=5
                 ) as ws:
-                    # v3.0: 先 hello 能力协商，再 auth
+                    # v4.0: 先 hello 能力协商，再 auth
                     await do_hello_handshake(ws)
                     auth_message = {
                         "type": "auth",

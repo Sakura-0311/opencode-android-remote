@@ -1,8 +1,14 @@
-# v2 协议弃用公告（v3.5 起生效）
+# v2 协议弃用公告（v3.5 起生效，v4.0 已执行 EOL）
 
-## 状态
+## 状态（2026-10-04 更新）
 
-v2 协议（无 hello 能力协商、单 desktop）自 v3.5 起进入**维护模式**：
+v2 协议（无 hello 能力协商、单 desktop）已于 **v4.0 正式 EOL**：
+
+- v4.0+ relay 直接拒绝无 hello 的 legacy 连接（`hello_required` + 4401）
+- v4.0+ App 移除 legacy 降级逻辑；连 v2 relay 时报 `PROTOCOL_MISMATCH`
+- v3.x relay / App 是最后的兼容版本（v3.5 为 v3 系列最终版）
+
+## 历史记录（v3.5 维护模式时期）
 
 - 不再新增功能，只修严重安全问题
 - v3.x relay / App 继续兼容 v2（App 连 v2 relay 时自动降级 legacy，不阻断，一次性提示）

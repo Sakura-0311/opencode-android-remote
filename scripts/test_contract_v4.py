@@ -1,7 +1,7 @@
 """
-v3.0 契约测试：hello 能力协商 + 多 desktop 共存 + transport 切换（Android 单测另见 TransportTest）。
+v4.0 契约测试：hello 强制 + 移除 legacy 路径（Android 单测另见 TransportTest）。
 
-跑法：/tmp/osvvenv/bin/python scripts/test_contract_v3.py
+跑法：/tmp/ctvenv/bin/python scripts/test_contract_v4.py
 启动真实 relay_server（uvicorn），用 websockets 客户端打真实协议：
   1. hello/hello_ack：v=3、server_capabilities 含 multi_desktop
   2. 无 hello 的 v2 旧客户端仍可直接 auth（向后兼容）
@@ -40,9 +40,9 @@ async def new_ws(path_client):
     return ws
 
 
-async def hello_auth(ws, client_type, device_id=None):
+async def hello_auth(ws, client_type, device_id=None, v=4):
     await ws.send(json.dumps({
-        "type": "hello", "v": 3,
+        "type": "hello", "v": v,
         "capabilities": ["hello", "multi_desktop"],
         "device_id": device_id or "",
     }))
@@ -67,18 +67,18 @@ async def test_hello():
     maker = await make_room()
     ws = await new_ws("mobile")
     ack, auth_ok = await hello_auth(ws, "mobile", "mobile-1")
-    check("hello_ack v=3", ack.get("type") == "hello_ack" and ack.get("v") == 3, str(ack))
+    check("hello_ack v=4", ack.get("type") == "hello_ack" and ack.get("v") == 4, str(ack))
     check("hello_ack 含 multi_desktop",
           "multi_desktop" in ack.get("server_capabilities", []), str(ack))
     check("auth_ok 含 v 与 server_capabilities",
-          auth_ok.get("type") == "auth_ok" and auth_ok.get("v") == 3
+          auth_ok.get("type") == "auth_ok" and auth_ok.get("v") == 4
           and "multi_desktop" in auth_ok.get("server_capabilities", []), str(auth_ok))
     await ws.close()
     await maker.close()
 
 
-async def test_v2_legacy_auth():
-    """v2 旧客户端（无 hello，直接 auth）仍可连上"""
+async def test_no_hello_rejected():
+    """v4.0: 无 hello 直接 auth（v2 旧客户端）被拒绝：hello_required + 4401"""
     maker = await make_room()
     ws = await new_ws("mobile")
     await ws.send(json.dumps({
@@ -86,35 +86,44 @@ async def test_v2_legacy_auth():
         "client_type": "mobile",
     }))
     resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-    check("v2 旧客户端直接 auth 成功", resp.get("type") == "auth_ok", str(resp))
+    check("无 hello 收到 hello_required", resp.get("type") == "hello_required", str(resp))
+    try:
+        await asyncio.wait_for(ws.recv(), timeout=5)
+        closed_4401 = False
+    except Exception as e:
+        closed_4401 = "4401" in str(e) or "close" in type(e).__name__.lower()
+    check("连接被 4401 关闭", closed_4401, "")
+    await maker.close()
+
+
+async def test_v3_client_accepted():
+    """v4.0: v3 客户端（hello v=3）仍被接受，hello_ack 回 v=4（向后兼容）"""
+    maker = await make_room()
+    ws = await new_ws("mobile")
+    ack, auth_ok = await hello_auth(ws, "mobile", "mobile-v3compat", v=3)
+    check("v3 hello 被接受", ack.get("type") == "hello_ack" and ack.get("v") == 4, str(ack))
+    check("v3 hello 后 auth_ok", auth_ok.get("type") == "auth_ok", str(auth_ok))
     await ws.close()
     await maker.close()
 
 
-async def test_legacy_stats():
-    """v3.5: legacy（无 hello）连接被计数；/api/stats 可查"""
+async def test_desktop_requires_device_id():
+    """v4.0: desktop 无 device_id 的 auth 被拒绝（4401）"""
     maker = await make_room()
-    before = json.loads(urllib.request.urlopen(f"{BASE}/api/stats", timeout=5).read())
-    legacy_before = before["connections"]["legacy_v2_total"]
-    v3_before = before["connections"]["v3_total"]
-    ws = await new_ws("mobile")
+    ws = await new_ws("desktop")
+    await ws.send(json.dumps({
+        "type": "hello", "v": 4, "capabilities": ["hello"], "device_id": "",
+    }))
+    ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+    assert ack.get("type") == "hello_ack"
     await ws.send(json.dumps({
         "type": "auth", "account_id": ACCOUNT, "secret": SECRET,
-        "client_type": "mobile",
+        "client_type": "desktop",
+        # 无 device_id
     }))
     resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
-    assert resp.get("type") == "auth_ok"
-    after = json.loads(urllib.request.urlopen(f"{BASE}/api/stats", timeout=5).read())
-    check("legacy 计数 +1", after["connections"]["legacy_v2_total"] == legacy_before + 1,
-          str(after["connections"]))
-    check("v3 计数不变", after["connections"]["v3_total"] == v3_before,
-          str(after["connections"]))
-    ws2 = await new_ws("mobile")
-    await hello_auth(ws2, "mobile", "mobile-v3")
-    after2 = json.loads(urllib.request.urlopen(f"{BASE}/api/stats", timeout=5).read())
-    check("v3 计数 +1", after2["connections"]["v3_total"] == v3_before + 1,
-          str(after2["connections"]))
-    await ws.close(); await ws2.close(); await maker.close()
+    check("无 device_id 的 desktop 被拒", resp.get("type") == "auth_error", str(resp))
+    await maker.close()
 
 
 async def test_multi_desktop():
@@ -312,19 +321,17 @@ async def test_desktop_routing():
           ids == {"desk-A", "desk-B"} and len(prim) == 1 and prim[0]["device_id"] == "desk-B",
           str(ds))
 
-    # 6. v2 旧 mobile（无 hello、无 target）行为不变：仍走主
+    # 6. v3 mobile（hello v=3、无 target）行为不变：仍走主
     m2 = await new_ws("mobile")
-    await m2.send(json.dumps({"type": "auth", "account_id": ACCOUNT, "secret": SECRET,
-                              "client_type": "mobile"}))
-    await asyncio.wait_for(m2.recv(), timeout=5)
+    await hello_auth(m2, "mobile", "mobile-v3b", v=3)
     await _drain(dA); await _drain(dB)
-    await m2.send(json.dumps({"type": "send_prompt", "session_id": "s4", "prompt": "v2"}))
-    got_v2 = None
+    await m2.send(json.dumps({"type": "send_prompt", "session_id": "s4", "prompt": "v3"}))
+    got_v3 = None
     try:
-        got_v2 = json.loads(await asyncio.wait_for(dB.recv(), timeout=3))
+        got_v3 = json.loads(await asyncio.wait_for(dB.recv(), timeout=3))
     except asyncio.TimeoutError:
         pass
-    check("v2 旧客户端无 target 仍走主", got_v2 and got_v2.get("prompt") == "v2", str(bool(got_v2)))
+    check("v3 客户端无 target 仍走主", got_v3 and got_v3.get("prompt") == "v3", str(bool(got_v3)))
 
     for w in (dA, dB, m, m2):
         await w.close()
@@ -346,8 +353,9 @@ async def main():
             except Exception:
                 time.sleep(0.2)
         await test_hello()
-        await test_v2_legacy_auth()
-        await test_legacy_stats()
+        await test_no_hello_rejected()
+        await test_v3_client_accepted()
+        await test_desktop_requires_device_id()
         await test_multi_desktop()
         await test_primary_fallback_by_auth_time()
         await test_desktop_routing()

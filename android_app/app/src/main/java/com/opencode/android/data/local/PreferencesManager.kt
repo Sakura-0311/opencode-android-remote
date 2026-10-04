@@ -115,17 +115,75 @@ class PreferencesManager(context: Context) {
     /** 加密存储是否可用；为 false 时禁止保存任何敏感凭据 */
     val isSecureStorageAvailable: Boolean get() = secure() != null
 
-    // 非敏感偏好：加密可用时走加密存储，否则走普通存储（不含敏感数据）
+    // v4.0: 非敏感偏好统一走明文存储（敏感 key 只走 secure()，绝不进明文）。
+    // 旧版本数据由 migratePrefsToPlainIfNeeded() 一次性搬运。
     private val prefs: SharedPreferences =
-        securePrefs ?: context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        context.getSharedPreferences(PLAIN_PREFS_NAME, Context.MODE_PRIVATE)
+
+    /**
+     * v4.0: 旧加密存储文件清理（一次性）。
+     * v3.2 迁移后旧 EncryptedSharedPreferences 文件仍保留；本版在 Tink 生效后删除它：
+     * - 非敏感 key 先从旧加密文件搬到明文 prefs（敏感 key 跳过，绝不进明文）；
+     * - Tink 生效时旧文件已无活数据，删除；LEGACY 回退时保留（仍是 live 安全存储）。
+     * 从 v3.1 直接升级的用户：v3.2 的 SecureMigration 先跑（initSecureBackend），
+     * 本清理在其之后执行，顺序安全。
+     */
+    private fun migratePrefsToPlainIfNeeded() {
+        if (prefs.getBoolean(KEY_V4_PREFS_CLEANED, false)) return
+        val old = securePrefs
+        if (old != null) {
+            try {
+                val sensitive = setOf(KEY_ACCOUNT_ID, KEY_SECRET, KEY_CLOUD_API_KEY)
+                val sensitivePrefixes = listOf(KEY_PROFILE_SECRET_PREFIX, KEY_PROFILE_CLOUD_KEY_PREFIX)
+                val editor = prefs.edit()
+                var copied = 0
+                for ((k, v) in old.all) {
+                    if (k in sensitive || sensitivePrefixes.any { k.startsWith(it) }) continue
+                    if (prefs.contains(k)) continue
+                    when (v) {
+                        is String -> editor.putString(k, v)
+                        is Int -> editor.putInt(k, v)
+                        is Long -> editor.putLong(k, v)
+                        is Float -> editor.putFloat(k, v)
+                        is Boolean -> editor.putBoolean(k, v)
+                        is Set<*> -> {
+                            @Suppress("UNCHECKED_CAST")
+                            editor.putStringSet(k, v as Set<String>)
+                        }
+                    }
+                    copied++
+                }
+                editor.apply()
+                android.util.Log.i("PrefsManager", "v4.0: 非敏感偏好迁移 $copied 项到明文存储")
+            } catch (e: Exception) {
+                android.util.Log.w("PrefsManager", "v4.0: 偏好迁移失败，保留旧文件", e)
+                return
+            }
+        }
+        if (secureBackend == SecureBackend.TINK) {
+            try {
+                val deleted = appContext.deleteSharedPreferences(PREFS_NAME)
+                android.util.Log.i("PrefsManager", "v4.0: 旧加密存储文件删除结果=$deleted")
+            } catch (e: Exception) {
+                android.util.Log.w("PrefsManager", "v4.0: 删除旧加密存储文件失败", e)
+            }
+        } else {
+            android.util.Log.i("PrefsManager", "v4.0: LEGACY 回退中，保留旧加密存储文件")
+        }
+        prefs.edit().putBoolean(KEY_V4_PREFS_CLEANED, true).apply()
+    }
 
     // v2.3: 存储 schema 版本。只增不改 key；变更带幂等迁移。
     init {
+        migratePrefsToPlainIfNeeded()
         migrateIfNeeded()
     }
 
     companion object {
         private const val PREFS_NAME = "opencode_remote_prefs"
+        // v4.0: 非敏感偏好明文存储（敏感 key 只走 secure()/Tink）
+        private const val PLAIN_PREFS_NAME = "opencode_remote_settings"
+        private const val KEY_V4_PREFS_CLEANED = "v4_prefs_cleaned"
         private const val KEY_SCHEMA_VERSION = "schema_version"
         private const val CURRENT_SCHEMA_VERSION = 1
         private const val KEY_APP_MODE = "app_mode"
@@ -154,7 +212,7 @@ class PreferencesManager(context: Context) {
         private const val TINK_BACKING_PREFS = "opencode_tink_values"
         private const val KEY_TINK_MIGRATED = "secure_tink_migrated"
         private const val KEY_MIGRATION_NOTICE_DISMISSED = "secure_migration_notice_dismissed"
-        private const val KEY_LEGACY_NOTICE_PREFIX = "legacy_relay_notice_dismissed_"
+        private const val KEY_OLD_RELAY_WARN_PREFIX = "old_relay_warn_dismissed_"
     }
 
     fun getAppMode(): AppMode {
@@ -533,11 +591,11 @@ class PreferencesManager(context: Context) {
         prefs.edit().putString(KEY_MIGRATION_NOTICE_DISMISSED, "1").apply()
     }
 
-    /** v3.5: v2 服务端弃用提示（每个 relayUrl 只提示一次） */
-    fun wasLegacyRelayNoticeDismissed(relayUrl: String): Boolean =
-        prefs.getString(KEY_LEGACY_NOTICE_PREFIX + relayUrl.hashCode(), null) != null
+    /** v4.0: v3 旧服务端升级提示（每个 relayUrl 只提示一次） */
+    fun wasOldRelayWarnDismissed(relayUrl: String): Boolean =
+        prefs.getString(KEY_OLD_RELAY_WARN_PREFIX + relayUrl.hashCode(), null) != null
 
-    fun dismissLegacyRelayNotice(relayUrl: String) {
-        prefs.edit().putString(KEY_LEGACY_NOTICE_PREFIX + relayUrl.hashCode(), "1").apply()
+    fun dismissOldRelayWarn(relayUrl: String) {
+        prefs.edit().putString(KEY_OLD_RELAY_WARN_PREFIX + relayUrl.hashCode(), "1").apply()
     }
 }

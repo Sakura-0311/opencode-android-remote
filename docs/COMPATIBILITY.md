@@ -41,6 +41,21 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 | 3.3.0 | 30300 |
 | 3.4.0 | 30400 |
 | 3.5.0 | 30500 |
+| 4.0.0 | 40000 | 协议 v=4（hello 必需，破坏性） |
+| 4.0.0 | 40000 |
+
+## 协议兼容（v4.0，唯一破坏性版本）
+
+- 协议 `v=4`：`hello` 变为必需。无 hello 的连接（v2 旧客户端）被 relay 直接拒绝
+  （先回 `hello_required` 明确错误，再 4401 关闭）。
+- v3 客户端 ↔ v4 relay：正常（v3 会发 hello，收到 `hello_ack` v=4 后走 auth）。
+- v4 App 要求 relay ≥ v3.0：连 v2 relay（hello 无响应即 4401）时报 `PROTOCOL_MISMATCH`，
+  无 legacy 降级；连 v3 relay 时功能可用，App 给一次性升级提示。
+- v4 移除：legacy 认证路径、relay `legacy` desktop 键（desktop 必须上报 `device_id`，
+  无则 auth 被拒）、`/api/stats` 的 `connections.legacy_v2_total` / `v3_total` 计数。
+- v4 清理（App）：`USE_NETWORK_MONITOR` 回退开关（NetworkMonitor 常开）、
+  v3.5 的 legacy 降级逻辑与弃用提示、Tink 迁移遗留的旧加密存储文件
+  （Tink 生效后删除；非敏感偏好搬到明文 `opencode_remote_settings`）。
 
 ## 协议兼容（v2.2.1）
 

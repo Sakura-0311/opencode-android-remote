@@ -18,8 +18,8 @@ KNOWN_SESSION_TTL_SEC = float(os.getenv("AGENT_KNOWN_SESSION_TTL_SEC", "3600"))
 FILE_READ_MAX_BYTES = int(os.getenv("AGENT_FILE_READ_MAX_BYTES", str(200 * 1024)))
 
 
-# v3.0: 协议版本与能力协商
-PROTOCOL_VERSION = 3
+# v4.0: 协议版本与能力协商
+PROTOCOL_VERSION = 4
 AGENT_CAPABILITIES = [
     "hello",
     "write_idempotency",  # client_msg_id 写幂等

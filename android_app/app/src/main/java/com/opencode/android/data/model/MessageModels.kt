@@ -128,8 +128,8 @@ data class OpenCodeUiState(
     val secureStorageInfo: String = "",
     val secureStorageOk: Boolean = true,
     val showSecureMigrationNotice: Boolean = false,
-    // v3.5: v2 旧服务端弃用提示（legacy 降级时一次性）
-    val showLegacyRelayNotice: Boolean = false,
+    // v4.0: v3 旧服务端升级提示（hello_ack v<4 时一次性，不阻断）
+    val showOldRelayWarning: Boolean = false,
     
     // 电脑中继模式参数
     val accountId: String = "",

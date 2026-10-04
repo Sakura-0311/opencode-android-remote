@@ -1,3 +1,67 @@
+# OpenCode Android Remote - Release v4.0.0（协议 v4，唯一破坏性版本）
+
+## 破坏性变更（本版唯一一次）
+
+- **hello 变为强制**：relay 拒绝无 hello 的连接（`hello_required` + 4401 关闭）；
+  v2 旧客户端（relay/agent/App）无法再连接
+- **移除 legacy 路径**：relay 删除 v2 兼容分支与 legacy 埋点；App 删除 v3.5 的 legacy 降级逻辑
+- **desktop 必须上报 device_id**（多 desktop 区分键，无回退）
+- 协议 `v=4`：hello/hello_ack 的 `v` 字段为 4
+
+## 兼容性
+
+- v3 客户端（hello v=3）仍被 v4 relay 接受（hello_ack 回 v=4），功能正常
+- v4 App 连 v3 relay：功能可用，一次性提示"建议升级服务端"（不阻断）
+- v4 App 连 v2 relay：明确报错"服务端版本过旧"，无自动降级
+- **升级顺序（强制）：先 relay + agent 到 v4.0，再覆盖安装 App**
+- 回滚：relay/agent 回到 v3.5 代码重启；App 回到 v3.5.0（无数据格式变更，不丢数据）
+
+## 其他
+
+- E2EE：按计划暂缓（v4.0 稳定后 + 明确威胁模型才重估）
+- applicationId / 签名：不变
+
+## 验证
+
+- 契约测试 23/23（v4：无 hello 拒绝、v3 兼容、无 device_id 拒绝、多 desktop、路由）；
+  CI 全绿；模拟器冒烟（待 CI）
+- 真机验证：未验证
+
+---
+
+# OpenCode Android Remote - Release v4.0.0（架构版本，唯一破坏性版本）
+
+## 内容
+
+- **协议 v=4，hello 强制**：无 hello 的连接（v2 旧客户端）被 relay 直接拒绝
+  （先回 `hello_required` 明确错误，再 4401 关闭）；desktop 必须上报 `device_id`
+  （无则 auth 被拒），relay 移除 `legacy` desktop 回退键
+- **兼容矩阵**：v3 App ↔ v4 relay 正常（v3 会发 hello）；v4 App 要求 relay ≥ v3.0
+  （连 v2 relay 报 `PROTOCOL_MISMATCH`，无 legacy 降级；连 v3 relay 功能可用，
+  App 给一次性升级提示）；v2 客户端正式 EOL（见 `docs/DEPRECATION_V2.md`）
+- **清理**（发布说明逐项列出）：
+  1. `USE_NETWORK_MONITOR` 回退开关移除，NetworkMonitor 常开
+  2. App 移除 v3.5 的 legacy 降级逻辑与"v2 弃用提示"（改为 v3 relay 升级提示）
+  3. Tink 迁移遗留的旧加密存储文件：Tink 生效后删除，非敏感偏好搬到明文
+     `opencode_remote_settings`（LEGACY 回退时保留旧文件）
+  4. relay 移除 legacy 连接计数器；`/api/stats` 不再含 `connections` 计数
+- **MIGRATION_V4.md** 正式版：升级顺序（先 relay/agent，后 App）、兼容矩阵、回滚路径
+- agent `PROTOCOL_VERSION` → 4（仍要求 hello_ack，即要求 v3.0+ relay）
+
+## 兼容性
+
+- v3.x 可直接覆盖升级到 v4.0（签名与 applicationId 不变）
+- 回滚：App 回到 v3.5，relay/agent 回退到 v3.5 代码重启；v4 不做数据格式变更，回滚不丢数据
+- E2EE：暂缓（v4.0 稳定后 + 明确威胁模型才重估）
+
+## 验证
+
+- v4 契约测试全绿（含：无 hello 被拒/v3 hello 被接受/desktop 无 device_id 被拒/
+  多 desktop/主回退/定向路由回归）；CI 全绿
+- 真机验证：未验证
+
+---
+
 # OpenCode Android Remote - Release v3.5.0（v2 弃用准备）
 
 ## 内容

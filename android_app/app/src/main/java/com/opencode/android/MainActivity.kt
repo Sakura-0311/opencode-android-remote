@@ -335,14 +335,14 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                // v3.5: v2 旧服务端弃用提示（已降级 legacy，不阻断）
-                if (uiState.showLegacyRelayNotice) {
+                // v4.0: v3 旧服务端升级提示（功能可用，不阻断）
+                if (uiState.showOldRelayWarning) {
                     AlertDialog(
-                        onDismissRequest = { viewModel.dismissLegacyRelayNotice() },
-                        title = { Text("服务端版本过旧") },
-                        text = { Text("当前连接的是 v2 旧版 relay，已自动降级兼容。v2 协议进入维护模式，v4.0 发布后将不再兼容，请将 relay_server 与 agent.py 升级到 v3.x。") },
+                        onDismissRequest = { viewModel.dismissOldRelayWarning() },
+                        title = { Text("建议升级服务端") },
+                        text = { Text("当前连接的是 v3 旧版 relay，功能可用但建议升级到 v4.0+（先升级 relay_server 与 agent.py，再升级 App）。") },
                         confirmButton = {
-                            Button(onClick = { viewModel.dismissLegacyRelayNotice() }) { Text("知道了") }
+                            Button(onClick = { viewModel.dismissOldRelayWarning() }) { Text("知道了") }
                         }
                     )
                 }

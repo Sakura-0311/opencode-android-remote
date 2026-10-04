@@ -26,7 +26,7 @@ jobs:
         # v3.0.2/B1: hello 协商 + 多 desktop 共存 + 主回退按最近认证时间
         run: |
           pip install uvicorn websockets
-          python scripts/test_contract_v3.py
+          python scripts/test_contract_v4.py
 
   supply-chain:
     # v2.6: 供应链安全——秘密扫描（仅 docs/，防文档泄密）与依赖漏洞扫描
