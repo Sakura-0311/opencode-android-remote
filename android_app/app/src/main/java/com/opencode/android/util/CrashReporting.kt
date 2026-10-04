@@ -108,7 +108,7 @@ object CrashReporting {
                 Log.i(TAG, "reportNonFatal skipped (not opted in): ${e.message}")
                 return
             }
-            org.acra.ACRA.getErrorReporter().handleSilentException(e)
+            org.acra.ACRA.errorReporter.handleSilentException(e)
             Log.i(TAG, "reportNonFatal sent: ${e.message}")
         } catch (re: Exception) {
             Log.w(TAG, "reportNonFatal failed", re)
