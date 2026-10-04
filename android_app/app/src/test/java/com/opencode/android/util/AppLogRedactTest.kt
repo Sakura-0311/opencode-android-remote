@@ -62,7 +62,7 @@ class AppLogRedactTest {
         AppLog.i("Relay", "connected secret=topsecret123")
         AppLog.e("Relay", "auth failed for user")
         val dest = File(dir.parentFile, "export.txt")
-        val exported = AppLog.exportLogFile(dest)
+        val exported = AppLog.exportLogFile(dest, "=== 日志导出 ===\n", "(已脱敏)\n")
         assertNotNull(exported)
         val text = dest.readText()
         assertFalse(text.contains("topsecret123"))

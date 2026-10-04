@@ -1,6 +1,5 @@
 package com.opencode.android.util
 
-import android.content.Context
 import com.opencode.android.R
 /**
  * v3.1: 多 desktop 定向路由的纯决策逻辑（无 Android 依赖，可 JVM 单测）。
@@ -32,10 +31,17 @@ object DesktopRoutingPolicy {
      * 目标电脑离线时的针对性提示文案。必须包含目标标识（名称或 device_id），
      * 区别于笼统的「电脑端未连接」。
      */
-    fun offlineHint(context: Context, targetName: String, targetDeviceId: String, serverMessage: String): String {
-        val label = targetName.ifBlank { targetDeviceId.take(8).ifBlank { context.getString(R.string.route_001) } }
-        val base = serverMessage.ifBlank { context.getString(R.string.route_002) }
-        return context.getString(R.string.route_003, label, targetDeviceId, base)
+    fun offlineHint(
+        targetName: String,
+        targetDeviceId: String,
+        serverMessage: String,
+        resUnnamed: String,
+        resNoMessage: String,
+        resFormat: String
+    ): String {
+        val label = targetName.ifBlank { targetDeviceId.take(8).ifBlank { resUnnamed } }
+        val base = serverMessage.ifBlank { resNoMessage }
+        return String.format(resFormat, label, targetDeviceId, base)
     }
 
     /** device_id 缩写（前 8 位），用于列表展示 */

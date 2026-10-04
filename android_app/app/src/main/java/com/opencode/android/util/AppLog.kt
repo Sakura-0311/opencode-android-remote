@@ -2,7 +2,6 @@ package com.opencode.android.util
 
 import com.opencode.android.R
 import org.json.JSONObject
-import android.content.Context
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -122,12 +121,12 @@ object AppLog {
      * 导出日志：将当前两个环形文件合并拷到目标文件（已脱敏写入，无需二次处理）。
      * 返回目标文件，失败返回 null。
      */
-    fun exportLogFile(context: Context, dest: File): File? {
+    fun exportLogFile(dest: File, headerTitle: String, headerNotice: String): File? {
         val dir = logDir ?: return null
         return try {
             val sb = StringBuilder()
-            sb.append(context.getString(R.string.log_001, dateFmt.format(Date())))
-            sb.append(context.getString(R.string.log_002))
+            sb.append(headerTitle)
+            sb.append(headerNotice)
             listOf(File(dir, "applog-0.txt"), File(dir, "applog-1.txt"))
                 .filter { it.exists() }
                 .sortedBy { it.lastModified() }

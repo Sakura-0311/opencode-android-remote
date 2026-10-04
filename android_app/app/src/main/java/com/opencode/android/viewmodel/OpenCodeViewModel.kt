@@ -1217,7 +1217,13 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         val targetName = _uiState.value.desktopList
             .firstOrNull { it.deviceId == targetDeviceId }
             ?.deviceName.orEmpty()
-        val hint = DesktopRoutingPolicy.offlineHint(getApplication(), targetName, targetDeviceId, message)
+        val app = getApplication<Application>()
+        val hint = DesktopRoutingPolicy.offlineHint(
+            targetName, targetDeviceId, message,
+            app.getString(R.string.route_001),
+            app.getString(R.string.route_002),
+            app.getString(R.string.route_003)
+        )
         AppLog.w("DesktopRouting", "target offline: $hint")
         _uiState.update { state ->
             val sysMsg = ChatMessage(
