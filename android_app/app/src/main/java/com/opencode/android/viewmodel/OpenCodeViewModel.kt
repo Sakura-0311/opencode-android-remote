@@ -102,9 +102,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     init {
         // v1.6: 序号持久化已在 OpenCodeApp.onCreate 中初始化
-        // v1.6 P0 后台保活：ViewModel 重建时重新挂载到应用级连接（不断连）
-        // CloudApiClient 每次调用时传入 listener，无需重新挂载
-        relayClient.setListener(this)
         // P1-1: 彻底移除虚假写死的 Demo 会话数据，以真实服务拉取为准
         val savedSessions = prefsManager.getSavedSessions()
 
@@ -140,6 +137,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 taskStatusDetail = effectiveDetail
             )
         )
+
+        // v3.0.1 热修：setListener 会同步回调 onConnectionStateChanged（v2.1 引入的
+        // WS 状态机），必须在 _uiState 就绪后调用，否则 NPE 闪退（v2.1~v3.0 全版本）。
+        // v1.6 P0 后台保活：ViewModel 重建时重新挂载到应用级连接（不断连）
+        // CloudApiClient 每次调用时传入 listener，无需重新挂载
+        relayClient.setListener(this)
     }
 
     val uiState: StateFlow<OpenCodeUiState> = _uiState.asStateFlow()
