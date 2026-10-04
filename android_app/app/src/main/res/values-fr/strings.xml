@@ -563,5 +563,5 @@
     <string name="e2ee_001">Chiffré</string>
     <string name="e2ee_002">En attente du handshake</string>
     <string name="e2ee_003">Canal chiffré établi</string>
-    <string name="e2ee_004">Canal chiffré établi. Les messages entre cet appareil et le bureau sont chiffrés de bout en bout. Le relais ne voit que les métadonnées de routage (qui, quand, combien d'octets), pas le contenu.</string>
+    <string name="e2ee_004">Canal chiffré établi. Les messages entre cet appareil et le bureau sont chiffrés de bout en bout. Le relais ne voit que les métadonnées de routage (qui, quand, combien d\'octets), pas le contenu.</string>
 </resources>
