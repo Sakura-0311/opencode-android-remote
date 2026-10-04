@@ -99,7 +99,7 @@ jobs:
           gradle-version: '8.7'
       - name: Write verification metadata
         working-directory: android_app
-        run: gradle --write-verification-metadata sha256 :app:assembleDebug :app:testDebugUnitTest :app:lintVitalAnalyzeRelease :app:cyclonedxBom --no-daemon --console=plain --stacktrace
+        run: gradle --write-verification-metadata sha256 :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintVitalAnalyzeRelease :app:cyclonedxBom --no-daemon --console=plain --stacktrace
       - name: Upload verification metadata
         uses: actions/upload-artifact@v4
         with:
