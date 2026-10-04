@@ -124,9 +124,7 @@ def main():
     assert d2m_d == d2m_m and m2d_d == m2d_m, "key derivation mismatch"
     print(f"[test] keys derived consistently", flush=True)
 
-    # Mobile auth 后发送 E2EE 消息
-    ws_m.close()
-    ws_m = websocket.create_connection(f"{RELAY_WS}/ws", timeout=10)
+    # Mobile auth（同一连接，pair_claim 后直接 auth）
     ws_m.send(json.dumps({"type": "auth", "account_id": ACCOUNT, "secret": device_secret,
                           "client_type": "mobile", "device_id": "mock-mobile-1"}))
     # auth 后 relay 会发 auth_ok + seq_sync（可能还有 resync_required），全部读掉
