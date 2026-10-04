@@ -51,6 +51,7 @@ private fun tagDisplay(tag: String): String = when (tag) {
     else -> tag
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     uiState: OpenCodeUiState,
