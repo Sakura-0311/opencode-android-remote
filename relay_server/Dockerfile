@@ -15,6 +15,12 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 COPY server.py crash_report.py ./
 
+# 非 root 运行：建用户并把 /app（含 crash_reports）与家目录交给他
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /app/data /home/appuser/.config \
+    && chown -R appuser:appuser /app /home/appuser
+USER appuser
+
 EXPOSE 8765
 
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8765"]

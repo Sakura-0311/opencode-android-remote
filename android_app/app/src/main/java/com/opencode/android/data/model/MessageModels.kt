@@ -146,7 +146,9 @@ data class OpenCodeUiState(
     // 电脑中继模式参数
     val accountId: String = "",
     val secret: String = "",
-    val relayUrl: String = "ws://10.0.2.2:8765",
+    // 默认留空：配对页用 placeholder 给输入提示（此前默认填模拟器地址 ws://10.0.2.2:8765，
+    // 真机用户容易误以为已填好）。release 环境请用 wss，见 docs/RELAY_DEPLOY.md。
+    val relayUrl: String = "",
     
     // 云端直连模式参数
     val cloudServerUrl: String = "https://opencode.yourdomain.com:4096",

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   caddy:
     image: caddy:2-alpine
@@ -20,7 +18,9 @@ services:
       - opencode_net
 
   opencode-server:
-    image: ghcr.io/anomalyco/opencode:latest
+    #  pin 到 digest（2026-10-05 查得 tag 2.0.23 对应 digest）：latest 浮动标签
+    # 不可复现，升级时手动改 digest。caddy 仍用 2-alpine（官方维护的浮动小版本）。
+    image: ghcr.io/anomalyco/opencode@sha256:2c74dc0dbdced56d069ec3d8be60c72157b04783a4f18c831c6b00a658764f81
     container_name: opencode-server
     restart: unless-stopped
     environment:

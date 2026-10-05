@@ -62,6 +62,9 @@ curl http://127.0.0.1:8765/api/stats
 直连 wss：在 `.env` 里配 `SSL_CERTFILE` / `SSL_KEYFILE` 并把证书目录
 挂进容器（compose 另加 volumes 映射）。
 
+> 地址选择：`ws://` 只用于同一局域网/可信网络调试；任何经公网的
+> release 部署请用 `wss://`（或经反代的 https），否则 secret 与消息明文传输。
+
 ## 崩溃上报接收端（可选，默认关闭）
 
 `.env` 里 `RELAY_ENABLE_CRASH_REPORT=1` 后重启，relay 开始接收已 opt-in

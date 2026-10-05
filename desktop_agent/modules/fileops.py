@@ -1,38 +1,17 @@
-import asyncio
-import json
 import logging
 import os
-import random
-import secrets
-import stat
-import sys
 import time
-from typing import Dict, Optional, Any
-import aiohttp
-import websockets
 
-from opencode_api import (
-    DEFAULT_OPENCODE_BASE_URL,
-    check_opencode_health,
-    query_sessions,
-    create_session,
-    abort_session,
-    respond_to_permission,
-    send_session_message_async,
-    subscribe_events_stream,
-    get_agents,
-    get_providers,
-    get_projects,
-    get_current_project,
-    get_vcs_info,
-)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [DesktopAgent] %(message)s"
-)
-logger = logging.getLogger("DesktopAgent")
 from modules import config
+
+# import 时不直接 basicConfig（会改写整个进程的 root logger 配置）：
+# 只有调用方还没配过 handler 时才给一个默认配置。
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] [DesktopAgent] %(message)s"
+    )
+logger = logging.getLogger("DesktopAgent")
 # ==============================================================================
 # ==============================================================================
 # P2-12: 文件浏览器辅助函数
