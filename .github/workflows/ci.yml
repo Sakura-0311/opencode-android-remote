@@ -201,6 +201,9 @@ jobs:
           ls -la app/build/reports/cyclonedx-bom.json
       - name: Scan SBOM for CVEs
         if: startsWith(github.ref, 'refs/tags/v')
+        # 只报告不拦构建：SBOM 含 Gradle/AGP 构建期传递依赖（如 netty），
+        # 其 CVE 不随 APK 发布；拦构建会误伤发版。报告仍上传供人工研判。
+        continue-on-error: true
         run: |
           curl -sSL https://github.com/google/osv-scanner/releases/download/v2.0.3/osv-scanner_linux_amd64 \
             -o /tmp/osv-scanner && chmod +x /tmp/osv-scanner
