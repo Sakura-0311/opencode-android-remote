@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "note": "E2EE v4.6.0 内层格式 v2 互操作向量；nonce 固定仅用于测试",
+  "mobile_priv_b64": "8Fyi3xKF80+ciqcxS+HcVhL1VU13wUh7A9E0/UnWA2M=",
+  "mobile_pub_b64": "oWNd5uVwLuUpDTeGDW6WwiCUbGri2f4DTQ7FWwDQzzU=",
+  "desktop_priv_b64": "eMigLnSO89VoP40xZGOYOiCOMfo+RNM1J7Dh1JtD8V8=",
+  "desktop_pub_b64": "PMCcE/zOHzdKkMMwky6VRVm/Fw+P7TAqs5V3uOuGwkA=",
+  "k_m2d_hex": "74e7c90969c2cfde1614bb35fd63df002562c4ffb8bf0ab3ea839412ee3cf94b",
+  "k_d2m_hex": "8584352af15b501b2da321578a59318981c737d9caf0628980a84546fc2278bc",
+  "hkdf_info_m2d": "opencode-remote-e2ee-v1-m2d",
+  "hkdf_info_d2m": "opencode-remote-e2ee-v1-d2m",
+  "aad_format": "{sender_device_id}:{session_id}",
+  "vectors": [
+    {
+      "direction": "m2d",
+      "sender_device_id": "mob-relay-id-1",
+      "session_id": "sess-1",
+      "inner_json": {
+        "action": "send_prompt",
+        "payload": {
+          "prompt": "hello"
+        },
+        "seq": 1
+      },
+      "nonce_hex": "010101010101010101010101",
+      "encrypted_payload_b64": "AQEBAQEBAQEBAQEBIPNIMwMWg7ribk0gF/ZDxbiwup0xxno0lGtYTQzw/TTAXxyQtgh30/3BcSLyA0lxyjEDc7fNeQ/v4rkCZ4eDiIHRqwrb2DH7UIcQF+afs4bpqsY="
+    },
+    {
+      "direction": "d2m",
+      "sender_device_id": "desk-relay-id-1",
+      "session_id": "sess-1",
+      "inner_json": {
+        "type": "stream_chunk",
+        "chunk": "hi",
+        "seq": 1
+      },
+      "nonce_hex": "010101010101010101010101",
+      "encrypted_payload_b64": "AQEBAQEBAQEBAQEB7/ZD2Q0LkO9LuvWpHJ0xInoKElB1KN0CW9g8L3gCFlP/hoSV0Lrfc34kA6MWGXfzPy+ECzYs0aJdYnv2QVI2RIc="
+    }
+  ]
+}

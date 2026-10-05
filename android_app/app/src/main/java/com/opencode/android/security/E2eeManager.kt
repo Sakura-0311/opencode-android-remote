@@ -4,6 +4,7 @@ import android.util.Base64
 import com.opencode.android.coordinator.PairingE2ee
 import com.opencode.android.data.local.PreferencesManager
 import com.opencode.android.util.AppLog
+import org.json.JSONObject
 
 /**
  * v4.1: E2EE 会话管理（mobile 侧）。
@@ -25,6 +26,13 @@ interface E2eePrefs {
     fun getE2eePeerPubkey(deviceId: String): String?
     fun setE2eePeerPubkey(deviceId: String, b64: String)
     fun removeE2eePeerPubkey(deviceId: String)
+    // v4.6.0: 本机在 relay 侧的 device_id（配对时 relay 分配），E2EE AAD sender 用它
+    // （与 desktop 侧保存对端公钥的 peer id 一致），非敏感，明文存储
+    fun getE2eeOwnRelayDeviceId(): String?
+    fun setE2eeOwnRelayDeviceId(id: String)
+    // v4.6.0: E2EE 序号计数器（防重放），按对端+方向独立；非敏感，明文存储
+    fun getE2eeSeq(peerId: String, direction: String): Long
+    fun setE2eeSeq(peerId: String, direction: String, seq: Long)
     /** 当前配对 secret（手动配对=房间主 secret，扫码配对=device_secret）。 */
     fun getSecret(): String
     /** 存储的 secret 是否为房间主 secret（手动配对时 true，扫码配对时 false）。 */
@@ -140,7 +148,8 @@ class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
         }
     }
 
-    /** 解密来自 desktop 的载荷。失败返回 null（调用方按错误处理，不静默吞掉）。 */
+    /** 解密来自 desktop 的载荷。失败返回 null（调用方按错误处理，不静默吞掉）。
+     * v4.6.0: 内层为 JSON {"type":..., ...字段..., "seq":N}，校验序号防重放。 */
     fun decryptFromDesktop(
         payloadB64: String,
         desktopDeviceId: String,
@@ -153,10 +162,49 @@ class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
             if (peerPub.isNullOrBlank()) return null
             val keys = E2eeCrypto.deriveMessageKeys(priv, peerPub)
             // AAD sender 为 desktop（加密方）
-            E2eeCrypto.decrypt(payloadB64, keys.d2m, desktopDeviceId, sessionId)
+            val innerStr = E2eeCrypto.decrypt(payloadB64, keys.d2m, desktopDeviceId, sessionId)
+            val inner = JSONObject(innerStr)
+            val seq = inner.optLong("seq", -1)
+            val last = prefs.getE2eeSeq(desktopDeviceId, "d2m")
+            if (seq <= 0 || seq <= last) {
+                AppLog.w("E2EE", "d2m 序号非法/重放（seq=$seq, last=$last），丢弃")
+                return null
+            }
+            prefs.setE2eeSeq(desktopDeviceId, "d2m", seq)
+            innerStr
         } catch (e: Exception) {
             AppLog.w("E2EE", "解密失败: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * v4.6.0: 加密发往 desktop 的内层 JSON。调用方构造 {"action":..., "payload":...}，
+     * 方法写入单调递增 seq 后加密。AAD sender 用本机 relay device_id
+     * （desktop 侧以同一 id 存对端公钥并做 AAD，两端一致）。
+     */
+    fun encryptInnerForDesktop(
+        inner: JSONObject,
+        desktopDeviceId: String,
+        sessionId: String
+    ): PayloadResult {
+        if (!isAvailable()) return PayloadResult.Plaintext
+        return try {
+            val priv = prefs.getE2eePrivateKey()
+                ?: return PayloadResult.Failed("本机 E2EE 私钥缺失")
+            val peerPub = prefs.getE2eePeerPubkey(desktopDeviceId)
+            if (peerPub.isNullOrBlank()) return PayloadResult.Failed("尚未与 $desktopDeviceId 协商 E2EE 公钥")
+            val ownId = prefs.getE2eeOwnRelayDeviceId()?.takeIf { it.isNotBlank() }
+                ?: return PayloadResult.Failed("本机 relay device_id 缺失，请重新配对")
+            val seq = prefs.getE2eeSeq(desktopDeviceId, "m2d") + 1
+            inner.put("seq", seq)
+            val keys = E2eeCrypto.deriveMessageKeys(priv, peerPub)
+            val enc = E2eeCrypto.encrypt(inner.toString(), keys.m2d, ownId, sessionId)
+            prefs.setE2eeSeq(desktopDeviceId, "m2d", seq)
+            PayloadResult.Encrypted(enc)
+        } catch (e: Exception) {
+            AppLog.e("E2EE", "加密失败（fail-closed，不回退明文）: ${e.message}")
+            PayloadResult.Failed(e.message ?: "未知加密错误")
         }
     }
 

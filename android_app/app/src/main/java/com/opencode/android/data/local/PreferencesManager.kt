@@ -194,6 +194,25 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         secure()?.remove("e2ee_peer_$deviceId")
     }
 
+    // v4.6.0: 本机 relay device_id（非敏感，明文存储）
+    override fun getE2eeOwnRelayDeviceId(): String? =
+        prefs.getString("e2ee_own_relay_device_id", null)
+    override fun setE2eeOwnRelayDeviceId(id: String) {
+        prefs.edit().putString("e2ee_own_relay_device_id", id).apply()
+    }
+
+    // v4.6.0: E2EE 序号计数器（非敏感，明文存储；key 做清洗防注入）
+    private fun seqKey(peerId: String, direction: String): String {
+        val safe = peerId.filter { it.isLetterOrDigit() || it in "-_." }.take(64)
+        val dir = if (direction == "d2m") "d2m" else "m2d"
+        return "e2ee_seq_${safe}_$dir"
+    }
+    override fun getE2eeSeq(peerId: String, direction: String): Long =
+        prefs.getLong(seqKey(peerId, direction), 0L)
+    override fun setE2eeSeq(peerId: String, direction: String, seq: Long) {
+        prefs.edit().putLong(seqKey(peerId, direction), seq).apply()
+    }
+
     // v4.0: 非敏感偏好统一走明文存储（敏感 key 只走 secure()，绝不进明文）。
     // 旧版本数据由 migratePrefsToPlainIfNeeded() 一次性搬运。
     private val prefs: SharedPreferences =

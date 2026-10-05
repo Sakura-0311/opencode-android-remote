@@ -24,6 +24,16 @@ class E2eeFailClosedTest {
         override fun setE2eePeerPubkey(deviceId: String, b64: String) { peers[deviceId] = b64 }
         override fun removeE2eePeerPubkey(deviceId: String) { peers.remove(deviceId) }
         override fun getSecret(): String = pairingSecret
+        // v4.6.0 新增
+        private var ownRelayId: String? = null
+        private val seqs = mutableMapOf<String, Long>()
+        override fun getE2eeOwnRelayDeviceId(): String? = ownRelayId
+        override fun setE2eeOwnRelayDeviceId(id: String) { ownRelayId = id }
+        override fun getE2eeSeq(peerId: String, direction: String): Long =
+            seqs["$peerId/$direction"] ?: 0L
+        override fun setE2eeSeq(peerId: String, direction: String, seq: Long) {
+            seqs["$peerId/$direction"] = seq
+        }
     }
 
     @Before

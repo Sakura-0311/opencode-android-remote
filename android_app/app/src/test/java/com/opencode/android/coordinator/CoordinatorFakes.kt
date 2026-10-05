@@ -67,6 +67,10 @@ class FakePairingPrefs(
         return cloudConfigResult
     }
 
+    // v4.6.0 新增
+    var savedRelayDeviceId: String? = null
+    override fun setE2eeOwnRelayDeviceId(id: String) { savedRelayDeviceId = id }
+
     override fun saveTaskStatus(status: String, detail: String, sessionId: String) {
         savedTaskStatus = Triple(status, detail, sessionId)
     }

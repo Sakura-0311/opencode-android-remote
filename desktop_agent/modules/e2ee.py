@@ -214,8 +214,80 @@ def decrypt(payload_b64: str, key: bytes, sender_device_id: str, session_id: str
 
 
 # ---------------------------------------------------------------------------
-# 协议钩子（send/recv 消息处调用；未启用/未协商时静默透传）
+# v4.6.0: 内层格式 v2（JSON 对象）+ 序号防重放
+#   m2d 内层: {"action": "<action>", "payload": {...}, "seq": <int>}
+#   d2m 内层: {"type": "<type>", ...原内容字段..., "seq": <int>}
+# 序号按对端、按方向独立计数，落盘持久化（防重放旧密文指令）。
+# AAD sender: m2d 用手机的 relay device_id（v4.6.0 起 relay 在 device_paired
+# 里带上，手机加密时用同一值）；d2m 用 desktop device_id。
 # ---------------------------------------------------------------------------
+
+import json as _json
+
+
+def _seq_path(peer_id: str, direction: str) -> str:
+    safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in peer_id)[:64]
+    return os.path.join(_config_dir(), f"e2ee_seq_{safe}_{direction}")
+
+
+def _load_seq(peer_id: str, direction: str) -> int:
+    try:
+        with open(_seq_path(peer_id, direction), "r", encoding="utf-8") as f:
+            return max(0, int(f.read().strip() or "0"))
+    except (OSError, ValueError):
+        return 0
+
+
+def _save_seq(peer_id: str, direction: str, n: int) -> None:
+    _ensure_config_dir()
+    tmp = _seq_path(peer_id, direction) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(str(int(n)))
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, _seq_path(peer_id, direction))
+
+
+def _next_outgoing_seq(peer_id: str) -> int:
+    """d2m 发送序号：单调递增，落盘。"""
+    n = _load_seq(peer_id, "d2m") + 1
+    _save_seq(peer_id, "d2m", n)
+    return n
+
+
+def _check_incoming_seq(peer_id: str, seq: int) -> bool:
+    """m2d 接收序号：必须严格递增，否则视为重放/乱序，拒绝。"""
+    last = _load_seq(peer_id, "m2d")
+    if seq <= last:
+        return False
+    _save_seq(peer_id, "m2d", seq)
+    return True
+
+
+# v4.6.0 P1-3: fail-closed——已协商对端后，以下控制类消息必须带合法 e2ee 信封，
+# 明文一律拒绝（防恶意 relay 注入指令 / 伪造审批）。
+CONTROL_ACTIONS = frozenset({
+    "send_prompt", "cancel", "tool_approval_response",
+    "create_session", "file_list", "file_read",
+})
+
+# v4.6.0 P1-3: d2m 可加密的内容型消息（内层 JSON，敏感字段不再明文过 relay）
+ENCRYPTABLE_D2M = frozenset({
+    "stream_chunk", "tool_approval_request", "file_read_result", "file_list_result",
+})
+
+
+def has_negotiated_peers() -> bool:
+    """E2EE 已启用且至少有一个对端完成公钥协商。"""
+    return is_enabled() and bool(list_peer_ids())
+
+
+def control_allowed(action: str, msg: dict) -> bool:
+    """控制消息是否放行。未协商时沿旧流程；协商后必须有合法信封。"""
+    if not has_negotiated_peers():
+        return True
+    if action not in CONTROL_ACTIONS:
+        return True
+    return bool(msg.get("_e2ee_ok"))
 
 def sign_pubkey(secret: str, device_id: str, pubkey_b64: str) -> str:
     """v4.3 M-2: 用房间主 secret 对 E2EE 公钥做 HMAC-SHA256 绑定。
@@ -232,18 +304,21 @@ def sign_pubkey(secret: str, device_id: str, pubkey_b64: str) -> str:
 
 
 def decrypt_incoming(msg: dict) -> dict:
-    """收消息钩子（mobile -> desktop）。
+    """收消息钩子（mobile -> desktop）。v4.6.0 内层格式 v2。
 
     msg 含 e2ee 信封（e2ee=true + encrypted_payload）且已启用时：
-    遍历已知对端，用各自 k_m2d + AAD(sender=对端, session_id) 试解密，
-    成功则把明文写回 payload["prompt"] 并返回；全部失败则原样返回（上层按旧流程处理）。
-    未启用 / 无信封时直接返回原 dict。
+    遍历已知对端，用各自 k_m2d + AAD(sender=对端 relay device_id, session_id)
+    试解密；成功则解析内层 JSON {"action","payload","seq"}，校验序号严格递增
+    （防重放），把 action/payload 写回 msg 并置 _e2ee_ok=True。
+    解密失败 / 内层非法 / 序号回退 → 置 _e2ee_failed（上层 fail-closed 拒绝），
+    不再按旧流程处理。未启用 / 无信封时直接返回原 dict。
     """
     if not is_enabled() or not isinstance(msg, dict) or not msg.get("e2ee"):
         return msg
     payload_b64 = msg.get("encrypted_payload", "")
     session_id = str(msg.get("session_id", "default"))
     if not payload_b64:
+        msg["_e2ee_failed"] = "empty payload"
         return msg
     for peer_id in list_peer_ids():
         try:
@@ -253,27 +328,42 @@ def decrypt_incoming(msg: dict) -> dict:
             continue
         except Exception:
             continue
-        payload = msg.get("payload")
-        if not isinstance(payload, dict):
-            payload = {}
-            msg["payload"] = payload
         try:
-            payload["prompt"] = plaintext.decode("utf-8")
-        except UnicodeDecodeError:
+            inner = _json.loads(plaintext.decode("utf-8"))
+        except Exception:
             continue
+        if not isinstance(inner, dict):
+            continue
+        seq = inner.get("seq")
+        action = inner.get("action")
+        payload = inner.get("payload")
+        if not isinstance(seq, int) or seq <= 0:
+            continue
+        if not isinstance(action, str) or not action or not isinstance(payload, dict):
+            continue
+        # 解密成功即确认来自该对端：序号回退直接 fail-closed，不再试其他对端
+        if not _check_incoming_seq(peer_id, seq):
+            msg["_e2ee_failed"] = f"replay/old seq={seq}"
+            return msg
+        msg["action"] = action
+        msg["payload"] = payload
         msg["_e2ee_peer"] = peer_id  # 备注解密来源对端（诊断用）
+        msg["_e2ee_ok"] = True
         return msg
+    msg["_e2ee_failed"] = "decrypt failed"
     return msg
 
 
 def encrypt_outgoing(msg: dict, peer_device_id: str = None, sender_device_id: str = None) -> dict:
-    """发消息钩子（desktop -> mobile）。
+    """发消息钩子（desktop -> mobile）。v4.6.0 内层格式 v2。
 
     已启用、peer 明确（或仅有一个已协商对端）、msg 为内容型消息时：
-    用 k_d2m + AAD(sender=本机, session_id) 加密内容字段，替换为 e2ee 信封
+    用 k_d2m + AAD(sender=本机 desktop device_id, session_id) 加密内层 JSON
+    {"type":..., ...内容字段..., "seq":N}，替换为 e2ee 信封
     （保留 type / session_id / relay_seq / source_device_id 供 relay 路由）。
     否则原样返回。
-    当前处理的内容型消息：stream_chunk（chunk 字段）。
+    当前处理的内容型消息：stream_chunk、tool_approval_request、
+    file_read_result、file_list_result。
     """
     if not is_enabled() or not isinstance(msg, dict):
         return msg
@@ -295,15 +385,24 @@ def encrypt_outgoing(msg: dict, peer_device_id: str = None, sender_device_id: st
             sender_device_id = "desktop"
     session_id = str(msg.get("session_id", "default"))
     msg_type = msg.get("type")
+    if msg_type not in ENCRYPTABLE_D2M:
+        return msg
 
-    def _seal(content: str, field: str) -> dict:
-        out = dict(msg)
-        out["encrypted_payload"] = encrypt(
-            content.encode("utf-8"), k_d2m, sender_device_id, session_id)
-        out["e2ee"] = True
-        out.pop(field, None)  # 明文字段移除
-        return out
-
-    if msg_type == "stream_chunk" and isinstance(msg.get("chunk"), str):
-        return _seal(msg["chunk"], "chunk")
-    return msg
+    inner = {"type": msg_type, "seq": _next_outgoing_seq(peer)}
+    for k, v in msg.items():
+        if k in ("type", "session_id", "relay_seq", "source_device_id",
+                 "e2ee", "encrypted_payload"):
+            continue
+        inner[k] = v
+    out = {
+        "type": msg_type,
+        "session_id": msg.get("session_id", "default"),
+        "e2ee": True,
+        "encrypted_payload": encrypt(
+            _json.dumps(inner, ensure_ascii=False).encode("utf-8"),
+            k_d2m, sender_device_id, session_id),
+    }
+    for k in ("relay_seq", "source_device_id"):
+        if k in msg:
+            out[k] = msg[k]
+    return out

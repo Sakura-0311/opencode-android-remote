@@ -32,6 +32,11 @@ jobs:
       - name: Run sandbox blacklist tests
         # 文件沙盒黑名单参数化单测（11 路径 + 目录列表过滤）
         run: python desktop_agent/modules/test_sandbox.py
+      - name: Run E2EE v2 interop tests
+        # v4.6.0: 互操作向量（与 Kotlin 共用）+ 真实代码整链（19 项）
+        run: |
+          pip install cryptography
+          python desktop_agent/modules/test_e2ee_v2.py
       - name: Lint undefined names (ruff F821/F811)
         # 未定义名 / 重复定义检查：拦住缺 import 类问题（如 protocol.py 的 NameError）
         run: |

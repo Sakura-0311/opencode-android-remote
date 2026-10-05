@@ -1008,10 +1008,16 @@ class RelayWebSocketClient(private val appContext: Context) {
             }
         }
         // v4.3 M-1: E2EE fail-closed——加密失败拒绝发送，绝不回退明文
+        // v4.6.0: 内层格式 v2——加密 {"action","payload","seq"} JSON，AAD sender 用
+        // 本机 relay device_id（desktop 侧以同一 id 存对端公钥，两端一致）
         val effectiveTarget = targetDeviceId?.ifEmpty { null }
             ?: cachedDesktops.firstOrNull { it.isPrimary }?.deviceId?.ifEmpty { null }
         val payloadResult: E2eeManager.PayloadResult? = if (!effectiveTarget.isNullOrEmpty()) {
-            e2eeManager?.encryptForDesktop(payload.toString(), effectiveTarget, deviceUuid(), sessionId)
+            val inner = JSONObject().apply {
+                put("action", "send_prompt")
+                put("payload", payload)
+            }
+            e2eeManager?.encryptInnerForDesktop(inner, effectiveTarget, sessionId)
         } else null
         if (payloadResult is E2eeManager.PayloadResult.Failed) {
             AppLog.e("E2EE", "发送中止：${payloadResult.reason}")

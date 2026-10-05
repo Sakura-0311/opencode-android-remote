@@ -887,6 +887,9 @@ async def websocket_endpoint(
                     device_paired_msg = {
                         "type": "device_paired",
                         "device_name": device_name,
+                        # v4.6.0: 带上 relay 分配的 device_id，desktop 用它做 E2EE
+                        # peer id 和 AAD（与手机加密时的 sender 一致）
+                        "device_id": result.get("device_id", ""),
                         "message": f"新设备已配对：{device_name}"
                     }
                     if result.get("mobile_e2ee_pubkey"):

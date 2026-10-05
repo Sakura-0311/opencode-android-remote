@@ -15,6 +15,8 @@ interface PairingPrefs {
     var secretIsMaster: Boolean
     fun savePairingInfo(accountId: String, secret: String, relayUrl: String): Boolean
     fun saveCloudConfig(cloudUrl: String, apiKey: String, workspacePath: String): Boolean
+    // v4.6.0: 存本机 relay device_id（E2EE AAD sender）
+    fun setE2eeOwnRelayDeviceId(id: String)
 }
 
 /** 配对链路所需的 E2EE 子集（窄接口，单测用假实现）。 */
@@ -109,6 +111,10 @@ class PairingCoordinator(
             }
             // 临界区：E2EE 存储 + 凭据保存 + 状态更新原子完成（与 pairDesktop/pairCloud 互斥）
             synchronized(pairingLock) {
+                // v4.6.0: 存本机 relay device_id（E2EE AAD sender 用它，与 desktop 侧 peer id 一致）
+                if (result.success && result.deviceId.isNotBlank()) {
+                    prefs.setE2eeOwnRelayDeviceId(result.deviceId)
+                }
                 // v4.3 M-2: 保存 desktop 的 E2EE 公钥（按 device_id 绑定，HMAC 验签）
                 if (result.success && result.e2eePeerPubkey.isNotEmpty() && result.desktopDeviceId.isNotEmpty()) {
                     val ok = e2ee.storePeerPubkey(

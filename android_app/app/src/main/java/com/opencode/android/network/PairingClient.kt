@@ -26,7 +26,9 @@ data class PairClaimResult(
     val e2eePeerPubkey: String = "",
     // v4.3 M-2: 公钥 HMAC 绑定签名（hex），旧 relay/desktop 为空
     val e2eePubkeySig: String = "",
-    val desktopDeviceId: String = ""
+    val desktopDeviceId: String = "",
+    // v4.6.0: relay 分配的本机 device_id（pair_success.device_id），E2EE AAD sender 用它
+    val deviceId: String = ""
 )
 
 object PairingClient {
@@ -83,7 +85,8 @@ object PairingClient {
                             desktopName = json.optString("desktop_name", "Desktop"),
                             e2eePeerPubkey = json.optString("e2ee_pubkey", ""),
                             e2eePubkeySig = json.optString("e2ee_pubkey_sig", ""),
-                            desktopDeviceId = json.optString("desktop_device_id", "")
+                            desktopDeviceId = json.optString("desktop_device_id", ""),
+                            deviceId = json.optString("device_id", "")
                         ))
                         "pair_error" -> finish(PairClaimResult(
                             success = false,

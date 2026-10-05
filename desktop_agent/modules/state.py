@@ -314,7 +314,7 @@ async def listen_opencode_events_stream(
 
                     rec = tool_guard.create_approval(session_id, permission_id, tool_name, event)
                     logger.info(f"Forwarding tool approval request with Nonce to mobile: {tool_name} (call_id={permission_id})")
-                    await ws_relay.send(json.dumps({
+                    _appr_msg = {
                         "type": "tool_approval_request",
                         "session_id": session_id,
                         "call_id": permission_id,
@@ -325,7 +325,12 @@ async def listen_opencode_events_stream(
                         "raw_content": raw_diff,
                         "nonce": rec["nonce"],
                         "expires_at": rec["expires_at"]
-                    }))
+                    }
+                    # v4.6.0: E2EE 开启时审批请求（含 diff/nonce）整体加密
+                    _em_appr = _e2ee()
+                    if _em_appr is not None:
+                        _appr_msg = _em_appr.encrypt_outgoing(_appr_msg)
+                    await ws_relay.send(json.dumps(_appr_msg))
 
                 # 3. 会话空闲或执行完成 (session.idle / message.complete)
                 elif event_type in ("session.idle", "message.complete", "stream.end"):

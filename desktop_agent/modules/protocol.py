@@ -79,8 +79,16 @@ async def handle_mobile_message(
         try:
             msg_data = _em.decrypt_incoming(msg_data)
         except Exception as e:
-            logger.warning(f"E2EE 解密 incoming 失败，走明文流程: {e}")
+            logger.warning(f"E2EE 解密 incoming 异常: {e}")
+            msg_data["_e2ee_failed"] = str(e)
     action = msg_data.get("action") or msg_data.get("type")
+    # v4.6.0 P1-3 fail-closed：已协商对端后，控制类消息必须带合法 e2ee 信封，
+    # 明文 / 信封非法一律拒绝（防恶意 relay 注入指令、伪造审批）
+    if _em is not None and not _em.control_allowed(action, msg_data):
+        logger.warning(
+            f"E2EE fail-closed: 拒绝无合法信封的控制消息 action={action} "
+            f"(reason={msg_data.get('_e2ee_failed', 'no envelope')})")
+        return
     session_id = msg_data.get("session_id", "default")
     payload = msg_data.get("payload", {})
     req_id = msg_data.get("req_id", "")
@@ -332,13 +340,18 @@ async def handle_mobile_message(
         req_path = payload.get("path") or _get_file_roots()[0]
         try:
             entries = _list_dir_entries(req_path)
-            await ws_relay.send(json.dumps({
+            _msg = {
                 "type": "file_list_result",
                 "req_id": req_id,
                 "path": os.path.realpath(os.path.abspath(os.path.expanduser(req_path))),
                 "entries": entries,
                 "roots": _get_file_roots(),
-            }))
+            }
+            # v4.6.0: E2EE 开启时目录列表整体加密（不再明文过 relay）
+            _em2 = _e2ee()
+            if _em2 is not None:
+                _msg = _em2.encrypt_outgoing(_msg)
+            await ws_relay.send(json.dumps(_msg))
         except PathNotAllowedError as e:
             logger.warning(f"file_list blocked (sandbox): {req_path}")
             await ws_relay.send(json.dumps({
@@ -361,13 +374,18 @@ async def handle_mobile_message(
         req_path = payload.get("path", "")
         try:
             content, truncated = _read_text_file(req_path)
-            await ws_relay.send(json.dumps({
+            _msg = {
                 "type": "file_read_result",
                 "req_id": req_id,
                 "path": os.path.realpath(os.path.abspath(os.path.expanduser(req_path))),
                 "content": content,
                 "truncated": truncated
-            }))
+            }
+            # v4.6.0: E2EE 开启时文件内容整体加密（不再明文过 relay）
+            _em2 = _e2ee()
+            if _em2 is not None:
+                _msg = _em2.encrypt_outgoing(_msg)
+            await ws_relay.send(json.dumps(_msg))
         except PathNotAllowedError as e:
             logger.warning(f"file_read blocked (sandbox): {req_path}")
             await ws_relay.send(json.dumps({

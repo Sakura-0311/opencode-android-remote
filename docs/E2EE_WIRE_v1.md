@@ -65,3 +65,45 @@
   路由、缓冲、补发，这是设计取舍（不断线恢复能力优先）。
 - 即使 E2EE 开启，中继/网络观察者仍能看到「谁在何时发了多少字节给哪个设备」，
   只是看不到内容。用户应在「安全」设置页与配对成功提示中知晓这一点。
+
+---
+
+## 内层格式 v2（v4.6.0，P1-2/P1-3 修复）
+
+v1 的两处互操作缺陷（AAD sender 两端不一致、内层格式两端不一致）在 v4.6.0 修复。
+E2EE 默认关闭且 v1 实际不可用，故无迁移成本；v4.6.0 起只实现 v2。
+
+### AAD sender 身份统一
+
+- mobile→desktop：AAD sender = **手机的 relay device_id**
+  （`pair_success.device_id`，relay 在 `claim_pairing` 时分配；手机存入偏好，
+  加密时用它；relay 在 `device_paired` 里带上同一 `device_id`，desktop 以它为
+  peer id 保存手机公钥并做 AAD——两端一致）。
+- desktop→mobile：AAD sender = desktop 的 `device_id`
+  （`config.get_desktop_device_id()`，auth/配对时上报的同一值）。
+
+### 内层 JSON（v2）
+
+- m2d 内层：`{"action":"<action>","payload":{...},"seq":<int>}`
+  desktop 解密后用内层 `action`/`payload` 覆盖外层（外层 `action` 保留明文仅供
+  relay 兼容，desktop 以内层为准）。
+- d2m 内层：`{"type":"<type>",...原内容字段...,"seq":<int>}`
+  手机解密后把内层字段合并进外层（与 v1 的合并逻辑兼容）。
+- `seq`：按对端、按方向独立的单调递增计数器，落盘持久化；
+  接收方要求严格递增，否则视为重放/乱序丢弃（fail-closed）。
+
+### fail-closed（P1-3）
+
+- desktop 已协商对端后，以下控制类消息必须带合法 e2ee 信封，否则拒绝：
+  `send_prompt`、`cancel`、`tool_approval_response`、`create_session`、
+  `file_list`、`file_read`。未协商时沿旧明文流程。
+- d2m 加密覆盖（v2）：`stream_chunk`、`tool_approval_request`（含 diff/nonce）、
+  `file_read_result`、`file_list_result`。仍明文的：`sessions_list`（会话标题）、
+  `projects_data`、错误信息、路由元数据（见元数据声明）。
+
+### 互操作向量
+
+`tests/e2ee/interop_vectors.json`（由 `tests/e2ee/gen_interop_vectors.py` 生成，
+提交进仓库）：固定 X25519 密钥对、HKDF 派生密钥、固定 nonce 加密向量。
+Kotlin（`E2eeInteropTest`）与 Python（`test_e2ee_v2.py`）单测读取同一份向量，
+保证跨端密钥派生与加解密一致。
