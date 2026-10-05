@@ -60,11 +60,9 @@ class ErrorCodesTest {
         assertTrue("main 源码里没扫到任何 AppError 码，扫描可能失效", used.isNotEmpty())
         val table = ErrorCodes.allCodes()
         val missing = used - table
-        println("ErrorCodesTest DEBUG used=" + used.sorted())
-        println("ErrorCodesTest DEBUG tableSize=" + table.size + " missing=" + missing.sorted())
-        assertTrue(
-            "这些错误码在 ErrorCodes 表里没有文案，用户会看到通用回退：$missing",
-            missing.isEmpty()
-        )
+        // 这些错误码在 ErrorCodes 表里没有文案，用户会看到通用回退
+        if (missing.isNotEmpty()) {
+            throw AssertionError("missing=${missing.sorted()} used=${used.sorted()} tableSize=${table.size}")
+        }
     }
 }
