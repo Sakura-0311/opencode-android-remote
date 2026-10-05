@@ -9,11 +9,12 @@ import com.opencode.android.data.model.SessionItem
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.annotation.VisibleForTesting
+import com.opencode.android.coordinator.DeviceRoutingPrefs
 import com.opencode.android.coordinator.PairingPrefs
 import com.opencode.android.coordinator.TaskStatusPrefs
 
 class PreferencesManager private constructor(context: Context) : com.opencode.android.security.E2eePrefs,
-    PairingPrefs, TaskStatusPrefs {
+    PairingPrefs, TaskStatusPrefs, DeviceRoutingPrefs {
 
     // P0-3: 加密存储失败时禁止静默降级（fail-closed）。
     // securePrefs 为 null 表示加密不可用：敏感凭据（Secret / API Key / AccountId）
@@ -519,11 +520,11 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     }
 
     // v1.6 P1 项目管理中心：收藏项目
-    fun saveFavoriteProjects(ids: List<String>) {
+    override fun saveFavoriteProjects(ids: List<String>) {
         prefs.edit().putStringSet("favorite_projects", ids.toSet()).apply()
     }
 
-    fun getFavoriteProjects(): List<String> {
+    override fun getFavoriteProjects(): List<String> {
         return prefs.getStringSet("favorite_projects", emptySet())?.toList() ?: emptyList()
     }
 
@@ -666,7 +667,7 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     })
 
     /** 目标电脑 deviceId；空字符串表示未选择，走主 desktop */
-    fun saveTargetDesktopId(deviceId: String) {
+    override fun saveTargetDesktopId(deviceId: String) {
         targetDesktopStore.saveTargetDesktopId(getActiveProfileId(), deviceId)
     }
 
