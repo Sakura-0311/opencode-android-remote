@@ -5,6 +5,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencode.android.OpenCodeApp
+import com.opencode.android.coordinator.DiagnosticsCoordinator
 import com.opencode.android.data.local.PreferencesManager
 import com.opencode.android.data.model.AppError
 import com.opencode.android.data.model.AppMode
