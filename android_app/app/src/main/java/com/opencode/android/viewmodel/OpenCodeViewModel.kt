@@ -665,6 +665,13 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     fun runDiagnose() {
         _uiState.update { it.copy(diagnoseLoading = true, diagnoseOpencodeOk = null) }
         relayClient.sendDiagnose()
+        // v4.9.0: 诊断时顺手测一次延迟，弹窗里显示
+        relayClient.requestLatencyMeasure()
+    }
+
+    // v4.9.0: 延迟测量回执
+    override fun onLatencyMeasured(latencyMs: Long) {
+        _uiState.update { it.copy(relayLatencyMs = latencyMs) }
     }
 
     override fun onDiagnoseResult(reqId: String, opencodeOk: Boolean, version: String, error: String) {

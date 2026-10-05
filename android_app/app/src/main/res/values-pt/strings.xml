@@ -140,6 +140,9 @@
     <string name="diag_034">Nenhuma sessão selecionada</string>
     <string name="diag_035">Armazenamento seguro</string>
     <string name="diag_036">Desconhecido</string>
+    <string name="diag_037">Copiar diagnóstico</string>
+    <string name="diag_038">Diagnóstico copiado para a área de transferência</string>
+    <string name="diag_039">Latência: %1$d ms</string>
     <string name="diag_n01">Não configurado</string>
     <string name="diff_001">Resumo de alterações: </string>
     <string name="diff_002">Ocultar linhas inalteradas</string>

@@ -140,6 +140,9 @@
     <string name="diag_034">Aucune session sélectionnée</string>
     <string name="diag_035">Stockage sécurisé</string>
     <string name="diag_036">Inconnu</string>
+    <string name="diag_037">Copier le diagnostic</string>
+    <string name="diag_038">Diagnostic copié dans le presse-papiers</string>
+    <string name="diag_039">Latence : %1$d ms</string>
     <string name="diag_n01">Non configuré</string>
     <string name="diff_001">Aperçu des modifications : </string>
     <string name="diff_002">Réduire les lignes inchangées</string>

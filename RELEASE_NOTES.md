@@ -1,3 +1,23 @@
+# OpenCode Android Remote - Release v4.9.0（诊断中心）
+
+## 内容
+
+- **一键复制诊断信息**：诊断弹窗加「复制诊断信息」按钮，文本含 App 版本、
+  连接模式、服务器 host（脱敏）、连接状态、延迟、最近错误码、设备信息；
+  不含 secret / API key
+- **延迟测量**：应用层 ping/pong 测往返延迟，诊断弹窗显示「延迟：xx ms」
+- **10 语言**：diag_037–039 全补齐
+
+## 兼容性
+
+- 非破坏性。versionCode 40900
+
+## 验证
+
+- CI 全绿
+
+---
+
 # OpenCode Android Remote - Release v4.8.0（Android 质量）
 
 ## 内容

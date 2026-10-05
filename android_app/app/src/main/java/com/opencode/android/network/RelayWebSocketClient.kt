@@ -82,6 +82,8 @@ interface RelayListener {
     fun onFileReadResult(reqId: String, path: String, content: String, truncated: Boolean) {}
     // P2-15: 连接诊断
     fun onDiagnoseResult(reqId: String, opencodeOk: Boolean, version: String, error: String) {}
+    // v4.9.0: 延迟测量——收到服务端 pong 回执时上报往返毫秒数
+    fun onLatencyMeasured(latencyMs: Long) {}
 
     // v1.6 P1 Model/Agent 管理
     fun onConfigDataReceived(agents: List<AgentInfo>, models: List<ModelInfo>, configError: String? = null) {}
@@ -181,6 +183,25 @@ class RelayWebSocketClient(private val appContext: Context) {
     // P0-4: 连接状态机当前状态
     var connectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED
         private set
+
+    // v4.9.0: 最近一次 ping/pong 往返延迟（毫秒），未测到为 null
+    var lastLatencyMs: Long? = null
+        private set
+    private var latencyPingSentAt = 0L
+
+    /** v4.9.0: 主动发应用层 ping 测延迟，服务端回 pong 后在回调里上报 */
+    fun requestLatencyMeasure() {
+        val ws = webSocket ?: return
+        latencyPingSentAt = System.currentTimeMillis()
+        try {
+            ws.send(JSONObject().apply {
+                put("type", "ping")
+                put("timestamp", latencyPingSentAt)
+            }.toString())
+        } catch (e: Exception) {
+            latencyPingSentAt = 0L
+        }
+    }
 
     private fun setState(state: RelayConnectionState) {
         if (connectionState == state) return
@@ -600,7 +621,13 @@ class RelayWebSocketClient(private val appContext: Context) {
                     ws.send(pong.toString())
                 }
                 "pong" -> {
-                    // 服务端心跳存活回执
+                    // v4.9.0: 服务端对我们主动 ping 的回执，计算往返延迟
+                    if (latencyPingSentAt > 0) {
+                        val rtt = System.currentTimeMillis() - latencyPingSentAt
+                        latencyPingSentAt = 0L
+                        lastLatencyMs = rtt
+                        listener?.onLatencyMeasured(rtt)
+                    }
                 }
 
                 // 桌面状态与系统消息

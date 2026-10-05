@@ -140,6 +140,9 @@
     <string name="diag_034">Keine Sitzung ausgewählt</string>
     <string name="diag_035">Sicherer Speicher</string>
     <string name="diag_036">Unbekannt</string>
+    <string name="diag_037">Diagnose kopieren</string>
+    <string name="diag_038">Diagnose in Zwischenablage kopiert</string>
+    <string name="diag_039">Latenz: %1$d ms</string>
     <string name="diag_n01">Nicht konfiguriert</string>
     <string name="diff_001">Änderungsübersicht: </string>
     <string name="diff_002">Unveränderte Zeilen einklappen</string>

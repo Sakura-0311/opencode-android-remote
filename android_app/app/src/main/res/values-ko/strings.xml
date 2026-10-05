@@ -141,6 +141,9 @@
     <string name="diag_034">세션을 선택하지 않았습니다</string>
     <string name="diag_035">보안 저장소</string>
     <string name="diag_036">알 수 없음</string>
+    <string name="diag_037">진단 정보 복사</string>
+    <string name="diag_038">진단 정보가 클립보드에 복사됨</string>
+    <string name="diag_039">지연: %1$d ms</string>
     <string name="diag_n01">구성되지 않음</string>
     <string name="diff_001">변경 개요: </string>
     <string name="diff_002">변경 없는 줄 접기</string>

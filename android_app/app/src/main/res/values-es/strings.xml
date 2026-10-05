@@ -140,6 +140,9 @@
     <string name="diag_034">Sin sesión seleccionada</string>
     <string name="diag_035">Almacenamiento seguro</string>
     <string name="diag_036">Desconocido</string>
+    <string name="diag_037">Copiar diagnóstico</string>
+    <string name="diag_038">Diagnóstico copiado al portapapeles</string>
+    <string name="diag_039">Latencia: %1$d ms</string>
     <string name="diag_n01">Sin configurar</string>
     <string name="diff_001">Resumen de cambios: </string>
     <string name="diff_002">Ocultar líneas sin cambios</string>

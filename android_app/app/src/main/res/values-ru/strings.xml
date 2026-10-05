@@ -141,6 +141,9 @@
     <string name="diag_034">Сессия не выбрана</string>
     <string name="diag_035">Безопасное хранилище</string>
     <string name="diag_036">Неизвестно</string>
+    <string name="diag_037">Копировать диагностику</string>
+    <string name="diag_038">Диагностика скопирована в буфер обмена</string>
+    <string name="diag_039">Задержка: %1$d ms</string>
     <string name="diag_n01">Не настроено</string>
     <string name="diff_001">Обзор изменений: </string>
     <string name="diff_002">Свернуть неизменённые строки</string>

@@ -140,6 +140,9 @@
     <string name="diag_034">未选择会话</string>
     <string name="diag_035">安全存储</string>
     <string name="diag_036">未知</string>
+    <string name="diag_037">复制诊断信息</string>
+    <string name="diag_038">诊断信息已复制到剪贴板</string>
+    <string name="diag_039">延迟：%1$d ms</string>
     <string name="diag_n01">未配置</string>
     <string name="diff_001">改动概览: </string>
     <string name="diff_002">收起未变动行</string>

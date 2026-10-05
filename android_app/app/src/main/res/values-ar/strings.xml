@@ -140,6 +140,9 @@
     <string name="diag_034">لم تُختر جلسة</string>
     <string name="diag_035">التخزين الآمن</string>
     <string name="diag_036">غير معروف</string>
+    <string name="diag_037">نسخ التشخيص</string>
+    <string name="diag_038">تم نسخ التشخيص إلى الحافظة</string>
+    <string name="diag_039">زمن الاستجابة: %1$d مللي ثانية</string>
     <string name="diag_n01">غير مُهيأ</string>
     <string name="diff_001">نظرة عامة على التغييرات: </string>
     <string name="diff_002">طي الأسطر غير المتغيرة</string>

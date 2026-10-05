@@ -141,6 +141,9 @@
     <string name="diag_034">セッションが選択されていません</string>
     <string name="diag_035">セキュアストレージ</string>
     <string name="diag_036">不明</string>
+    <string name="diag_037">診断情報をコピー</string>
+    <string name="diag_038">診断情報をクリップボードにコピーしました</string>
+    <string name="diag_039">遅延：%1$d ms</string>
     <string name="diag_n01">未設定</string>
     <string name="diff_001">変更概要: </string>
     <string name="diff_002">変更なしの行を折りたたむ</string>

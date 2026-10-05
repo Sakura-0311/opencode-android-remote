@@ -1,9 +1,13 @@
 package com.opencode.android.ui.screens
 
 import com.opencode.android.R
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -124,6 +128,13 @@ fun ConnectionDiagnoseDialog(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(stringResource(R.string.diag_004), fontSize = 12.sp)
                     } else {
+                        // v4.9.0: 一键复制诊断信息（脱敏，不含 secret/key）
+                        TextButton(onClick = {
+                            copyDiagnosticInfo(context, uiState)
+                            Toast.makeText(context, context.getString(R.string.diag_038), Toast.LENGTH_SHORT).show()
+                        }) {
+                            Text(stringResource(R.string.diag_037))
+                        }
                         TextButton(onClick = onRunDiagnose) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -173,7 +184,7 @@ private fun buildLayers(uiState: OpenCodeUiState, phoneNetOk: Boolean): List<Dia
                 RelayConnectionState.AUTH_FAILED -> stringResource(R.string.diag_017)
                 RelayConnectionState.AUTHENTICATED,
                 RelayConnectionState.DESKTOP_ONLINE -> stringResource(R.string.diag_018)
-            }
+            } + (uiState.relayLatencyMs?.let { "\n${stringResource(R.string.diag_039, it)}" } ?: "")
         ),
         DiagnoseLayer(
             name = stringResource(R.string.diag_019),
@@ -274,4 +285,48 @@ private fun isPhoneNetworkAvailable(context: Context): Boolean {
     } catch (e: Exception) {
         false
     }
+}
+
+/**
+ * v4.9.0: 一键复制诊断信息。中文标签，地址只取 host 脱敏，
+ * 不含 secret / API key 等敏感字段。
+ */
+private fun copyDiagnosticInfo(context: Context, uiState: OpenCodeUiState) {
+    val appVersion = try {
+        val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+        pi.versionName ?: "?"
+    } catch (e: Exception) {
+        "?"
+    }
+    val mode = when (uiState.appMode) {
+        com.opencode.android.data.model.AppMode.DESKTOP_RELAY -> "电脑中继"
+        com.opencode.android.data.model.AppMode.CLOUD_HOSTED -> "云端直连"
+    }
+    // 地址脱敏：只显示 host，不带路径参数
+    fun hostOf(url: String): String {
+        if (url.isBlank()) return "未配置"
+        return try {
+            val u = java.net.URI(url)
+            u.host ?: url
+        } catch (e: Exception) {
+            url
+        }
+    }
+    val address = when (uiState.appMode) {
+        com.opencode.android.data.model.AppMode.DESKTOP_RELAY -> hostOf(uiState.relayUrl)
+        com.opencode.android.data.model.AppMode.CLOUD_HOSTED -> hostOf(uiState.cloudServerUrl)
+    }
+    val latency = uiState.relayLatencyMs?.let { "$it ms" } ?: "--"
+    val text = buildString {
+        appendLine("App 版本：$appVersion")
+        appendLine("连接模式：$mode")
+        appendLine("服务器地址：$address")
+        appendLine("连接状态：${uiState.relayConnectionState}")
+        appendLine("延迟：$latency")
+        appendLine("最近错误：${uiState.appError?.code ?: "无"}")
+        appendLine("Android 版本：${Build.VERSION.RELEASE}")
+        append("设备型号：${Build.MODEL}")
+    }
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(ClipData.newPlainText("诊断信息", text))
 }
