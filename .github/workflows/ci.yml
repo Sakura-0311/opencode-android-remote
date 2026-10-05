@@ -32,6 +32,11 @@ jobs:
       - name: Run sandbox blacklist tests
         # 文件沙盒黑名单参数化单测（11 路径 + 目录列表过滤）
         run: python desktop_agent/modules/test_sandbox.py
+      - name: Lint undefined names (ruff F821/F811)
+        # 未定义名 / 重复定义检查：拦住缺 import 类问题（如 protocol.py 的 NameError）
+        run: |
+          pip install ruff
+          ruff check --select F821,F811 desktop_agent relay_server
 
   supply-chain:
     # v2.6: 供应链安全——秘密扫描（仅 docs/，防文档泄密）与依赖漏洞扫描

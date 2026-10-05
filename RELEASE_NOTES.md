@@ -1,3 +1,78 @@
+# OpenCode Android Remote - Release v4.5.0（工具链升级 + 序号追踪拆分）
+
+## 内容
+
+- **工具链升级**：AGP 8.2.2→8.5.2、Kotlin 1.9.22→2.0.21、compileSdk/targetSdk 34→35、
+  Compose BOM 2024.02.00→2024.10.01；Compose 编译器改走 `org.jetbrains.kotlin.plugin.compose`
+  插件（Kotlin 2.0 不再支持旧写法）；minSdk 保持 24
+- **序号追踪拆分**：`RelaySeqTracker`（去重+纪元重置，纯逻辑可 JVM 单测）与
+  `RelayMessageParser` 拆分，8+9 个新单测；`RelayWebSocketClient` 改调，行为不变
+- **relay 工程项**：requirements 锁版本（fastapi/uvicorn/websockets）；Dockerfile 非 root
+  用户 appuser；cloud_server compose 删废弃 version 字段、opencode 镜像 pin 到 digest；
+  配对页 relay 地址默认值留空，公网 release 请用 wss；fileops.py 删未使用导入、
+  import 时不再无条件 basicConfig
+
+## 兼容性
+
+- 非破坏性；覆盖升级，无需迁移。versionCode 40500
+
+## 验证
+
+- CI 全绿；APK 验签通过（包名/40500/指纹 D9:21:…9E:78 与历史一致，可覆盖升级）
+
+---
+
+# OpenCode Android Remote - Release v4.3.3（PreferencesManager 单例修复）
+
+## 内容
+
+- 修复模拟升级挖出的真 bug：v4.1 在 `OpenCodeApp.onCreate` 又 new 了一个
+  PreferencesManager，与 ViewModel 里的实例并发初始化导致 keyset 竞争，加密存储
+  keyset 写坏，升级迁移失败回退 LEGACY
+
+## 兼容性
+
+- 非破坏性。versionCode 40303
+
+## 验证
+
+- v3.1.0→v4.3.3 upgrade 复验通过（迁移无回退，keyset 正常写入，单例修复生效）；
+  验签通过（包名/40303/指纹 D9:21:…9E:78）
+
+---
+
+# OpenCode Android Remote - Release v4.3.2（relay 配对验签透传修复）
+
+## 内容
+
+- relay 端修复：E2EE 配对时 `e2ee_pubkey_sig` 透传补漏（mobile 验签永远失败的真 bug）；
+  App 端无代码变更，仅版本号递增
+
+## 兼容性
+
+- 非破坏性。versionCode 40302
+
+## 验证
+
+- 验签通过（包名/40302/指纹 D9:21:…9E:78）
+
+---
+
+# OpenCode Android Remote - Release v4.3.1（发版事故修复）
+
+## 内容
+
+- v4.3.0 的 release APK 被替换过（同一版本号两份不同构建），以 4.3.1 重新发版
+  保证版本历史干净；代码与 v4.3.0 加固版一致
+- CI 新增版本守卫（tag 必须等于 appVersionName、禁止复用已发布 tag）；
+  新增 PR 模板（含「是否需要发版」勾选项）
+
+## 兼容性
+
+- 非破坏性。versionCode 40301
+
+---
+
 # OpenCode Android Remote - Release v4.3.0（多语言）
 
 ## 内容
@@ -20,28 +95,17 @@
 
 ---
 
-# OpenCode Android Remote - Release v4.2.0（E2EE 运行时开关）
+# OpenCode Android Remote - Release v4.2.0（E2EE 运行时开关 + 安全审计优化）
 
 ## 内容
+
+### E2EE 运行时开关
 
 - **E2EE 改为运行时开关**：菜单 → 端到端加密（默认关闭），无需重新编译
   - 开启后需重新配对以交换 X25519 公钥；desktop 侧 `E2EE_ENABLED=1` 本来就是运行时
   - 开关状态变更下次连接生效；任一端未启用则走明文（原有降级）
 
-## 兼容性
-
-- 非破坏性；默认关闭，无行为变化
-
-## 验证
-
-- CI 全绿；契约测试 25/25；单测 E2eeCryptoTest 7 项；模拟器冒烟（待 CI）
-- 真机联调：未验证
-
----
-
-# OpenCode Android Remote - Release v4.2.0（安全审计优化）
-
-## 内容（全部非破坏性；E2EE 相关文件未动）
+### 安全审计优化（全部非破坏性；E2EE 相关文件未动）
 
 - **V2 桌面端系统级密钥存储**：`desktop_agent` 加 `keyring` **可选依赖**（try-import）——
   优先 Windows Credential Manager / macOS Keychain，成功则不再落盘；无依赖或后端不可用时

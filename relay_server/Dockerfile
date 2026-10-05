@@ -21,6 +21,11 @@ RUN useradd -m -u 1000 appuser \
     && chown -R appuser:appuser /app /home/appuser
 USER appuser
 
+# 状态文件与崩溃上报目录指向持久卷（compose 挂载 relay-data:/app/data）；
+# 不设则默认写家目录与 /app 下，容器重建即丢（配对设备密钥会失效）。
+ENV RELAY_STATE_FILE=/app/data/relay_state.json \
+    RELAY_CRASH_REPORT_DIR=/app/data/crash_reports
+
 EXPOSE 8765
 
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8765"]

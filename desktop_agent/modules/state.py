@@ -276,12 +276,29 @@ async def listen_opencode_events_stream(
 
                 # 2. 工具权限请求 (permission.asked / tool_approval)
                 elif event_type in ("permission.asked", "permission.request", "permission"):
-                    permission_id = event.get("id", event.get("permission_id", secrets.token_hex(8)))
-                    tool_info = event.get("tool", {})
-                    tool_name = tool_info.get("name", event.get("tool_name", "sensitive_tool"))
-                    file_path = event.get("file_path", tool_info.get("path"))
-                    summary = event.get("summary", tool_info.get("description", "申请执行本地文件修改或终端命令"))
-                    raw_diff = event.get("diff", event.get("raw_content", ""))
+                    # 与 _extract_event_delta 一致：优先 properties，顶层字段兜底
+                    # （真实事件结构待抓包确认，双兼容保证两种结构都能解析）
+                    _props = event.get("properties") or {}
+                    if not isinstance(_props, dict):
+                        _props = {}
+                    def _pkey(*keys):
+                        for k in keys:
+                            v = _props.get(k)
+                            if v:
+                                return v
+                        for k in keys:
+                            v = event.get(k)
+                            if v:
+                                return v
+                        return None
+                    permission_id = _pkey("id", "permission_id") or secrets.token_hex(8)
+                    tool_info = _props.get("tool") or event.get("tool") or {}
+                    if not isinstance(tool_info, dict):
+                        tool_info = {}
+                    tool_name = tool_info.get("name") or _pkey("tool_name") or "sensitive_tool"
+                    file_path = _pkey("file_path") or tool_info.get("path")
+                    summary = _pkey("summary") or tool_info.get("description") or "申请执行本地文件修改或终端命令"
+                    raw_diff = _pkey("diff", "raw_content") or ""
 
                     diff_lines = []
                     if raw_diff:

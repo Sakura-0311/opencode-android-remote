@@ -62,10 +62,11 @@ def _e2ee():
     return _e2ee_mod
 from modules.fileops import (
     _resolve_sandboxed_path, _list_dir_entries, _read_text_file, PathNotAllowedError,
+    _get_file_roots, _is_duplicate_client_msg,
 )
 from modules.state import (
     tool_guard, known_session_ids, listen_opencode_events_stream,
-    _extract_event_session, _extract_event_delta,
+    _extract_event_session, _extract_event_delta, task_manager,
 )
 async def handle_mobile_message(
     msg_data: dict,
@@ -293,7 +294,12 @@ async def handle_mobile_message(
     elif action == "tool_approval_response":
         call_id = payload.get("call_id") or msg_data.get("call_id")
         nonce = payload.get("nonce", "")
-        is_approved = payload.get("approved", True)
+        # fail-closed：approved 缺失或非布尔值一律按拒绝处理（缺省同意是安全隐患）
+        approved = payload.get("approved")
+        if not isinstance(approved, bool):
+            logger.warning(f"Approval response for {call_id}: missing/invalid approved flag, treating as reject")
+            approved = False
+        is_approved = approved
         reason = payload.get("reason", "")
         logger.info(f"Handling approval decision for permission {call_id}: approved={is_approved}")
         if not call_id:
