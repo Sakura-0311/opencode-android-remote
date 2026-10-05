@@ -42,14 +42,14 @@ import com.opencode.android.util.TargetSwitchPolicy
 import com.opencode.android.util.DesktopRoutingPolicy
 import com.opencode.android.util.SessionReducer
 import com.opencode.android.coordinator.PairingCoordinator
+import com.opencode.android.coordinator.DeviceRoutingCoordinator
+import com.opencode.android.coordinator.DeviceRoutingSystem
 import com.opencode.android.coordinator.StateDispatcher
 import com.opencode.android.coordinator.TaskStatusController
 import com.opencode.android.coordinator.ViewModelPairingTransports
 import com.opencode.android.util.SendMessageReducer
 import com.opencode.android.util.StreamEndReducer
-import com.opencode.android.util.DeviceListReducer
 import com.opencode.android.util.ConnectionStateReducer
-import com.opencode.android.util.ProjectsReducer
 import com.opencode.android.util.FeatureFlags
 import com.opencode.android.network.RelayConnectionState
 import com.opencode.android.network.RelayWebSocketClient
@@ -120,6 +120,20 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     // 阶段 2: 任务状态流转（ViewModel 保留同名私有方法做转发）
     private val taskStatusController: TaskStatusController by lazy {
         TaskStatusController(prefs = prefsManager, dispatch = stateDispatcher)
+    }
+
+    // 阶段 3: 设备/桌面/项目回调收拢（ViewModel 保留同名方法做转发）
+    private val deviceRoutingCoordinator: DeviceRoutingCoordinator by lazy {
+        DeviceRoutingCoordinator(
+            prefs = prefsManager,
+            system = object : DeviceRoutingSystem {
+                override fun stopTaskProgress() =
+                    OpenCodeKeepAliveService.stopTaskProgress(getApplication())
+            },
+            dispatch = stateDispatcher,
+            onPeerRefresh = { pairingCoordinator.refreshE2eePeerReady() },
+            maxMessagesCount = MAX_MESSAGES_COUNT,
+        )
     }
 
     /** v3.0: 按当前 appMode 选择传输（transport 切换的唯一决策点） */
@@ -932,9 +946,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         relayClient.renameDeviceById(deviceId, oldName, newName)
     }
 
-    override fun onDeviceListReceived(devices: List<DeviceInfo>) {
-        _uiState.update { it.copy(pairedDevices = devices) }
-    }
+    override fun onDeviceListReceived(devices: List<DeviceInfo>) =
+        deviceRoutingCoordinator.onDeviceListReceived(devices)
 
     override fun onDeviceRevoked(deviceName: String) {
         // v4.1: 撤销设备时清理其 E2EE 公钥（按 deviceName 查 deviceId）
@@ -1008,52 +1021,14 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    override fun onDesktopList(desktops: List<DesktopInfo>) {
-        val prevTarget = _uiState.value.targetDesktopId
-        // 已选目标不在在线列表中 → 清空选择，回主 desktop 路由
-        // 阶段 1: 存活判定委托 DeviceListReducer
-        val (targetAlive, _) = DeviceListReducer.resolveTarget(prevTarget, desktops)
-        if (!targetAlive) {
-            prefsManager.saveTargetDesktopId("")
-            AppLog.i("DesktopRouting", "target $prevTarget offline, fallback to primary")
-        }
-        _uiState.update { DeviceListReducer.applyDesktopList(it, desktops) }
-        refreshE2eePeerReady()
-    }
+    override fun onDesktopList(desktops: List<DesktopInfo>) =
+        deviceRoutingCoordinator.onDesktopList(desktops)
 
-    /** v4.3 M-5: 按当前目标（targetDesktopId 或主 desktop）刷新 E2EE 就绪状态。 */
     /** v4.3 M-5: 按当前目标刷新 E2EE 就绪状态。阶段 2: 实现已迁入 PairingCoordinator。 */
     private fun refreshE2eePeerReady() = pairingCoordinator.refreshE2eePeerReady()
 
-    override fun onTargetDesktopOffline(targetDeviceId: String, message: String) {
-        OpenCodeKeepAliveService.stopTaskProgress(getApplication())
-        val targetName = _uiState.value.desktopList
-            .firstOrNull { it.deviceId == targetDeviceId }
-            ?.deviceName.orEmpty()
-        val app = getApplication<Application>()
-        val hint = DesktopRoutingPolicy.offlineHint(
-            targetName, targetDeviceId, message,
-            app.getString(R.string.route_001),
-            app.getString(R.string.route_002),
-            app.getString(R.string.route_003)
-        )
-        AppLog.w("DesktopRouting", "target offline: $hint")
-        _uiState.update { state ->
-            val sysMsg = ChatMessage(
-                id = UUID.randomUUID().toString(),
-                role = MessageRole.SYSTEM,
-                content = getApplication<Application>().getString(R.string.vm_039, hint),
-                isError = true
-            )
-            state.copy(
-                messages = (state.messages + sysMsg).takeLast(MAX_MESSAGES_COUNT),
-                isGenerating = false,
-                // 复用既有 appError 展示机制
-                appError = AppError("DESKTOP_OFFLINE", hint),
-                targetOfflineHint = hint
-            )
-        }
-    }
+    override fun onTargetDesktopOffline(targetDeviceId: String, message: String) =
+        deviceRoutingCoordinator.onTargetDesktopOffline(targetDeviceId, message)
 
     fun clearTargetOfflineHint() {
         _uiState.update { it.copy(targetOfflineHint = null) }
@@ -1108,18 +1083,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun toggleFavoriteProject(projectId: String) {
-        // 阶段 1: 收藏切换委托 ProjectsReducer（返回不可变集合）
-        val updated = ProjectsReducer.toggleFavorite(_uiState.value.favoriteProjectIds, projectId)
-        prefsManager.saveFavoriteProjects(updated.toList())
-        _uiState.update { it.copy(favoriteProjectIds = updated) }
-    }
+    /** 项目收藏切换。阶段 3: 实现已迁入 DeviceRoutingCoordinator。 */
+    fun toggleFavoriteProject(projectId: String) =
+        deviceRoutingCoordinator.toggleFavoriteProject(projectId)
 
-    override fun onProjectsDataReceived(projects: List<ProjectInfo>, projectsError: String?) {
-        // 阶段 1: 纯状态部分委托 ProjectsReducer
-        val favorites = prefsManager.getFavoriteProjects().toSet()
-        _uiState.update { ProjectsReducer.applyProjectsData(it, projects, projectsError, favorites) }
-    }
+    override fun onProjectsDataReceived(projects: List<ProjectInfo>, projectsError: String?) =
+        deviceRoutingCoordinator.onProjectsDataReceived(projects, projectsError)
 
     // =========================================================================
     // v1.6 P1 Model/Agent 管理
