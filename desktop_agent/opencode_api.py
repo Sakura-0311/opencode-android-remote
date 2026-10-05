@@ -4,6 +4,8 @@ import logging
 from typing import AsyncGenerator, List, Dict, Any, Tuple, Optional
 import aiohttp
 
+from endpoints import build_url, ENDPOINTS
+
 logger = logging.getLogger("OpenCodeApi")
 
 DEFAULT_OPENCODE_BASE_URL = "http://127.0.0.1:4096"
@@ -28,8 +30,7 @@ async def check_opencode_health(
     严格请求真实端点 GET /global/health
     只有 HTTP 200 且返回正常才判为健康，绝不将 404/500 等异常状态码伪装为成功！
     """
-    clean_url = base_url.rstrip("/")
-    health_url = f"{clean_url}/global/health"
+    health_url = build_url("health", base_url)
     headers = get_auth_headers(password)
 
     try:
@@ -63,8 +64,7 @@ async def query_sessions(
     请求真实端点 GET /session
     返回真实的 OpenCode 会话列表，失败时返回空列表，绝不硬编码虚假会话冒充真实数据！
     """
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/session"
+    url = build_url("session_list", base_url)
     headers = get_auth_headers(password)
 
     try:
@@ -92,8 +92,7 @@ async def create_session(
     """
     调用真实端点 POST /session 创建真实会话
     """
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/session"
+    url = build_url("session_create", base_url)
     headers = get_auth_headers(password)
     payload = {"title": title}
 
@@ -113,8 +112,7 @@ async def abort_session(
     """
     调用真实端点 POST /session/:id/abort 真正停止底层正在运行的模型生成与工具执行
     """
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/session/{session_id}/abort"
+    url = build_url("session_abort", base_url, id=session_id)
     headers = get_auth_headers(password)
 
     try:
@@ -143,8 +141,7 @@ async def respond_to_permission(
     旧代码多发的 action/reason 字段会被严格服务端 400 拒绝。
     映射：同意 -> "once"，拒绝 -> "reject"；reason 仅记本地日志，不发送。
     """
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/session/{session_id}/permissions/{permission_id}"
+    url = build_url("permission_respond", base_url, id=session_id, permissionID=permission_id)
     headers = get_auth_headers(password)
     payload = {"response": "once" if allow else "reject"}
     if reason:
@@ -176,8 +173,7 @@ async def send_session_message_async(
     超过 300 秒的长任务会被误报 EXECUTION_ERROR。输出全量走 /event 事件流。
     v1.6 P1: 支持按消息指定 model {providerID, modelID} 与 agent（prompt_async 原生支持）。
     """
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/session/{session_id}/prompt_async"
+    url = build_url("prompt_async", base_url, id=session_id)
     headers = get_auth_headers(password)
     payload = {
         "parts": [
@@ -221,7 +217,7 @@ async def _resolve_event_url(
     clean = base_url.rstrip("/")
     headers = get_auth_headers(password)
     headers["Accept"] = "text/event-stream"
-    for path in ("/event", "/global/event"):
+    for path in ENDPOINTS["event_stream"].candidates:  # B1: 候选路径走配置表
         try:
             async with session.get(
                 f"{clean}{path}", headers=headers,
@@ -301,8 +297,7 @@ async def get_agents(
     password: Optional[str] = None,
 ) -> tuple:
     """GET /agent — 获取可用 Agent 列表（含自定义 Agent）。返回 (agents, error)。"""
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/agent"
+    url = build_url("agent_list", base_url)
     headers = get_auth_headers(password)
     try:
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
@@ -322,8 +317,7 @@ async def get_providers(
     password: Optional[str] = None,
 ) -> tuple:
     """GET /config/providers — 获取 Provider 与 Model 列表（动态，非硬编码）。返回 (providers, error)。"""
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/config/providers"
+    url = build_url("providers", base_url)
     headers = get_auth_headers(password)
     try:
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
@@ -345,8 +339,7 @@ async def get_projects(
     password: Optional[str] = None,
 ) -> tuple:
     """GET /project — 获取项目列表。返回 (projects, error)。"""
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/project"
+    url = build_url("project_list", base_url)
     headers = get_auth_headers(password)
     try:
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
@@ -366,8 +359,7 @@ async def get_current_project(
     password: Optional[str] = None,
 ) -> tuple:
     """GET /project/current — 获取当前项目。返回 (project, error)。"""
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/project/current"
+    url = build_url("project_current", base_url)
     headers = get_auth_headers(password)
     try:
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
@@ -386,8 +378,7 @@ async def get_vcs_info(
     password: Optional[str] = None,
 ) -> tuple:
     """GET /vcs — 获取当前项目的 Git 分支与工作区状态（项目管理中心用）。返回 (vcs, error)。"""
-    clean_url = base_url.rstrip("/")
-    url = f"{clean_url}/vcs"
+    url = build_url("vcs", base_url)
     headers = get_auth_headers(password)
     try:
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:

@@ -26,6 +26,8 @@ from opencode_api import (
     get_current_project,
     get_vcs_info,
 )
+# B1: 上游契约探测（GET /doc）
+from endpoints import ENDPOINTS, verify_contract
 
 logging.basicConfig(
     level=logging.INFO,
@@ -459,6 +461,19 @@ async def run_desktop_agent(account_id: str, secret: str, relay_url: str):
         else:
             logger.warning(f"⚠ OpenCode API 自检警示: {err}")
             logger.warning("  请确保已启动真实服务: opencode serve --port 4096")
+
+        # B1: 上游契约探测——GET /doc 拉取 OpenAPI 规范，关键端点缺失则拒绝启动
+        contract = await verify_contract(http_session, config.OPENCODE_API_URL, config.OPENCODE_PASSWORD)
+        if not contract.doc_available:
+            logger.warning("⚠ opencode 未提供 /doc 规范，端点契约校验跳过（老版本兼容模式）")
+        elif not contract.ok:
+            raise RuntimeError(
+                "opencode 上游契约不兼容，缺失关键端点，拒绝启动:\n  "
+                + "\n  ".join(contract.missing)
+                + f"\n  请升级 opencode（/doc 报告版本: {contract.opencode_version}）"
+            )
+        else:
+            logger.info(f"✔ opencode 端点契约校验通过（{len(ENDPOINTS)} 个端点，版本 {contract.opencode_version}）")
 
         while True:
             try:

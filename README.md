@@ -17,6 +17,9 @@
    ```bash
    opencode serve --port 4096
    ```
+   > **上游兼容版本（B1）**：已验证 opencode **1.18.x**（契约以 1.18.34 的 `/doc` 为准）。
+   > agent 启动时会自动拉取 `GET /doc` 做端点契约校验：关键端点缺失则**拒绝启动并列出缺失项**；
+   > 老版本无 `/doc` 时降级为警告。端点配置表见 `desktop_agent/endpoints.py`。
 2. **启动电脑端代理桥接**：
    ```bash
    cd desktop_agent

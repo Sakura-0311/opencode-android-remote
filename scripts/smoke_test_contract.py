@@ -26,6 +26,16 @@ from desktop_agent import opencode_api
 import aiohttp
 
 
+# B1: /doc 规范 mock——按 ENDPOINTS 配置表生成，保证「规范」与「代码用到的端点」同源
+def _mock_openapi_spec():
+    from endpoints import ENDPOINTS
+    paths = {}
+    for name, ep in ENDPOINTS.items():
+        for p in (ep.candidates if ep.candidates else (ep.path,)):
+            paths.setdefault(p, {})[ep.method.lower()] = {"summary": f"mock {name}"}
+    return {"openapi": "3.0.0", "info": {"version": "1.18.34-mock"}, "paths": paths}
+
+
 class MockOpenCodeHandler(BaseHTTPRequestHandler):
     sessions = [{"id": "ses_01JABCDEF0123456789", "title": "Real OpenCode Workspace"}]
     aborted_sessions = set()
@@ -36,7 +46,10 @@ class MockOpenCodeHandler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path == "/global/health":
+        if self.path == "/doc":
+            # B1: 返回与 ENDPOINTS 同源的 OpenAPI 规范，供 verify_contract 真实校验
+            self._json(200, _mock_openapi_spec())
+        elif self.path == "/global/health":
             # N-4: mock 返回官方形状 {"healthy": true, "version": ...}，与真实一致
             self._json(200, {"healthy": True, "version": "1.0.4"})
         elif self.path == "/session":
@@ -214,6 +227,43 @@ async def run_smoke_tests():
                 http_session, base_url + "/nonexistent", None)
             assert bad_agents == [] and bad_err is not None, "N-6: 404 时应返回 error"
             print(f"✔ 12. N-6 error visibility passed (error={bad_err})")
+
+            # 13. B1 正向：verify_contract 打 mock /doc，全量端点通过
+            from endpoints import ENDPOINTS, verify_contract, build_url
+            contract = await verify_contract(http_session, base_url, None)
+            assert contract.doc_available and contract.ok, f"B1 契约校验失败: {contract.missing}"
+            assert not contract.missing
+            print(f"✔ 13. B1 verify_contract passed ({len(ENDPOINTS)} endpoints, version={contract.opencode_version})")
+
+            # 14. B1 负向：规范缺 /session/{id}/prompt_async -> missing 必须列出它
+            class _FakeResp:
+                def __init__(self, status, payload):
+                    self.status, self._p = status, payload
+                async def __aenter__(self): return self
+                async def __aexit__(self, *a): return False
+                async def json(self): return self._p
+            class _FakeSession:
+                def __init__(self, spec): self._spec = spec
+                def get(self, url, headers=None, timeout=None):
+                    return _FakeResp(200, self._spec)
+            bad_spec = _mock_openapi_spec()
+            del bad_spec["paths"]["/session/{id}/prompt_async"]
+            bad_contract = await verify_contract(_FakeSession(bad_spec), base_url, None)
+            assert not bad_contract.ok, "B1: 缺端点时必须 ok=False"
+            assert any("prompt_async" in m for m in bad_contract.missing), \
+                f"B1: missing 未列出 prompt_async: {bad_contract.missing}"
+            print(f"✔ 14. B1 verify_contract negative passed (missing={bad_contract.missing})")
+
+            # 15. B1 真实规范比对：ENDPOINTS 每一项都被真实代码使用；源码无硬编码端点字面量
+            src = open(os.path.join(DESKTOP_AGENT_DIR, "opencode_api.py"), encoding="utf-8").read()
+            unused = [n for n in ENDPOINTS
+                      if f'build_url("{n}"' not in src and f'ENDPOINTS["{n}"]' not in src]
+            assert not unused, f"B1: ENDPOINTS 有未被代码使用的端点: {unused}"
+            import re as _re
+            lits = [(i + 1, ln.strip()) for i, ln in enumerate(src.splitlines())
+                    if _re.search(r'"/(session|event|agent|project|vcs|config|global)/', ln.split("#")[0])]
+            assert not lits, f"B1: 发现硬编码端点字面量: {lits}"
+            print(f"✔ 15. B1 spec-code alignment passed (all {len(ENDPOINTS)} endpoints used, no literals)")
     finally:
         server.shutdown()
 
