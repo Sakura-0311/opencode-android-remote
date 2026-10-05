@@ -21,7 +21,6 @@ import com.opencode.android.network.CloudApiClient
 import com.opencode.android.network.CloudStreamListener
 import com.opencode.android.network.CloudConnectionState
 import com.opencode.android.util.OpLog
-import com.opencode.android.util.TAG_ALL
 import com.opencode.android.util.ConfigImportExport
 import com.opencode.android.data.model.ConnectionProfile
 import com.opencode.android.network.DeviceInfo
@@ -44,6 +43,7 @@ import com.opencode.android.util.ApprovalReducer
 import com.opencode.android.util.StreamReducer
 import com.opencode.android.util.TargetSwitchPolicy
 import com.opencode.android.util.DesktopRoutingPolicy
+import com.opencode.android.util.SessionReducer
 import com.opencode.android.util.FeatureFlags
 import com.opencode.android.network.RelayConnectionState
 import com.opencode.android.network.RelayWebSocketClient
@@ -192,49 +192,40 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     // =========================================================================
 
     fun setTagFilter(tag: String?) {
-        // v4.3 M-4: 按稳定 key 过滤
-        val finalTag = if (tag == TAG_ALL) null else tag
-        _uiState.update { it.copy(selectedTagFilter = finalTag) }
+        // v4.3 M-4: 按稳定 key 过滤；B2: 归一化抽到 SessionReducer
+        _uiState.update { it.copy(selectedTagFilter = SessionReducer.normalizeTagFilter(tag)) }
     }
 
     fun togglePinSession(sessionId: String) {
         _uiState.update { state ->
-            val updated = state.availableSessions.map { s ->
-                if (s.id == sessionId) s.copy(isPinned = !s.isPinned, updatedAt = System.currentTimeMillis()) else s
-            }
+            val updated = SessionReducer.togglePin(state.availableSessions, sessionId, System.currentTimeMillis())
             prefsManager.saveSessions(updated)
-            state.copy(availableSessions = sortSessions(updated))
+            state.copy(availableSessions = SessionReducer.sortSessions(updated))
         }
     }
 
     fun archiveSession(sessionId: String) {
         _uiState.update { state ->
-            val updated = state.availableSessions.map { s ->
-                if (s.id == sessionId) s.copy(isArchived = true, updatedAt = System.currentTimeMillis()) else s
-            }
+            val updated = SessionReducer.archive(state.availableSessions, sessionId, System.currentTimeMillis())
             prefsManager.saveSessions(updated)
-            state.copy(availableSessions = sortSessions(updated))
+            state.copy(availableSessions = SessionReducer.sortSessions(updated))
         }
     }
 
     fun batchArchiveOldSessions() {
         _uiState.update { state ->
-            val updated = state.availableSessions.map { s ->
-                if (!s.isPinned && s.id != state.currentSessionId) s.copy(isArchived = true) else s
-            }
+            val updated = SessionReducer.batchArchive(state.availableSessions, state.currentSessionId)
             prefsManager.saveSessions(updated)
-            state.copy(availableSessions = sortSessions(updated))
+            state.copy(availableSessions = SessionReducer.sortSessions(updated))
         }
     }
 
     fun setSessionTag(sessionId: String, newTag: String) {
         _uiState.update { state ->
-            val updated = state.availableSessions.map { s ->
-                if (s.id == sessionId) s.copy(tag = newTag, updatedAt = System.currentTimeMillis()) else s
-            }
+            val updated = SessionReducer.setTag(state.availableSessions, sessionId, newTag, System.currentTimeMillis())
             val tags = (state.availableTags + newTag).distinct()
             prefsManager.saveSessions(updated)
-            state.copy(availableSessions = sortSessions(updated), availableTags = tags)
+            state.copy(availableSessions = SessionReducer.sortSessions(updated), availableTags = tags)
         }
     }
 
@@ -242,14 +233,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         // v3.4: 空值防御——空 sessionId 忽略，不清空当前会话
         if (sessionId.isBlank()) return
         _uiState.update { it.copy(currentSessionId = sessionId, messages = emptyList()) }
-    }
-
-    private fun sortSessions(sessions: List<SessionItem>): List<SessionItem> {
-        return sessions.sortedWith(
-            compareByDescending<SessionItem> { it.isPinned }
-                .thenBy { it.isArchived }
-                .thenByDescending { it.updatedAt }
-        )
     }
 
     // =========================================================================
@@ -532,7 +515,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                     _uiState.update { state ->
                         val currentId = realSessions.firstOrNull()?.id ?: ""
                         state.copy(
-                            availableSessions = sortSessions(realSessions),
+                            availableSessions = SessionReducer.sortSessions(realSessions),
                             currentSessionId = currentId
                         )
                     }
@@ -786,7 +769,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 merged.firstOrNull()?.id ?: ""
             }
             state.copy(
-                availableSessions = sortSessions(merged),
+                availableSessions = SessionReducer.sortSessions(merged),
                 currentSessionId = currentId
             )
         }
