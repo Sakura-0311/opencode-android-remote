@@ -218,10 +218,17 @@ class RelayWebSocketClient(private val appContext: Context) {
     /** 服务端是否支持某能力（v3 服务端必备；旧服务端无 hello_ack 时为空） */
     fun serverSupports(cap: String): Boolean = serverCapabilities.contains(cap)
 
-    // v1.6 P0 断线恢复：relay 消息序号持久化与幂等去重
+    // v1.6 P0 断线恢复：relay 消息序号持久化与幂等去重（逻辑抽到 RelaySeqTracker，可单测）
     private var seqPrefs: SharedPreferences? = null
-    @Volatile private var lastRelaySeq: Long = 0L
     @Volatile private var serverSeq: Long = 0L
+    private val seqTracker = RelaySeqTracker(
+        loadSeq = { seqPrefs?.getLong(seqKey(), 0L) ?: 0L },
+        saveSeq = { s -> try { seqPrefs?.edit()?.putLong(seqKey(), s)?.apply() } catch (_: Exception) { } },
+        loadEpoch = { seqPrefs?.getString(epochKey(), null) },
+        saveEpoch = { e, s ->
+            try { seqPrefs?.edit()?.putString(epochKey(), e)?.putLong(seqKey(), s)?.apply() } catch (_: Exception) { }
+        },
+    )
 
     fun setSeqPersistence(prefs: SharedPreferences) {
         seqPrefs = prefs
@@ -252,39 +259,7 @@ class RelayWebSocketClient(private val appContext: Context) {
         return "last_relay_seq_${urlHash}_${currentAccountId}_${deviceUuid()}"
     }
 
-    // v2.2.1-C: 序号纪元——与 lastRelaySeq 一起持久化，relay 重启（房间重建）时 seq 归零
-    @Volatile private var relayEpoch: String? = null
     private fun epochKey(): String = seqKey() + "_epoch"
-
-    private fun loadPersistedEpoch() {
-        relayEpoch = seqPrefs?.getString(epochKey(), null)
-    }
-
-    /**
-     * 检查服务端下发的 room_epoch。返回 true 表示 epoch 发生变化（已重置 seq）。
-     * 旧 relay 不下发 epoch（空字符串）时保持旧行为。
-     */
-    private fun checkEpoch(json: org.json.JSONObject): Boolean {
-        val epoch = json.optString("room_epoch", "")
-        if (epoch.isBlank()) return false  // 旧 relay：无 epoch，保持旧行为
-        val known = relayEpoch
-        if (known == null) {
-            // 首次记录
-            relayEpoch = epoch
-            seqPrefs?.edit()?.putString(epochKey(), epoch)?.apply()
-            return false
-        }
-        if (known != epoch) {
-            relayEpoch = epoch
-            lastRelaySeq = 0L
-            seqPrefs?.edit()
-                ?.putString(epochKey(), epoch)
-                ?.putLong(seqKey(), 0L)
-                ?.apply()
-            return true
-        }
-        return false
-    }
 
     /**
      * P1-7: 本机稳定设备标识（首次生成后持久化），用于 seq 持久化隔离。
@@ -311,26 +286,6 @@ class RelayWebSocketClient(private val appContext: Context) {
         )
     }
 
-    private fun loadPersistedSeq() {
-        lastRelaySeq = seqPrefs?.getLong(seqKey(), 0L) ?: 0L
-        loadPersistedEpoch()  // v2.2.1-C
-    }
-
-    // v2.3: seq 持久化改成「处理后再写」——内存先更新保证去重，磁盘在消息处理成功后 flush，
-    // 避免进程在处理中崩溃时丢一条（at-least-once，重复由去重逻辑消化）
-    private fun trackSeq(seq: Long) {
-        if (seq > lastRelaySeq) lastRelaySeq = seq
-    }
-
-    private fun flushSeq() {
-        val s = lastRelaySeq
-        try {
-            seqPrefs?.edit()?.putLong(seqKey(), s)?.apply()
-        } catch (e: Exception) {
-            // ignore
-        }
-    }
-
     fun connect(relayUrl: String, accountId: String, secret: String, listener: RelayListener) {
         cancelPendingReconnect()
         // v2.3: 先关闭旧连接，避免重复调用留下旧 socket 及其回调
@@ -351,7 +306,7 @@ class RelayWebSocketClient(private val appContext: Context) {
         serverCapabilities = emptyList()
         serverProtocolVersion = 0
         // v1.6: 恢复该房间的已确认序号
-        loadPersistedSeq()
+        seqTracker.reload()
 
         setState(RelayConnectionState.CONNECTING)
         initiateConnection()
@@ -534,7 +489,7 @@ class RelayWebSocketClient(private val appContext: Context) {
             // v2.2.1-D: secret 绝不打日志（AppLog 脱敏亦会处理）
             put("secret", currentSecret)
             put("client_type", "mobile")
-            put("last_relay_seq", lastRelaySeq)
+            put("last_relay_seq", seqTracker.lastSeq)
         }
         ws.send(authPacket.toString())
         setState(RelayConnectionState.AUTHENTICATING)
@@ -562,11 +517,11 @@ class RelayWebSocketClient(private val appContext: Context) {
             var newSeqSeen = false
             if (json.has("relay_seq")) {
                 val seq = json.optLong("relay_seq", -1L)
-                if (seq >= 0 && seq <= lastRelaySeq) {
+                if (seqTracker.isDuplicate(seq)) {
                     return  // 已处理过，丢弃
                 }
                 if (seq > 0) {
-                    trackSeq(seq)
+                    seqTracker.track(seq)
                     newSeqSeen = true
                 }
             }
@@ -604,7 +559,7 @@ class RelayWebSocketClient(private val appContext: Context) {
                     serverSeq = json.optLong("server_seq", serverSeq)
                     // v2.2.1-C: epoch 变化说明房间重建，seq 归零并提示重同步
                     // v2.3: 走 onResyncRequired
-                    if (checkEpoch(json)) {
+                    if (seqTracker.checkEpoch(json.optString("room_epoch", ""))) {
                         AppLog.i("Relay", "room_epoch changed, seq reset")
                         listener?.onResyncRequired(appContext.getString(R.string.relay_007))
                     }
@@ -621,7 +576,7 @@ class RelayWebSocketClient(private val appContext: Context) {
                     setState(RelayConnectionState.AUTHENTICATED)
                     // v2.2.1-C: auth_ok 也可能携带 epoch，先做检查（seq_sync 还会再确认）
                     // v2.3: 走 onResyncRequired
-                    if (checkEpoch(json)) {
+                    if (seqTracker.checkEpoch(json.optString("room_epoch", ""))) {
                         AppLog.i("Relay", "room_epoch changed on auth_ok, seq reset")
                         listener?.onResyncRequired(appContext.getString(R.string.relay_007))
                     }
@@ -917,7 +872,7 @@ class RelayWebSocketClient(private val appContext: Context) {
                 else -> {}
             }
             // v2.3: 消息处理成功后才落盘 seq
-            if (newSeqSeen) flushSeq()
+            if (newSeqSeen) seqTracker.flush()
         } catch (e: Exception) {
             // v3.4: 未知异常兜底——记日志、状态机回 DISCONNECTED（触发重连），不向上传播崩溃。
             // 每步独立 guard，避免兜底逻辑自身抛异常。
