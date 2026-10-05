@@ -31,6 +31,10 @@ on:
         type: choice
         default: '29'
         options: ['29', '34']
+      old_version:
+        description: 'upgrade 模式的旧版本号（默认 v3.1.0）'
+        type: string
+        default: 'v3.1.0'
   schedule:
     # 每周日 11:00 CST 自动 smoke（默认 release-latest + smoke + API 29）
     - cron: '0 3 * * 0'
@@ -85,7 +89,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/old-apk
-          gh release download v3.1.0 --pattern 'app-release.apk' --dir /tmp/old-apk \
+          OLD_VER="${{ inputs.old_version || 'v3.1.0' }}"
+          if [[ "$OLD_VER" == v4* ]]; then PAT='opencode-remote-*.apk'; else PAT='app-release.apk'; fi
+          gh release download "$OLD_VER" --pattern "$PAT" --dir /tmp/old-apk \
             -R Sakura-0311/opencode-android-remote
           ls /tmp/old-apk
 
@@ -113,7 +119,7 @@ jobs:
           fi
           if [ "$MODE" = "upgrade" ]; then
             OLD_APK=$(ls /tmp/old-apk/*.apk | head -1)
-            echo "先装旧版 v3.1.0: $OLD_APK"
+            echo "先装旧版 ${{ inputs.old_version || 'v3.1.0' }}: $OLD_APK"
             adb install -r "$OLD_APK"
             adb shell am start -n com.opencode.android/.MainActivity
             sleep 30
