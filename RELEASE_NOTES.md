@@ -1,3 +1,20 @@
+# OpenCode Android Remote - Release v4.11.0（安全强化）
+
+## 内容
+
+- **防截屏/录屏**：MainActivity 加 FLAG_SECURE，App 可远程执行代码、
+  显示密钥与配对二维码，默认禁止截屏录屏防泄露
+
+## 兼容性
+
+- 非破坏性。versionCode 41100
+
+## 验证
+
+- CI 全绿
+
+---
+
 # OpenCode Android Remote - Release v4.10.0（发送队列）
 
 ## 内容

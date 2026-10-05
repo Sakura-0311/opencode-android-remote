@@ -76,6 +76,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // v4.11.0: 防截屏/录屏——App 可远程执行代码、显示密钥与二维码，
+        // 默认禁止截屏录屏，防止敏感信息经截图泄露
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_SECURE,
+            android.view.WindowManager.LayoutParams.FLAG_SECURE
+        )
+
         // v1.6 P0 任务通知：处理通知深链（点击通知直达对应会话）
         handleNotificationDeepLink(intent)
 
