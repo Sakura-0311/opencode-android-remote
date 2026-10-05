@@ -337,3 +337,26 @@ jobs:
           docker compose config > /dev/null && echo "compose 语法 OK"
           docker compose config | grep -q "unless-stopped" && echo "自动重启 OK"
           docker compose config | grep -q "healthcheck:" && echo "healthcheck OK"
+
+  # relay 镜像冒烟——构建并真实启动，轮询 /api/stats。
+  # 回归网：若 Dockerfile 漏 COPY（如缺 crash_report.py），镜像起不来，CI 变红。
+  relay-image-smoke:
+    name: Relay image smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build relay image
+        run: docker build -t relay-test relay_server
+      - name: Run and poll /api/stats
+        run: |
+          docker run -d --name relay-smoke -p 8765:8765 relay-test
+          for i in $(seq 1 30); do
+            curl -fs localhost:8765/api/stats && echo "冒烟通过" && exit 0
+            sleep 2
+          done
+          echo "=== 镜像未在 60s 内就绪，dump 日志 ==="
+          docker logs relay-smoke
+          exit 1
+      - name: Cleanup
+        if: always()
+        run: docker rm -f relay-smoke || true

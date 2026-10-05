@@ -10,9 +10,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 只拷依赖（/install -> /usr/local）+ server.py
+# 只拷依赖（/install -> /usr/local）+ server.py + crash_report.py
+# （server.py 顶层 import crash_report，缺失则镜像无法启动）
 COPY --from=builder /install /usr/local
-COPY server.py .
+COPY server.py crash_report.py ./
 
 EXPOSE 8765
 
