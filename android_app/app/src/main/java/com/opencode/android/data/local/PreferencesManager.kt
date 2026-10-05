@@ -35,7 +35,16 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     }
 
     /** v3.2: 安全存储后端 */
-    enum class SecureBackend { LEGACY, TINK }
+    enum class SecureBackend {
+        /**
+         * B3: 已废弃。仅 Tink 不可用或迁移失败时回退使用。
+         * 删除条件：legacyBackendUseCount 在一个完整发版周期内保持为 0，
+         * 且 TESTING_CHECKLIST §9（R-4 真机迁移项）通过。
+         */
+        @Deprecated("B3: LEGACY 后端已废弃，待计数器归零后删除")
+        LEGACY,
+        TINK
+    }
 
     private val appContext: Context = context.applicationContext ?: context
 
@@ -62,8 +71,32 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     init {
         val (backend, info, rolledBack) = initSecureBackend()
         secureBackend = backend
-        secureStorageInfo = info
         secureMigrationRolledBack = rolledBack
+        // B3: LEGACY 选中时在诊断信息里带上累计计数，方便判断是否可删
+        secureStorageInfo = if (backend == SecureBackend.LEGACY) {
+            "$info (B3: LEGACY 已废弃，累计使用 ${readLegacyUseCount()} 次)"
+        } else info
+    }
+
+    /**
+     * B3: LEGACY 后端累计使用次数（每次进程启动选中 LEGACY 即+1，明文偏好，非敏感）。
+     * 删除 LEGACY 后端的前置条件：此计数在一个完整发版周期内保持为 0。
+     */
+    val legacyBackendUseCount: Int get() = readLegacyUseCount()
+
+    private fun readLegacyUseCount(): Int = try {
+        // init 块早于 prefs 初始化，直接用 appContext 读同一文件
+        appContext.getSharedPreferences(PLAIN_PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(KEY_LEGACY_USE_COUNT, 0)
+    } catch (_: Exception) { 0 }
+
+    /** B3: LEGACY 计数器+1，并打废弃警告日志 */
+    private fun recordLegacyUse(reason: String) {
+        try {
+            val sp = appContext.getSharedPreferences(PLAIN_PREFS_NAME, Context.MODE_PRIVATE)
+            sp.edit().putInt(KEY_LEGACY_USE_COUNT, sp.getInt(KEY_LEGACY_USE_COUNT, 0) + 1).apply()
+        } catch (_: Exception) { }
+        android.util.Log.w("PrefsManager", "B3: LEGACY 安全存储后端已废弃，仍被使用（$reason），计数+1")
     }
 
     /**
@@ -77,6 +110,7 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         val legacy = securePrefs?.let { LegacySecureStore(it) }
         val tink = tinkStore
         if (tink == null) {
+            recordLegacyUse("Tink 不可用")
             return Triple(
                 SecureBackend.LEGACY,
                 if (legacy != null) appContext.getString(R.string.prefs_001) else appContext.getString(R.string.prefs_002),
@@ -100,6 +134,7 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
                             RuntimeException("SecureMigration 失败已回退: ${r.failedKey}", r.cause)
                         )
                     } catch (_: Exception) { }
+                    recordLegacyUse("迁移失败回退 key=${r.failedKey}")
                     return Triple(SecureBackend.LEGACY, appContext.getString(R.string.prefs_005), true)
                 }
             }
@@ -260,6 +295,8 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         private const val KEY_PROFILE_SECRET_PREFIX = "secret_profile_"
         private const val KEY_PROFILE_CLOUD_KEY_PREFIX = "cloud_api_key_profile_"
         private const val KEY_SAVED_SESSIONS = "saved_sessions_json"
+        // B3: LEGACY 后端累计使用计数（明文，非敏感；删 LEGACY 前需归零）
+        private const val KEY_LEGACY_USE_COUNT = "legacy_backend_use_count"
         private const val KEY_SAVED_TAGS = "saved_tags_json"
         // v1.6 P0 后台保活：任务状态持久化
         private const val KEY_TASK_STATUS = "task_status"
