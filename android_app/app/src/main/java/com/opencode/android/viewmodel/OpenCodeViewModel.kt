@@ -29,26 +29,23 @@ import com.opencode.android.network.FileEntry
 import com.opencode.android.network.AgentInfo
 import com.opencode.android.network.ModelInfo
 import com.opencode.android.network.ProjectInfo
-import com.opencode.android.network.PairClaimResult
-import com.opencode.android.network.PairingClient
 import com.opencode.android.network.CloudTransport
 import com.opencode.android.network.RelayListener
 import com.opencode.android.network.RelayTransport
 import com.opencode.android.network.Transport
 import com.opencode.android.network.TransportFactory
 import com.opencode.android.network.TransportListener
-import com.opencode.android.network.TransportParams
 import com.opencode.android.util.AppLog
 import com.opencode.android.util.ApprovalReducer
 import com.opencode.android.util.StreamReducer
 import com.opencode.android.util.TargetSwitchPolicy
 import com.opencode.android.util.DesktopRoutingPolicy
 import com.opencode.android.util.SessionReducer
-import com.opencode.android.util.TaskStatusReducer
-import com.opencode.android.util.PairingStateReducer
-import com.opencode.android.util.PairingStateReducer.ManualInputError
+import com.opencode.android.coordinator.PairingCoordinator
+import com.opencode.android.coordinator.StateDispatcher
+import com.opencode.android.coordinator.TaskStatusController
+import com.opencode.android.coordinator.ViewModelPairingTransports
 import com.opencode.android.util.SendMessageReducer
-import com.opencode.android.util.CloudPairReducer
 import com.opencode.android.util.StreamEndReducer
 import com.opencode.android.util.DeviceListReducer
 import com.opencode.android.util.ConnectionStateReducer
@@ -91,6 +88,40 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     private val relayTransport: Transport by lazy { RelayTransport(relayClient, this) }
     private val cloudTransport: Transport by lazy { CloudTransport(cloudClient, this) }
 
+    // 阶段 2: 状态调度抽象（供 Coordinator 用；getter 延迟读 _uiState，构造时不触碰）
+    private val stateDispatcher = object : StateDispatcher {
+        override val currentState: OpenCodeUiState get() = _uiState.value
+        override fun updateState(transform: (OpenCodeUiState) -> OpenCodeUiState) {
+            _uiState.update(transform)
+        }
+        override fun launch(block: suspend () -> Unit) {
+            viewModelScope.launch { block() }
+        }
+        override fun getString(resId: Int, vararg args: Any): String =
+            getApplication<Application>().getString(resId, *args)
+    }
+
+    // 阶段 2: 配对链路唯一入口（ViewModel 保留同名方法做转发）
+    private val pairingCoordinator: PairingCoordinator by lazy {
+        PairingCoordinator(
+            prefs = prefsManager,
+            e2ee = e2eeManager,
+            transports = ViewModelPairingTransports(
+                app = getApplication(),
+                relayTransport = relayTransport,
+                transportListener = transportListener,
+                relayClient = relayClient,
+                cloudClient = cloudClient,
+            ),
+            dispatch = stateDispatcher,
+        )
+    }
+
+    // 阶段 2: 任务状态流转（ViewModel 保留同名私有方法做转发）
+    private val taskStatusController: TaskStatusController by lazy {
+        TaskStatusController(prefs = prefsManager, dispatch = stateDispatcher)
+    }
+
     /** v3.0: 按当前 appMode 选择传输（transport 切换的唯一决策点） */
     fun activeTransport(): Transport =
         TransportFactory.select(_uiState.value.appMode, relayTransport, cloudTransport)
@@ -102,14 +133,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * v1.6 P0 后台保活：统一任务状态流转（同步 UI + 持久化 + 通知栏）。
+     * 阶段 2: 实现已迁入 TaskStatusController，此处保留同名私有方法做转发。
      */
-    private fun setTaskStatus(status: TaskStatus, detail: String = "", sessionId: String = "") {
-        val sid = sessionId.ifBlank { _uiState.value.currentSessionId }
-        prefsManager.saveTaskStatus(status.name, detail, sid)
-        // 阶段 1: 纯状态部分委托 TaskStatusReducer（now 显式传入）
-        val now = System.currentTimeMillis()
-        _uiState.update { TaskStatusReducer.applyTaskStatus(it, status, detail, now) }
-    }
+    private fun setTaskStatus(status: TaskStatus, detail: String = "", sessionId: String = "") =
+        taskStatusController.set(status, detail, sessionId)
 
     init {
         // v1.6: 序号持久化已在 OpenCodeApp.onCreate 中初始化
@@ -117,16 +144,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         val savedSessions = prefsManager.getSavedSessions()
 
         // v1.6 P0 后台保活：恢复任务状态（App 重启后）
-        val (savedStatus, savedDetail, savedTaskSession) = prefsManager.getTaskStatus()
-        val restoredStatus = try {
-            TaskStatus.valueOf(savedStatus)
-        } catch (e: Exception) { TaskStatus.IDLE }
-        // 若上次退出时任务还在进行中，标记为已断开（需重连同步），而非假装仍在运行
-        // 阶段 1: 恢复语义委托 TaskStatusReducer
-        val effectiveStatus = TaskStatusReducer.restoreOnLaunch(restoredStatus)
-        val effectiveDetail = if (TaskStatusReducer.needsRestoreHint(effectiveStatus, restoredStatus)) {
-            getApplication<Application>().getString(R.string.vm_001, savedDetail)
-        } else savedDetail
+        // 阶段 2: 恢复逻辑已迁入 TaskStatusController
+        val (effectiveStatus, effectiveDetail) = taskStatusController.restoreOnLaunch()
 
         _uiState = MutableStateFlow(
             OpenCodeUiState(
@@ -346,6 +365,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     /**
      * v1.6 P0 一键扫码配对：凭扫码得到的配对信息认领设备密钥。
      * 成功后凭据保存到加密存储（Android Keystore），之后用设备密钥连接。
+     * 阶段 2: 实现已迁入 PairingCoordinator，此处保留同名方法做转发（UI 签名不变）。
      */
     fun claimPairingByQr(
         relayUrl: String,
@@ -353,185 +373,27 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         pairingToken: String,
         desktopName: String,
         onDone: (Boolean, String) -> Unit
-    ) {
-        viewModelScope.launch {
-            // 阶段 1: 纯状态部分委托 PairingStateReducer
-            _uiState.update {
-                PairingStateReducer.applyClaimStarted(
-                    it,
-                    getApplication<Application>().getString(R.string.vm_007, desktopName)
-                )
-            }
-            // v4.1: E2EE 公钥交换（开关关闭时传空，relay/对端跳过）
-            val e2eePubkey = e2eeManager.ownPublicKeyB64() ?: ""
-            val result = try {
-                PairingClient.claimPairing(getApplication(), relayUrl, accountId, pairingToken, e2eePubkey = e2eePubkey)
-            } catch (e: Exception) {
-                PairClaimResult(success = false, error = e.message ?: getApplication<Application>().getString(R.string.vm_008))
-            }
-            // v4.3 M-2: 保存 desktop 的 E2EE 公钥（按 device_id 绑定，HMAC 验签）
-            if (result.success && result.e2eePeerPubkey.isNotEmpty() && result.desktopDeviceId.isNotEmpty()) {
-                val ok = e2eeManager.storePeerPubkey(
-                    result.desktopDeviceId, result.e2eePeerPubkey, result.e2eePubkeySig)
-                if (!ok) {
-                    _uiState.update {
-                        PairingStateReducer.applyE2eePubkeyResult(
-                            it, false, "对端公钥认证失败，已拒绝（疑似中继篡改）"
-                        )
-                    }
-                } else {
-                    // v4.3 M-5: 新配对成功，给一次「已建立加密通道」明确提示
-                    _uiState.update { PairingStateReducer.applyE2eePubkeyResult(it, true, "") }
-                }
-                refreshE2eePeerReady()
-            }
-            if (result.success && result.deviceSecret.isNotBlank()) {
-                // v1.6: 设备密钥保存到加密存储；P0-3: 加密不可用时拒绝保存并报错
-                // v4.3 M-2: 扫码配对存的是 device_secret（非主 secret），标记之
-                prefsManager.secretIsMaster = false
-                val saved = prefsManager.savePairingInfo(
-                    result.accountId.ifBlank { accountId },
-                    result.deviceSecret,
-                    relayUrl
-                )
-                if (!saved) {
-                    _uiState.update {
-                        PairingStateReducer.applySaveFailed(
-                            it,
-                            getApplication<Application>().getString(R.string.vm_009)
-                        )
-                    }
-                    onDone(false, getApplication<Application>().getString(R.string.vm_010))
-                    return@launch
-                }
-                _uiState.update {
-                    PairingStateReducer.applyClaimSuccess(
-                        it,
-                        result.accountId.ifBlank { accountId },
-                        result.deviceSecret,
-                        relayUrl,
-                        getApplication<Application>().getString(R.string.vm_011, result.desktopName.ifBlank { desktopName })
-                    )
-                }
-                onDone(true, getApplication<Application>().getString(R.string.vm_012))
-                OpLog.record(getApplication(), OpLog.OpType.PAIR, "desktop=${result.desktopName.ifBlank { desktopName }}")
-            } else {
-                val err = result.error.ifBlank { getApplication<Application>().getString(R.string.vm_013) }
-                _uiState.update { PairingStateReducer.applyClaimFailed(it, err) }
-                onDone(false, err)
-            }
-        }
-    }
+    ) = pairingCoordinator.claimPairingByQr(relayUrl, accountId, pairingToken, desktopName, onDone)
 
-    fun pairDesktop(accountId: String, secret: String, relayUrl: String) {
-        val trimmedAccount = accountId.trim()
-        val trimmedSecret = secret.trim()
-        val trimmedRelay = relayUrl.trim()
+    /**
+     * v1.6 手动配对：账号/密钥/relay 地址直连。
+     * 阶段 2: 实现已迁入 PairingCoordinator，此处保留同名方法做转发（UI 签名不变）。
+     */
+    fun pairDesktop(accountId: String, secret: String, relayUrl: String) =
+        pairingCoordinator.pairDesktop(accountId, secret, relayUrl)
 
-        // 阶段 1: 输入校验委托 PairingStateReducer（文案映射留在 ViewModel）
-        when (PairingStateReducer.validateManualInput(accountId, secret)) {
-            ManualInputError.BLANK_ACCOUNT -> {
-                _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_014))) }
-                return
-            }
-            ManualInputError.BLANK_SECRET -> {
-                _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_015))) }
-                return
-            }
-            ManualInputError.NONE -> {}
-        }
+    /**
+     * v2.x 云端直连配对：探活 → 存配置 → 拉会话。
+     * 阶段 2: 实现已迁入 PairingCoordinator，此处保留同名方法做转发（UI 签名不变）。
+     */
+    fun pairCloud(cloudUrl: String, apiKey: String, workspacePath: String) =
+        pairingCoordinator.pairCloud(cloudUrl, apiKey, workspacePath)
 
-        // v4.3 M-2: 手动配对填的是房间主 secret，可做 E2EE 公钥 HMAC 绑定校验
-        prefsManager.secretIsMaster = true
-        // P0-3: 加密存储不可用时拒绝保存敏感凭据
-        if (!prefsManager.savePairingInfo(trimmedAccount, trimmedSecret, trimmedRelay)) {
-            _uiState.update {
-                it.copy(appError = AppError("SECURE_STORAGE_UNAVAILABLE", getApplication<Application>().getString(R.string.vm_009)))
-            }
-            return
-        }
-
-        _uiState.update {
-            PairingStateReducer.applyManualSuccess(
-                it,
-                trimmedAccount,
-                trimmedSecret,
-                trimmedRelay,
-                getApplication<Application>().getString(R.string.vm_016)
-            )
-        }
-
-        // v3.0: 走 Transport（connect/send/close 统一入口）
-        relayTransport.connect(
-            TransportParams(
-                relayUrl = trimmedRelay,
-                accountId = trimmedAccount,
-                secret = trimmedSecret
-            ),
-            transportListener
-        )
-    }
-
-    fun pairCloud(cloudUrl: String, apiKey: String, workspacePath: String) {
-        val trimmedUrl = cloudUrl.trim()
-        val trimmedKey = apiKey.trim()
-        val trimmedWorkspace = workspacePath.trim()
-
-        if (trimmedUrl.isBlank()) {
-            _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_017))) }
-            return
-        }
-
-        _uiState.update {
-            CloudPairReducer.applyHealthCheckStarted(
-                it,
-                getApplication<Application>().getString(R.string.vm_018)
-            )
-        }
-
-        cloudClient.checkHealth(trimmedUrl, trimmedKey) { isSuccess, message ->
-            if (isSuccess) {
-                // P0-3: 加密存储不可用时拒绝保存敏感凭据
-                if (!prefsManager.saveCloudConfig(trimmedUrl, trimmedKey, trimmedWorkspace)) {
-                    _uiState.update {
-                        CloudPairReducer.applySaveFailed(
-                            it,
-                            getApplication<Application>().getString(R.string.vm_019)
-                        )
-                    }
-                    return@checkHealth
-                }
-                _uiState.update {
-                    CloudPairReducer.applySuccess(it, trimmedUrl, trimmedKey, trimmedWorkspace)
-                }
-                // 拉取云端真实会话列表
-                cloudClient.getSessions(trimmedUrl, trimmedKey) { realSessions ->
-                    _uiState.update { state ->
-                        CloudPairReducer.applySessionsLoaded(state, realSessions)
-                    }
-                }
-            } else {
-                _uiState.update { CloudPairReducer.applyHealthFailed(it, message) }
-            }
-        }
-    }
-
-    fun unpair() {
-        relayClient.disconnect()
-        cloudClient.cancelCurrentStream()
-        OpenCodeKeepAliveService.stopTaskProgress(getApplication())
-        _uiState.update {
-            it.copy(
-                isPaired = false,
-                isRelayConnected = false,
-                isAuthenticated = false,
-                isDesktopOnline = false,
-                isGenerating = false,
-                isReconnecting = false,
-                statusBanner = null
-            )
-        }
-    }
+    /**
+     * 解绑：断开所有连接并复位配对相关状态。
+     * 阶段 2: 实现已迁入 PairingCoordinator，此处保留同名方法做转发（UI 签名不变）。
+     */
+    fun unpair() = pairingCoordinator.unpair()
 
     fun dismissError() {
         _uiState.update { it.copy(appError = null) }
@@ -1160,15 +1022,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** v4.3 M-5: 按当前目标（targetDesktopId 或主 desktop）刷新 E2EE 就绪状态。 */
-    private fun refreshE2eePeerReady() {
-        val s = _uiState.value
-        // 阶段 1: 目标选择委托 DeviceListReducer
-        val target = DeviceListReducer.selectE2eeTarget(s.targetDesktopId, s.desktopList)
-        val ready = target.isNotEmpty() && e2eeManager.hasPeerKey(target)
-        if (s.e2eePeerReady != ready) {
-            _uiState.update { it.copy(e2eePeerReady = ready) }
-        }
-    }
+    /** v4.3 M-5: 按当前目标刷新 E2EE 就绪状态。阶段 2: 实现已迁入 PairingCoordinator。 */
+    private fun refreshE2eePeerReady() = pairingCoordinator.refreshE2eePeerReady()
 
     override fun onTargetDesktopOffline(targetDeviceId: String, message: String) {
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
