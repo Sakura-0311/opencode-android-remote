@@ -202,6 +202,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     private val taskModifiedFiles = mutableSetOf<String>()
     // P1-5: 流式 chunk 批处理缓冲（50ms 聚合一次刷新 UI）
     private val streamBuffer = StringBuilder()
+    // 头尾窗口（ENABLE_STREAM_WINDOW 开启时替代 streamBuffer）
+    private val streamWindow = StreamWindow()
     private var streamFlushJob: Job? = null
     private var streamFlushSessionId: String? = null
     private var lastProgressNotifyMs: Long = 0L
@@ -757,6 +759,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         activeAssistantMessageId = newMsgId
         // P1-5: 新一轮流式输出，清空上一轮缓冲
         streamBuffer.clear()
+        // 窗口同步清空
+        streamWindow.clear()
         streamFlushJob?.cancel()
         streamFlushSessionId = sessionId
 
@@ -782,7 +786,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
 
         // P1-5: chunk 先进缓冲，50ms 批量刷新一次，避免每个 chunk 重建消息列表
-        streamBuffer.append(chunk)
+        // 新路径走 StreamWindow（增量切分），旧路径走 StringBuilder
+        if (FeatureFlags.ENABLE_STREAM_WINDOW) {
+            streamWindow.append(chunk)
+        } else {
+            streamBuffer.append(chunk)
+        }
         streamFlushSessionId = sessionId
         // 通知栏进度也节流（最多 1 秒一次）
         val now = System.currentTimeMillis()
@@ -800,26 +809,30 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * P1-5: 将缓冲的 chunk 一次性追加到流式消息，保证顺序、不丢失、不重复。
+     * 新路径用 StreamWindow 渲染替换（无增量拼接、无全文重折叠）。
      */
     private fun flushStreamBuffer() {
+        val msgId = activeAssistantMessageId ?: return
+        val app = getApplication<Application>()
+        if (FeatureFlags.ENABLE_STREAM_WINDOW) {
+            if (streamWindow.isEmpty) return
+            val content = streamWindow.render { header, hidden, tail ->
+                app.getString(R.string.vm_028, header, hidden, tail)
+            }
+            _uiState.update { state ->
+                state.copy(
+                    messages = StreamReducer.replaceMessageContent(state.messages, msgId, content)
+                )
+            }
+            return
+        }
         val text = streamBuffer.toString()
         if (text.isEmpty()) return
         streamBuffer.clear()
-        val msgId = activeAssistantMessageId ?: return
-        val app = getApplication<Application>()
         _uiState.update { state ->
             state.copy(messages = StreamReducer.appendToMessage(
                 state.messages, msgId, text, MAX_STREAM_LINES
             ) { header, hidden, tail -> app.getString(R.string.vm_028, header, hidden, tail) })
-        }
-    }
-
-    /** P1-5: 超长输出折叠保护（原 onStreamChunk 内联逻辑抽取，行为不变） */
-    private fun applyStreamGuard(combined: String): String {
-        return when (val r = StreamReducer.collapseIfNeeded(combined, MAX_STREAM_LINES)) {
-            is StreamReducer.CollapseResult.NoCollapse -> combined
-            is StreamReducer.CollapseResult.Collapsed ->
-                getApplication<Application>().getString(R.string.vm_028, r.header, r.hiddenCount, r.tail)
         }
     }
 

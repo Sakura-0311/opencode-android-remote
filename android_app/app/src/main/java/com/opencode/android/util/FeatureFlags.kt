@@ -11,4 +11,8 @@ object FeatureFlags {
     /** v4.1: E2EE 端到端加密（mobile ↔ desktop，relay 盲转发）。
      * v4.2 起改为运行时开关（PreferencesManager.isE2eeEnabled），此处保留常量仅作默认值语义。 */
     const val ENABLE_E2EE_DEFAULT = false
+
+    /** 流式输出头尾窗口（替代增量拼接+全文重折叠）。
+     * true=新路径（默认）；false=回退到 StreamReducer 旧路径。回滚开关保留一个版本。 */
+    const val ENABLE_STREAM_WINDOW = true
 }

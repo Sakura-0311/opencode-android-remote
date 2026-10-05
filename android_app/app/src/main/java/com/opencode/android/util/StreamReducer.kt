@@ -58,4 +58,26 @@ object StreamReducer {
         }
         return if (hit) updated else messages
     }
+
+    /**
+     * 用窗口渲染出的完整文本直接替换指定消息的 content。
+     * 供 StreamWindow 路径使用（不再做增量拼接+重折叠）。
+     * - 命中：仅该条消息的 content 变化；未命中返回原列表（引用不变）。
+     */
+    fun replaceMessageContent(
+        messages: List<ChatMessage>,
+        msgId: String,
+        content: String
+    ): List<ChatMessage> {
+        var hit = false
+        val updated = messages.map { msg ->
+            if (msg.id == msgId) {
+                hit = true
+                msg.copy(content = content)
+            } else {
+                msg
+            }
+        }
+        return if (hit) updated else messages
+    }
 }
