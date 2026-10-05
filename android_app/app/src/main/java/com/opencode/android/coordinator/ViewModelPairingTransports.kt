@@ -48,7 +48,7 @@ class ViewModelPairingTransports(
         cloudUrl: String,
         apiKey: String,
         callback: (List<SessionItem>) -> Unit
-    ) = CloudApiClient.getSessions(cloudUrl, apiKey, callback)
+    ) = cloudClient.getSessions(cloudUrl, apiKey, callback)
 
     override fun cancelCloudStream() = cloudClient.cancelCurrentStream()
 
