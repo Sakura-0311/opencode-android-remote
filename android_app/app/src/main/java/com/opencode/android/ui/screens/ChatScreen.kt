@@ -130,9 +130,15 @@ fun ChatScreen(
     }
 
     // 新消息或流式输出自动滚底（在未暂停时）
+    // 流式期间用 scrollToItem（无动画）：每 50ms 刷新一次，动画会被反复取消重启
     LaunchedEffect(uiState.messages.size, uiState.messages.lastOrNull()?.content?.length) {
         if (!uiState.isAutoScrollPaused && uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+            val lastIndex = uiState.messages.size - 1
+            if (uiState.messages.lastOrNull()?.isStreaming == true) {
+                listState.scrollToItem(lastIndex)
+            } else {
+                listState.animateScrollToItem(lastIndex)
+            }
         }
     }
 

@@ -21,6 +21,7 @@ import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -165,6 +166,12 @@ class RelayWebSocketClient(private val appContext: Context) {
     private var webSocket: WebSocket? = null
     private var listener: RelayListener? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    // 消息解析单线程执行器：OkHttp onMessage 本身是顺序回调，单线程保证解析保序；
+    // 解析线程只做 JSON 解析与 E2EE 解密（不碰共享状态），序号去重与分发仍在主线程。
+    private val parseExecutor = Executors.newSingleThreadExecutor()
+    private val messageParser = RelayMessageParser(
+        decrypt = { payload, srcId, sessId -> e2eeManager?.decryptFromDesktop(payload, srcId, sessId) }
+    )
 
     private var currentUrl: String = ""
     private var currentAccountId: String = ""
@@ -414,9 +421,30 @@ class RelayWebSocketClient(private val appContext: Context) {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                mainHandler.post {
-                    if (isStale()) return@post
-                    parseIncomingMessage(webSocket, text)
+                // JSON 解析 + E2EE 解密移到解析线程，主线程只做去重与分发
+                parseExecutor.execute {
+                    val outcome = try {
+                        messageParser.parseAndDecrypt(text)
+                    } catch (e: Exception) {
+                        // 解析阶段未预期异常：按外层 JSON 坏处理（分发阶段走异常兜底）
+                        RelayMessageParser.Outcome.BadJson("解析异常: ${e.message}")
+                    }
+                    // 日志仍在解析线程打（AppLog 内部同步），文案与拆分前一致
+                    when (outcome) {
+                        is RelayMessageParser.Outcome.Ok ->
+                            outcome.decryptedFrom?.let {
+                                AppLog.d("Relay", "v4.1 E2EE: 已解密来自 $it 的消息")
+                            }
+                        is RelayMessageParser.Outcome.BadInnerJson ->
+                            AppLog.w("Relay", "v4.1 E2EE: 解密后 JSON 解析失败: ${outcome.error}")
+                        is RelayMessageParser.Outcome.DecryptFailed ->
+                            AppLog.w("Relay", "v4.1 E2EE: 解密失败，丢弃该消息")
+                        is RelayMessageParser.Outcome.BadJson -> { }
+                    }
+                    mainHandler.post {
+                        if (isStale()) return@post
+                        dispatchParsedMessage(webSocket, outcome)
+                    }
                 }
             }
 
@@ -512,30 +540,22 @@ class RelayWebSocketClient(private val appContext: Context) {
         setState(RelayConnectionState.AUTHENTICATING)
     }
 
-    private fun parseIncomingMessage(ws: WebSocket, jsonText: String) {
+    /**
+     * 分发阶段（主线程执行）：序号去重 + 按 type 分发。
+     * 各失败分支行为与拆分前一致：外层 JSON 坏→异常兜底（断开重连）；
+     * 解密失败→onError 提示后丢弃；内层 JSON 坏→记日志丢弃。
+     */
+    private fun dispatchParsedMessage(ws: WebSocket, outcome: RelayMessageParser.Outcome) {
         try {
-            var json = JSONObject(jsonText)
-            // v4.1: E2EE——解密内容载荷（路由字段保持明文）
-            if (json.optBoolean("e2ee", false) && json.has("encrypted_payload")) {
-                val srcId = json.optString("source_device_id", "")
-                val sessId = json.optString("session_id", "default")
-                val decrypted = e2eeManager?.decryptFromDesktop(
-                    json.optString("encrypted_payload", ""), srcId, sessId
-                )
-                if (decrypted != null) {
-                    try {
-                        val inner = JSONObject(decrypted)
-                        for (key in inner.keys()) json.put(key, inner.get(key))
-                        AppLog.d("Relay", "v4.1 E2EE: 已解密来自 $srcId 的消息")
-                    } catch (e: Exception) {
-                        AppLog.w("Relay", "v4.1 E2EE: 解密后 JSON 解析失败: ${e.message}")
-                        return
-                    }
-                } else {
-                    AppLog.w("Relay", "v4.1 E2EE: 解密失败，丢弃该消息")
+            val json = when (outcome) {
+                is RelayMessageParser.Outcome.Ok -> outcome.json
+                is RelayMessageParser.Outcome.BadJson ->
+                    throw IllegalArgumentException("消息 JSON 解析失败: ${outcome.error}")
+                is RelayMessageParser.Outcome.DecryptFailed -> {
                     listener?.onError(appContext.getString(R.string.relay_005))
                     return
                 }
+                is RelayMessageParser.Outcome.BadInnerJson -> return
             }
             // v1.6 P0 断线恢复：幂等去重——服务端补发的消息可能与已收到的重复
             // v2.3: 先 track（内存），处理成功后再 flush 落盘

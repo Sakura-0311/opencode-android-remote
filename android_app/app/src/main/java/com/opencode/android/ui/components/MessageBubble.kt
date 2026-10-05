@@ -96,7 +96,8 @@ fun MessageBubbleWithHighlight(message: ChatMessage, appMode: AppMode, highlight
 
                 SelectionContainer {
                     val rawText = message.content.ifEmpty { if (message.isStreaming) "▌" else "..." }
-                    val useMarkdown = !isUser && !isError && highlightQuery.isBlank() &&
+                    // 流式中用纯文本渲染：每 50ms 全量 Markdown 解析太贵，流结束后再走 Markdown
+                    val useMarkdown = !isUser && !isError && !message.isStreaming && highlightQuery.isBlank() &&
                         remember(rawText) { looksLikeMarkdown(rawText) }
                     if (useMarkdown) {
                         // P2-11: AI 回复走原生 Markdown 渲染
