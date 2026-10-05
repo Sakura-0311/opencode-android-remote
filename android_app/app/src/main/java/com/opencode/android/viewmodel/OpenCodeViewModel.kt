@@ -61,7 +61,7 @@ import java.util.UUID
 
 class OpenCodeViewModel(application: Application) : AndroidViewModel(application), RelayListener, CloudStreamListener {
 
-    val prefsManager = PreferencesManager(application.applicationContext)
+    val prefsManager = PreferencesManager.getInstance(application.applicationContext)
     // v1.6 P0 后台保活：连接由 Application 持有，与 ViewModel 生命周期解耦
     private val app = application as OpenCodeApp
     private val relayClient: RelayWebSocketClient = app.relayClient

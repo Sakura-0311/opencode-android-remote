@@ -36,7 +36,7 @@ class OpenCodeApp : Application() {
         // v4.1: E2EE 管理器注入（FeatureFlags.ENABLE_E2EE 门控，默认关闭）
         relayClient.setE2eeManager(
             com.opencode.android.security.E2eeManager(
-                com.opencode.android.data.local.PreferencesManager(this)
+                com.opencode.android.data.local.PreferencesManager.getInstance(this)
             )
         )
         cloudClient.setEventIdPersistence(

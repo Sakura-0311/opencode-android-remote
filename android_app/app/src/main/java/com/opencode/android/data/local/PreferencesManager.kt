@@ -8,8 +8,32 @@ import com.opencode.android.data.model.ConnectionProfile
 import com.opencode.android.data.model.SessionItem
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.annotation.VisibleForTesting
 
-class PreferencesManager(context: Context) : com.opencode.android.security.E2eePrefs {
+class PreferencesManager private constructor(context: Context) : com.opencode.android.security.E2eePrefs {
+
+    companion object {
+        @Volatile
+        private var INSTANCE: PreferencesManager? = null
+
+        /**
+         * v4.3.2 A1: 单例。之前 Application 和 ViewModel 各 new 一个实例，
+         * 两个 EncryptedSharedPreferences 并发初始化会导致 keyset 竞争，
+         * 升级后迁移读到写坏的旧文件（SecurityException 回退 LEGACY）。
+         */
+        fun getInstance(context: Context): PreferencesManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: PreferencesManager(context.applicationContext ?: context)
+                    .also { INSTANCE = it }
+            }
+        }
+
+        /** 仅供测试：重置单例。 */
+        @VisibleForTesting
+        fun resetForTest() {
+            synchronized(this) { INSTANCE = null }
+        }
+    }
 
     // P0-3: 加密存储失败时禁止静默降级（fail-closed）。
     // securePrefs 为 null 表示加密不可用：敏感凭据（Secret / API Key / AccountId）
