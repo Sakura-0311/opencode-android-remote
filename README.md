@@ -90,7 +90,7 @@
 ```
 .
 ├── README.md                                # 项目使用与安全指南
-├── OPTIMIZATION_REPORT.md                   # 历史加固与审计记录
+├── docs/archive/                            # 历史报告归档（含 v1.x 优化报告）
 ├── scripts/
 │   └── smoke_test_contract.py               # OpenCode 官方真实契约端到端自动化冒烟测试
 ├── cloud_server/                            # 云端直连 Docker 部署
