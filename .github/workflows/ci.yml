@@ -37,6 +37,11 @@ jobs:
         run: |
           pip install cryptography
           python desktop_agent/modules/test_e2ee_v2.py
+      - name: Run relay handler tests
+        # v4.8.0/E3: route_message 路由 handler 测试（未认证/限速/定向/扇出）
+        run: |
+          pip install -r relay_server/requirements.txt
+          RELAY_ADMIN_TOKEN=test-admin-token-0123456789abcdef python relay_server/test_handlers.py
       - name: Lint undefined names (ruff F821/F811)
         # 未定义名 / 重复定义检查：拦住缺 import 类问题（如 protocol.py 的 NameError）
         run: |
@@ -366,7 +371,8 @@ jobs:
         run: docker build -t relay-test relay_server
       - name: Run and poll /api/stats
         run: |
-          docker run -d --name relay-smoke -p 8765:8765 relay-test
+          docker run -d --name relay-smoke -p 8765:8765 \
+            -e RELAY_ADMIN_TOKEN=smoke-test-token-0123456789abcdef relay-test
           for i in $(seq 1 30); do
             curl -fs localhost:8765/api/stats && echo "冒烟通过" && exit 0
             sleep 2

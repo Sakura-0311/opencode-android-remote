@@ -1,3 +1,34 @@
+# OpenCode Android Remote - Release v4.8.0（Android 质量）
+
+## 内容
+
+- **明文连接明示**（M1）：配对页输入 `ws://` / `http://` 显示红色警告；
+  release 包连接前弹二次确认框；debug 包直接连（本地调试）
+- **翻译补齐**（M2）：9 语言 × 36 条（崩溃上报、错误码 err_061–084、明文警告），
+  缺失 0 条
+- **依赖升级**（M3）：desktop_agent 依赖锁定到 PyPI 最新（cryptography 50.0.2、
+  qrcode 8.2、keyring 25.7.0）；relay 早已锁定；Android 工具链 v4.5.0 刚升过
+- **security-crypto 评估**（M4）：继续保留——仍是 Tink 迁移源与回退后端，
+  B3 删除条件未满足
+- **MarkdownText**（M5）：代码高亮内联正则提为文件级常量
+- **UpdateChecker**（M6）：HttpURLConnection 改 OkHttp
+- **相机可选**（M7）：`uses-feature camera required=false`，无摄像头设备可安装
+- **ViewModel 继续拆**（M8）：诊断/日志区抽为 `DiagnosticsCoordinator` + 4 个单测
+- **文档对齐**（E2）：README 安全须知补建房令牌/secret 打码/明文警告；
+  PRIVACY 更新日期、Tink 存储说明、相机可选说明
+- **CI 补 handler 测试**（E3）：`relay_server/test_handlers.py`（路由 6 项）
+- **icon_concepts 移出仓库**（E4）：git rm + .gitignore
+
+## 兼容性
+
+- 非破坏性。versionCode 40800
+
+## 验证
+
+- CI 全绿；Python 单测全过；翻译缺失 0 条；emulator-smoke 待跑
+
+---
+
 # OpenCode Android Remote - Release v4.7.0（安全默认值与运维）
 
 ## 内容

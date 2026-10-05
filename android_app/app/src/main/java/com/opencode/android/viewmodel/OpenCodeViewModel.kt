@@ -118,6 +118,16 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
+    // v4.8.0/M8: 诊断与日志视图状态（ViewModel 保留同名方法做转发）
+    private val diagnosticsCoordinator: DiagnosticsCoordinator by lazy {
+        DiagnosticsCoordinator(
+            dispatch = stateDispatcher,
+            diagnose = { url, key, cb ->
+                TunnelDiagnosticsHelper.diagnoseEndpoint(getApplication(), url, key, cb)
+            },
+        )
+    }
+
     // 阶段 2: 任务状态流转（ViewModel 保留同名私有方法做转发）
     private val taskStatusController: TaskStatusController by lazy {
         TaskStatusController(prefs = prefsManager, dispatch = stateDispatcher)
@@ -331,40 +341,17 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     // 3. 连通性测试与隧道适配排查
     // =========================================================================
 
-    fun testConnectivity() {
-        val targetUrl = if (_uiState.value.appMode == AppMode.CLOUD_HOSTED) {
-            _uiState.value.cloudServerUrl
-        } else {
-            _uiState.value.relayUrl
-        }
-        val key = if (_uiState.value.appMode == AppMode.CLOUD_HOSTED) _uiState.value.cloudApiKey else _uiState.value.secret
+    fun testConnectivity() = diagnosticsCoordinator.testConnectivity()
 
-        _uiState.update {
-            it.copy(
-                diagnostics = DiagnosticsResult(isChecking = true, statusTitle = getApplication<Application>().getString(R.string.vm_005))
-            )
-        }
-
-        TunnelDiagnosticsHelper.diagnoseEndpoint(getApplication(), targetUrl, key) { result ->
-            _uiState.update { it.copy(diagnostics = result) }
-        }
-    }
-
-    fun clearDiagnostics() {
-        _uiState.update { it.copy(diagnostics = null) }
-    }
+    fun clearDiagnostics() = diagnosticsCoordinator.clearDiagnostics()
 
     // =========================================================================
     // 4. 日志搜索与触摸暂停滚动
     // =========================================================================
 
-    fun setLogSearchQuery(query: String) {
-        _uiState.update { it.copy(logSearchQuery = query) }
-    }
+    fun setLogSearchQuery(query: String) = diagnosticsCoordinator.setLogSearchQuery(query)
 
-    fun setAutoScrollPaused(isPaused: Boolean) {
-        _uiState.update { it.copy(isAutoScrollPaused = isPaused) }
-    }
+    fun setAutoScrollPaused(isPaused: Boolean) = diagnosticsCoordinator.setAutoScrollPaused(isPaused)
 
     // =========================================================================
     // 5. 会话导出为 Markdown

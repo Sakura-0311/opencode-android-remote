@@ -1,5 +1,7 @@
 package com.opencode.android.ui.screens
 
+import com.opencode.android.BuildConfig
+
 import com.opencode.android.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -68,6 +70,11 @@ fun PairingScreen(
     var showScanner by remember { mutableStateOf(false) }
     var scannedQr by remember { mutableStateOf<PairingQrData?>(null) }
     var showPairConfirm by remember { mutableStateOf(false) }
+
+    // v4.8.0/M1: 明文协议明示 —— ws:// 或 http:// 时显示警告；
+    // release 包下连接前弹确认框
+    val insecureScheme = remember(relayUrl) { isInsecureRelayUrl(relayUrl) }
+    var showInsecureConfirm by remember { mutableStateOf(false) }
 
     // v1.6: 扫码器全屏覆盖
     if (showScanner) {
@@ -364,6 +371,26 @@ fun PairingScreen(
                 shape = RoundedCornerShape(12.dp)
             )
 
+            // v4.8.0/M1: 明文协议警告（ws:// / http://）
+            if (insecureScheme) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().testTag("pair_insecure_warning")
+                ) {
+                    Icon(
+                        Icons.Default.Warning, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        stringResource(R.string.pair_034),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -378,7 +405,11 @@ fun PairingScreen(
                 }
 
                 Button(
-                    onClick = { onConnectDesktop(accountId, secret, relayUrl) },
+                    onClick = {
+                        // v4.8.0/M1: release 包下明文协议连接前二次确认
+                        if (insecureScheme && !BuildConfig.DEBUG) showInsecureConfirm = true
+                        else onConnectDesktop(accountId, secret, relayUrl)
+                    },
                     modifier = Modifier.weight(1.4f).height(48.dp).testTag("pair_connect"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
@@ -562,4 +593,31 @@ fun PairingScreen(
 
         Spacer(modifier = Modifier.height(28.dp))
     }
+
+    // v4.8.0/M1: 明文协议连接确认框（release 包）
+    if (showInsecureConfirm) {
+        AlertDialog(
+            onDismissRequest = { showInsecureConfirm = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null) },
+            title = { Text(stringResource(R.string.pair_035)) },
+            text = { Text(stringResource(R.string.pair_036, relayUrl)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showInsecureConfirm = false
+                    onConnectDesktop(accountId, secret, relayUrl)
+                }) { Text(stringResource(R.string.pair_037)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showInsecureConfirm = false }) {
+                    Text(stringResource(R.string.pair_038))
+                }
+            }
+        )
+    }
+}
+
+/** v4.8.0/M1: 是否为明文协议（ws:// 或 http://）。 */
+fun isInsecureRelayUrl(url: String): Boolean {
+    val u = url.trim().lowercase()
+    return u.startsWith("ws://") || u.startsWith("http://")
 }

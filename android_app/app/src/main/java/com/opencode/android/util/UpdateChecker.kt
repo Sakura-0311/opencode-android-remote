@@ -1,21 +1,28 @@
 package com.opencode.android.util
 
 import com.opencode.android.R
-import android.os.Handler
 import android.content.Context
+import android.os.Handler
 import android.os.Looper
 import com.opencode.android.BuildConfig
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
+import java.util.concurrent.TimeUnit
 
 /**
  * B-12: 应用内更新检查 — 比对 GitHub Releases 最新版
+ * v4.8.0/M6: HttpURLConnection 改 OkHttp（连接复用、超时统一）。
  */
 object UpdateChecker {
 
     private const val RELEASES_API =
         "https://api.github.com/repos/Sakura-0311/opencode-android-remote/releases/latest"
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .build()
 
     data class UpdateInfo(
         val hasUpdate: Boolean,
@@ -33,36 +40,37 @@ object UpdateChecker {
         val mainHandler = Handler(Looper.getMainLooper())
         Thread {
             val info = try {
-                val conn = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 8000
-                    readTimeout = 8000
-                    setRequestProperty("Accept", "application/vnd.github+json")
-                }
-                if (conn.responseCode != 200) {
-                    UpdateInfo(false, "", BuildConfig.VERSION_NAME, null, null,
-                        context.getString(R.string.update_001, conn.responseCode))
-                } else {
-                    val body = conn.inputStream.bufferedReader().readText()
-                    val json = JSONObject(body)
-                    val tag = json.optString("tag_name", "").trim().removePrefix("v")
-                    val notes = json.optString("body", "")
-                    var dlUrl: String? = null
-                    val assets = json.optJSONArray("assets")
-                    if (assets != null) {
-                        for (i in 0 until assets.length()) {
-                            val a = assets.getJSONObject(i)
-                            val name = a.optString("name", "")
-                            if (name.endsWith(".apk")) { dlUrl = a.optString("browser_download_url"); break }
+                val req = Request.Builder()
+                    .url(RELEASES_API)
+                    .header("Accept", "application/vnd.github+json")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        UpdateInfo(false, "", BuildConfig.VERSION_NAME, null, null,
+                            context.getString(R.string.update_001, resp.code))
+                    } else {
+                        val body = resp.body?.string().orEmpty()
+                        val json = JSONObject(body)
+                        val tag = json.optString("tag_name", "").trim().removePrefix("v")
+                        val notes = json.optString("body", "")
+                        var dlUrl: String? = null
+                        val assets = json.optJSONArray("assets")
+                        if (assets != null) {
+                            for (i in 0 until assets.length()) {
+                                val a = assets.getJSONObject(i)
+                                val name = a.optString("name", "")
+                                if (name.endsWith(".apk")) { dlUrl = a.optString("browser_download_url"); break }
+                            }
                         }
+                        val current = BuildConfig.VERSION_NAME
+                        UpdateInfo(
+                            hasUpdate = isNewer(tag, current),
+                            latestVersion = tag.ifEmpty { context.getString(R.string.update_002) },
+                            currentVersion = current,
+                            downloadUrl = dlUrl,
+                            releaseNotes = notes.takeIf { it.isNotBlank() }
+                        )
                     }
-                    val current = BuildConfig.VERSION_NAME
-                    UpdateInfo(
-                        hasUpdate = isNewer(tag, current),
-                        latestVersion = tag.ifEmpty { context.getString(R.string.update_002) },
-                        currentVersion = current,
-                        downloadUrl = dlUrl,
-                        releaseNotes = notes.takeIf { it.isNotBlank() }
-                    )
                 }
             } catch (e: Exception) {
                 UpdateInfo(false, "", BuildConfig.VERSION_NAME, null, null, context.getString(R.string.update_003, e.message))

@@ -337,6 +337,11 @@
     <string name="pair_031">OpenCode 7x24 小时运行在您的云服务器（VPS/Docker）上。\n</string>
     <string name="pair_032">手机随时随地通过 HTTPS/SSE 直连云端写代码、跑测试。</string>
     <string name="pair_033">设置后台忽略电池优化（防系统杀进程）</string>
+    <string name="pair_034">明文连接：secret 与消息未经 TLS 加密，仅用于可信网络调试</string>
+    <string name="pair_035">确认使用明文连接？</string>
+    <string name="pair_036">%1$s 使用未加密的 ws:// 或 http:// 协议，密钥与聊天内容可能被网络窃听。仅在可信网络（如自家局域网）继续。</string>
+    <string name="pair_037">仍要连接</string>
+    <string name="pair_038">取消</string>
     <string name="pairc_001">配对失败</string>
     <string name="pairc_002">连接失败</string>
     <string name="pairc_003">连接已关闭</string>

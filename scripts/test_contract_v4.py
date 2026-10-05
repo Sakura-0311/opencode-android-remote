@@ -25,6 +25,8 @@ PORT = 18711
 BASE = f"http://127.0.0.1:{PORT}"
 ACCOUNT = "v3test"
 SECRET = "v3-secret-xyz"
+# v4.7.0: relay 强制建房令牌（P1-6），CI 合约测试带令牌启动并建房
+ADMIN_TOKEN = "ci-contract-admin-token-0123456789abcdef"
 
 PASS, FAIL = "PASS", "FAIL"
 results = []
@@ -40,7 +42,7 @@ async def new_ws(path_client):
     return ws
 
 
-async def hello_auth(ws, client_type, device_id=None, v=4):
+async def hello_auth(ws, client_type, device_id=None, v=4, admin_token=None):
     await ws.send(json.dumps({
         "type": "hello", "v": v,
         "capabilities": ["hello", "multi_desktop"],
@@ -51,6 +53,7 @@ async def hello_auth(ws, client_type, device_id=None, v=4):
         "type": "auth", "account_id": ACCOUNT, "secret": SECRET,
         "client_type": client_type,
         **({"device_id": device_id} if device_id else {}),
+        **({"admin_token": admin_token} if admin_token else {}),
     }))
     auth_ok = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
     return ack, auth_ok
@@ -59,7 +62,7 @@ async def hello_auth(ws, client_type, device_id=None, v=4):
 async def make_room():
     """desktop 先建房（mobile 不能建房）"""
     d = await new_ws("desktop")
-    await hello_auth(d, "desktop", "room-maker")
+    await hello_auth(d, "desktop", "room-maker", admin_token=ADMIN_TOKEN)
     return d
 
 
@@ -172,7 +175,7 @@ async def test_desktop_requires_device_id():
 
 async def test_multi_desktop():
     d1 = await new_ws("desktop")
-    ack1, ok1 = await hello_auth(d1, "desktop", "desk-A")
+    ack1, ok1 = await hello_auth(d1, "desktop", "desk-A", admin_token=ADMIN_TOKEN)
     check("desktop A 认证成功", ok1.get("type") == "auth_ok", str(ok1))
 
     d2 = await new_ws("desktop")
@@ -224,7 +227,7 @@ async def test_multi_desktop():
 async def test_primary_fallback_by_auth_time():
     """v3.0.2/B2: 主 desktop 掉线后，回退到最近认证的在线 desktop（而非字典第一项）"""
     dA = await new_ws("desktop")
-    await hello_auth(dA, "desktop", "desk-A")
+    await hello_auth(dA, "desktop", "desk-A", admin_token=ADMIN_TOKEN)
     await asyncio.sleep(0.05)
     dB = await new_ws("desktop")
     await hello_auth(dB, "desktop", "desk-B")
@@ -284,7 +287,7 @@ async def _drain(ws, n=5):
 async def test_desktop_routing():
     """v3.1: desktop_routing —— target_device_id 定向路由 / 缺省走主 / 目标不存在报错 / source 打标 / list_desktops"""
     dA = await new_ws("desktop")
-    ack_a, _ = await hello_auth(dA, "desktop", "desk-A")
+    ack_a, _ = await hello_auth(dA, "desktop", "desk-A", admin_token=ADMIN_TOKEN)
     check("hello_ack 含 desktop_routing",
           "desktop_routing" in ack_a.get("server_capabilities", []), str(ack_a.get("server_capabilities")))
     await asyncio.sleep(0.05)
@@ -393,6 +396,8 @@ async def test_desktop_routing():
 
 async def main():
     env = dict(os.environ)
+    # v4.7.0: relay 强制建房令牌，测试环境带令牌启动
+    env["RELAY_ADMIN_TOKEN"] = ADMIN_TOKEN
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "relay_server.server:app",
          "--host", "127.0.0.1", "--port", str(PORT)],

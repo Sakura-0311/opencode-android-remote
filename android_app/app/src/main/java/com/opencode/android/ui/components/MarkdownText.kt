@@ -92,6 +92,10 @@ private val INLINE_PATTERN = Regex(
     """(\*\*.+?\*\*|\*[^*\n]+?\*|~~.+?~~|`[^`\n]+?`|\[[^\]\n]+\]\([^)\n]+\))"""
 )
 
+// v4.8.0/M5: 代码高亮用正则提为文件级常量（原在函数内每次重建）
+private val CODE_TOKEN_RE = Regex("\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`|\\b\\d[\\d._]*\\b|\\b[A-Za-z_][A-Za-z0-9_]*\\b|\\s+|.")
+private val CODE_NUMBER_RE = Regex("\\b\\d[\\d._]*\\b")
+
 private fun parseInline(text: String): List<InlineSpan> {
     val spans = mutableListOf<InlineSpan>()
     var last = 0
@@ -387,15 +391,14 @@ private fun highlightCode(code: String, language: String, baseColor: Color): Ann
             val commentPart = if (commentStart >= 0) line.substring(commentStart) else ""
 
             // 字符串与普通 token 切分
-            val tokenPattern = Regex("\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`|\\b\\d[\\d._]*\\b|\\b[A-Za-z_][A-Za-z0-9_]*\\b|\\s+|.")
-            for (m in tokenPattern.findAll(codePart)) {
+            for (m in CODE_TOKEN_RE.findAll(codePart)) {
                 val tok = m.value
                 when {
                     tok.length >= 2 && ((tok.startsWith("\"") && tok.endsWith("\"")) ||
                             (tok.startsWith("'") && tok.endsWith("'")) ||
                             (tok.startsWith("`") && tok.endsWith("`"))) ->
                         withStyle(SpanStyle(color = stringColor)) { append(tok) }
-                    tok.matches(Regex("\\b\\d[\\d._]*\\b")) ->
+                    tok.matches(CODE_NUMBER_RE) ->
                         withStyle(SpanStyle(color = numberColor)) { append(tok) }
                     tok in keywords ->
                         withStyle(SpanStyle(color = keywordColor, fontWeight = FontWeight.Bold)) { append(tok) }

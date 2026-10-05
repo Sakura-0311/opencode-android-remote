@@ -1249,6 +1249,8 @@ if __name__ == "__main__":
                      help="WebSocket 单帧字节上限（默认 $WS_MAX_SIZE 或 2097152）")
     _args = _ap.parse_args()
     if _args.admin_token is not None:
+        # 同步到环境变量，_require_admin_token() 从环境读取
+        os.environ["RELAY_ADMIN_TOKEN"] = _args.admin_token
         globals()["RELAY_ADMIN_TOKEN"] = _args.admin_token
     if _args.trusted_proxies is not None:
         globals()["TRUSTED_PROXIES"] = set(filter(None, _args.trusted_proxies.split(",")))

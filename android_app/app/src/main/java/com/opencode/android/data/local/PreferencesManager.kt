@@ -21,6 +21,8 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     // 拒绝读写；非敏感偏好仍可用普通存储。
     //
     // v3.2: 保留旧 EncryptedSharedPreferences 实现至少 1 个版本（迁移源 + 回退）。
+    // v4.8.0/M4 评估结论：继续保留——仍是 Tink 迁移源与回退后端，
+    // B3 删除条件（legacyBackendUseCount 完整发版周期为 0）尚未验证，不可删。
     // 新实现为 Tink AEAD（tink-android）。后端选择见 initSecureBackend()。
     private val securePrefs: SharedPreferences? = try {
         val masterKey = androidx.security.crypto.MasterKey.Builder(context)
