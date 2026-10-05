@@ -9,8 +9,11 @@ import com.opencode.android.data.model.SessionItem
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.annotation.VisibleForTesting
+import com.opencode.android.coordinator.PairingPrefs
+import com.opencode.android.coordinator.TaskStatusPrefs
 
-class PreferencesManager private constructor(context: Context) : com.opencode.android.security.E2eePrefs {
+class PreferencesManager private constructor(context: Context) : com.opencode.android.security.E2eePrefs,
+    PairingPrefs, TaskStatusPrefs {
 
     // P0-3: 加密存储失败时禁止静默降级（fail-closed）。
     // securePrefs 为 null 表示加密不可用：敏感凭据（Secret / API Key / AccountId）
@@ -341,7 +344,7 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     /**
      * P0-3: 保存配对敏感凭据。加密存储不可用时返回 false，调用方必须提示用户且不得继续。
      */
-    fun savePairingInfo(accountId: String, secret: String, relayUrl: String): Boolean {
+    override fun savePairingInfo(accountId: String, secret: String, relayUrl: String): Boolean {
         val sp = secure() ?: run {
             android.util.Log.e("PrefsManager", "P0-3: 拒绝保存配对凭据——加密存储不可用")
             return false
@@ -376,7 +379,7 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     /**
      * P0-3: 保存云端敏感凭据。加密存储不可用时返回 false，调用方必须提示用户且不得继续。
      */
-    fun saveCloudConfig(cloudUrl: String, apiKey: String, workspacePath: String): Boolean {
+    override fun saveCloudConfig(cloudUrl: String, apiKey: String, workspacePath: String): Boolean {
         val sp = secure() ?: run {
             android.util.Log.e("PrefsManager", "P0-3: 拒绝保存云端凭据——加密存储不可用")
             return false
@@ -468,7 +471,7 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     }
 
     // v1.6 P0 后台保活：任务状态持久化（App 重启后恢复显示）
-    fun saveTaskStatus(status: String, detail: String, sessionId: String) {
+    override fun saveTaskStatus(status: String, detail: String, sessionId: String) {
         prefs.edit()
             .putString(KEY_TASK_STATUS, status)
             .putString(KEY_TASK_DETAIL, detail)
@@ -476,7 +479,7 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
             .apply()
     }
 
-    fun getTaskStatus(): Triple<String, String, String> {
+    override fun getTaskStatus(): Triple<String, String, String> {
         return Triple(
             prefs.getString(KEY_TASK_STATUS, "IDLE") ?: "IDLE",
             prefs.getString(KEY_TASK_DETAIL, "") ?: "",

@@ -1,6 +1,7 @@
 package com.opencode.android.security
 
 import android.util.Base64
+import com.opencode.android.coordinator.PairingE2ee
 import com.opencode.android.data.local.PreferencesManager
 import com.opencode.android.util.AppLog
 
@@ -30,14 +31,14 @@ interface E2eePrefs {
     var secretIsMaster: Boolean
 }
 
-class E2eeManager(private val prefs: E2eePrefs) {
+class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
 
     /** E2EE 是否可用（运行时开关开 + 安全存储可用）。 */
     fun isAvailable(): Boolean =
         prefs.isE2eeEnabled && prefs.isSecureStorageAvailable
 
     /** 本机公钥（base64）；不存在则生成并持久化私钥。 */
-    fun ownPublicKeyB64(): String? {
+    override fun ownPublicKeyB64(): String? {
         if (!isAvailable()) return null
         return try {
             var priv = prefs.getE2eePrivateKey()
@@ -62,7 +63,7 @@ class E2eeManager(private val prefs: E2eePrefs) {
      * v4.3 M-2: 保存对端公钥前做 HMAC 绑定校验。
      * @return true=已保存；false=拒绝保存（签名无效，疑似中继篡改）
      */
-    fun storePeerPubkey(deviceId: String, pubkeyB64: String, sig: String = ""): Boolean {
+    override fun storePeerPubkey(deviceId: String, pubkeyB64: String, sig: String): Boolean {
         if (!isAvailable() || deviceId.isEmpty() || pubkeyB64.isEmpty()) return false
         // 只有持有房间主 secret（手动配对）时才能校验；扫码配对用 device_secret，
         // relay 明文知道它，无法做不可伪造绑定，走 TOFU（威胁模型已声明）。
@@ -103,7 +104,7 @@ class E2eeManager(private val prefs: E2eePrefs) {
     }
 
     /** 该 desktop 是否已协商 E2EE（有对端公钥）。 */
-    fun hasPeerKey(deviceId: String): Boolean =
+    override fun hasPeerKey(deviceId: String): Boolean =
         isAvailable() && !prefs.getE2eePeerPubkey(deviceId).isNullOrEmpty()
 
     /**
