@@ -56,7 +56,9 @@
 - [ ] 7.1 卸载重装后需重新配对（旧凭据不残留）
 
 ## 9. 安全存储迁移（v3.2）
-> 2026-10-05 cloud-device upgrade 模式发现：v3.1.0→v4.3.2 覆盖安装后，迁移抛 SecurityException（Could not decrypt key）回退 LEGACY。v3.1.0 自读正常，master key 与 keyset 未被改写，根因定位中。回退是优雅的（凭据不丢），但升级用户实际走不到 Tink。
+> 2026-10-05 cloud-device upgrade 模式发现：v3.1.0→v4.3.2 覆盖安装后，迁移抛 SecurityException（Could not decrypt key）回退 LEGACY。
+> 根因：v4.1 加 E2EE 时在 OpenCodeApp 里又 new 了一个 PreferencesManager（给 E2eeManager 用），与 ViewModel 里的实例并存；两个 EncryptedSharedPreferences 实例并发初始化导致 keyset 竞争，旧文件写坏。v3.1.0 只有一个实例所以没事。
+> 修复：PreferencesManager 改为单例（getInstance），已合入 main，CI 全绿。回退是优雅的（无崩溃、不丢数据），但修之前升级用户实际走不到 Tink。下个发版后用 upgrade 模式复验。
 - [ ] 9.1 从 v3.1.x 覆盖安装 v3.2：配对凭据、profile 密钥保留，无需重新配对
 - [ ] 9.2 菜单 → 连接诊断：「安全存储」层显示 Tink 1.23.0（已迁移），状态 OK
 - [ ] 9.3 首次启动无「安全存储提示」弹窗（迁移成功时不打扰）
