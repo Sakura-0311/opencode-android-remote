@@ -141,6 +141,9 @@ jobs:
           if [ "$MODE" = "rtl" ]; then
             adb exec-out screencap -p > /tmp/rtl-ar.png && echo "截图已保存"
           fi
+          echo "=== 诊断3：v4.3.2 启动后，ESP 文件是否被改写 ==="
+          adb shell "cat /data/data/com.opencode.android/shared_prefs/opencode_remote_prefs.xml 2>&1" | grep -o "__androidx_security_crypto_encrypted_prefs_key_keyset__\">[A-Za-z0-9+/=]*" | head -c 100; echo
+          adb shell "ls /data/misc/keystore/user_0/ 2>&1 | head -8"
           if adb logcat -d | grep -q "FATAL EXCEPTION"; then
             echo "::error::模拟器出现 FATAL 崩溃"
             adb logcat -d | grep -A15 "FATAL EXCEPTION" | head -30
