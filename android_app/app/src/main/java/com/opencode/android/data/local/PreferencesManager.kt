@@ -12,29 +12,6 @@ import androidx.annotation.VisibleForTesting
 
 class PreferencesManager private constructor(context: Context) : com.opencode.android.security.E2eePrefs {
 
-    companion object {
-        @Volatile
-        private var INSTANCE: PreferencesManager? = null
-
-        /**
-         * v4.3.2 A1: 单例。之前 Application 和 ViewModel 各 new 一个实例，
-         * 两个 EncryptedSharedPreferences 并发初始化会导致 keyset 竞争，
-         * 升级后迁移读到写坏的旧文件（SecurityException 回退 LEGACY）。
-         */
-        fun getInstance(context: Context): PreferencesManager {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: PreferencesManager(context.applicationContext ?: context)
-                    .also { INSTANCE = it }
-            }
-        }
-
-        /** 仅供测试：重置单例。 */
-        @VisibleForTesting
-        fun resetForTest() {
-            synchronized(this) { INSTANCE = null }
-        }
-    }
-
     // P0-3: 加密存储失败时禁止静默降级（fail-closed）。
     // securePrefs 为 null 表示加密不可用：敏感凭据（Secret / API Key / AccountId）
     // 拒绝读写；非敏感偏好仍可用普通存储。
@@ -243,6 +220,27 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     }
 
     companion object {
+        @Volatile
+        private var INSTANCE: PreferencesManager? = null
+
+        /**
+         * v4.3.2 A1: 单例。之前 Application 和 ViewModel 各 new 一个实例，
+         * 两个 EncryptedSharedPreferences 并发初始化会导致 keyset 竞争，
+         * 升级后迁移读到写坏的旧文件（SecurityException 回退 LEGACY）。
+         */
+        fun getInstance(context: Context): PreferencesManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: PreferencesManager(context.applicationContext ?: context)
+                    .also { INSTANCE = it }
+            }
+        }
+
+        /** 仅供测试：重置单例。 */
+        @VisibleForTesting
+        fun resetForTest() {
+            synchronized(this) { INSTANCE = null }
+        }
+
         private const val PREFS_NAME = "opencode_remote_prefs"
         // v4.0: 非敏感偏好明文存储（敏感 key 只走 secure()/Tink）
         private const val PLAIN_PREFS_NAME = "opencode_remote_settings"
