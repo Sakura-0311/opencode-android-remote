@@ -14,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -305,7 +306,7 @@ fun PairingScreen(
                     Icon(Icons.Default.Badge, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("pair_account"),
                 shape = RoundedCornerShape(12.dp)
             )
 
@@ -344,7 +345,7 @@ fun PairingScreen(
                 visualTransformation = if (isSecretVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("pair_secret"),
                 shape = RoundedCornerShape(12.dp)
             )
 
@@ -359,7 +360,7 @@ fun PairingScreen(
                     Icon(Icons.Default.Sensors, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                 },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("pair_relay_url"),
                 shape = RoundedCornerShape(12.dp)
             )
 
@@ -378,7 +379,7 @@ fun PairingScreen(
 
                 Button(
                     onClick = { onConnectDesktop(accountId, secret, relayUrl) },
-                    modifier = Modifier.weight(1.4f).height(48.dp),
+                    modifier = Modifier.weight(1.4f).height(48.dp).testTag("pair_connect"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {

@@ -20,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -561,7 +562,7 @@ fun ChatScreen(
                             val hint = if (uiState.appMode == AppMode.CLOUD_HOSTED) stringResource(R.string.chat_030) else stringResource(R.string.chat_031)
                             Text(hint)
                         },
-                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                        modifier = Modifier.weight(1f).padding(end = 8.dp).testTag("chat_input"),
                         shape = RoundedCornerShape(20.dp),
                         maxLines = 4
                     )
@@ -586,7 +587,7 @@ fun ChatScreen(
                             },
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = Color.White,
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(48.dp).testTag("chat_send")
                         ) {
                             Icon(Icons.Default.Send, contentDescription = "Send")
                         }

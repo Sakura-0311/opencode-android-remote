@@ -1,0 +1,54 @@
+# B4: 黄金路径 E2E —— 配对 → 连接 → 发消息 → 收到回声回复
+#
+# 前置条件（由 .github/workflows/e2e.yml 准备）:
+#   1. relay_server 已在本机启动（E2E_RELAY_PORT）
+#   2. e2e/fake_desktop.py 已连接并建房（E2E_ACCOUNT / E2E_SECRET）
+#   3. adb reverse tcp:E2E_RELAY_PORT tcp:E2E_RELAY_PORT 已执行
+#      → 模拟器内用 http://10.0.2.2:PORT 访问宿主机 relay
+#
+# 环境变量: E2E_ACCOUNT, E2E_SECRET, E2E_RELAY_PORT（workflow 注入）
+appId: com.opencode.android
+---
+- clearState
+- launchApp
+
+# ---------- 配对屏 ----------
+- extendedWaitUntil:
+    visible:
+      id: "pair_account"
+    timeout: 30000
+
+- tapOn:
+    id: "pair_account"
+- inputText: ${E2E_ACCOUNT}
+- tapOn:
+    id: "pair_secret"
+- inputText: ${E2E_SECRET}
+- tapOn:
+    id: "pair_relay_url"
+- inputText: "http://10.0.2.2:${E2E_RELAY_PORT}"
+
+# 收起键盘，避免遮挡连接按钮
+- hideKeyboard
+
+- tapOn:
+    id: "pair_connect"
+
+# ---------- 等待进入聊天屏 ----------
+- extendedWaitUntil:
+    visible:
+      id: "chat_input"
+    timeout: 45000
+
+# ---------- 发一条消息 ----------
+- tapOn:
+    id: "chat_input"
+- inputText: "你好 E2E"
+- tapOn:
+    id: "chat_send"
+
+# ---------- 断言收到 fake desktop 的回声 ----------
+- extendedWaitUntil:
+    visible:
+      text: "E2E 回声：你好 E2E"
+    timeout: 60000
