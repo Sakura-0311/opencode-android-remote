@@ -914,59 +914,37 @@ class RelayWebSocketClient(private val appContext: Context) {
     }
 
     fun sendListSessions() {
-        val envelope = JSONObject().apply {
-            put("action", "list_sessions")
-            put("req_id", UUID.randomUUID().toString())
-        }
-        webSocket?.send(envelope.toString())
+        webSocket?.send(RelayMessageFactory.listSessions().toString())
     }
 
     fun sendCreateSession(title: String) {
-        val envelope = JSONObject().apply {
-            put("action", "create_session")
-            put("req_id", UUID.randomUUID().toString())
-            put("payload", JSONObject().apply { put("title", title) })
-        }
-        webSocket?.send(envelope.toString())
+        webSocket?.send(RelayMessageFactory.createSession(title).toString())
     }
 
     /**
      * v1.6 P0 多设备管理：请求设备列表 / 撤销设备 / 重命名设备
      */
     fun requestDeviceList() {
-        webSocket?.send(JSONObject().apply { put("type", "list_devices") }.toString())
+        webSocket?.send(RelayMessageFactory.listDevices().toString())
     }
 
     /** v3.1: 请求在线 desktop 列表（定向路由的目标选择用） */
     fun requestDesktopList() {
-        webSocket?.send(JSONObject().apply { put("type", "list_desktops") }.toString())
+        webSocket?.send(RelayMessageFactory.listDesktops().toString())
     }
 
     // v2.4: 按 deviceId 撤销（deviceName 仅兼容旧 relay）
     fun revokeDevice(deviceId: String, deviceName: String = "") {
-        webSocket?.send(JSONObject().apply {
-            put("type", "revoke_device")
-            put("device_id", deviceId)
-            put("device_name", deviceName)
-        }.toString())
+        webSocket?.send(RelayMessageFactory.revokeDevice(deviceId, deviceName).toString())
     }
 
     // v2.4: 按 deviceId 重命名
     fun renameDeviceById(deviceId: String, oldName: String, newName: String) {
-        webSocket?.send(JSONObject().apply {
-            put("type", "rename_device")
-            put("device_id", deviceId)
-            put("old_name", oldName)
-            put("new_name", newName)
-        }.toString())
+        webSocket?.send(RelayMessageFactory.renameDeviceById(deviceId, oldName, newName).toString())
     }
 
     fun renameDevice(oldName: String, newName: String) {
-        webSocket?.send(JSONObject().apply {
-            put("type", "rename_device")
-            put("old_name", oldName)
-            put("new_name", newName)
-        }.toString())
+        webSocket?.send(RelayMessageFactory.renameDevice(oldName, newName).toString())
     }
 
     /**
@@ -974,23 +952,13 @@ class RelayWebSocketClient(private val appContext: Context) {
      */
     fun sendFileList(path: String): String {
         val reqId = UUID.randomUUID().toString()
-        val envelope = JSONObject().apply {
-            put("action", "file_list")
-            put("req_id", reqId)
-            put("payload", JSONObject().apply { put("path", path) })
-        }
-        webSocket?.send(envelope.toString())
+        webSocket?.send(RelayMessageFactory.fileList(path, reqId).toString())
         return reqId
     }
 
     fun sendFileRead(path: String): String {
         val reqId = UUID.randomUUID().toString()
-        val envelope = JSONObject().apply {
-            put("action", "file_read")
-            put("req_id", reqId)
-            put("payload", JSONObject().apply { put("path", path) })
-        }
-        webSocket?.send(envelope.toString())
+        webSocket?.send(RelayMessageFactory.fileRead(path, reqId).toString())
         return reqId
     }
 
@@ -999,11 +967,7 @@ class RelayWebSocketClient(private val appContext: Context) {
      */
     fun sendDiagnose(): String {
         val reqId = UUID.randomUUID().toString()
-        val envelope = JSONObject().apply {
-            put("action", "diagnose")
-            put("req_id", reqId)
-        }
-        webSocket?.send(envelope.toString())
+        webSocket?.send(RelayMessageFactory.diagnose(reqId).toString())
         return reqId
     }
 
@@ -1011,22 +975,14 @@ class RelayWebSocketClient(private val appContext: Context) {
      * v1.6 P1: 请求 Model/Agent 配置（动态获取）
      */
     fun requestConfig() {
-        val envelope = JSONObject().apply {
-            put("action", "get_config")
-            put("req_id", UUID.randomUUID().toString())
-        }
-        webSocket?.send(envelope.toString())
+        webSocket?.send(RelayMessageFactory.getConfig().toString())
     }
 
     /**
      * v1.6 P1 项目管理中心：请求项目列表
      */
     fun requestProjects() {
-        val envelope = JSONObject().apply {
-            put("action", "get_projects")
-            put("req_id", UUID.randomUUID().toString())
-        }
-        webSocket?.send(envelope.toString())
+        webSocket?.send(RelayMessageFactory.getProjects().toString())
     }
 
     /**
@@ -1109,30 +1065,12 @@ class RelayWebSocketClient(private val appContext: Context) {
     }
 
     fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "", nonce: String? = null) {
-        val payload = JSONObject().apply {
-            put("call_id", callId)
-            put("approved", isApproved)
-            put("reason", reason)
-            // B-5: nonce 原样回传，供 agent 防重放校验
-            if (!nonce.isNullOrEmpty()) put("nonce", nonce)
-        }
-        val envelope = JSONObject().apply {
-            put("action", "tool_approval_response")
-            put("req_id", UUID.randomUUID().toString())
-            put("payload", payload)
-        }
-        webSocket?.send(envelope.toString())
+        webSocket?.send(RelayMessageFactory.approvalResponse(callId, isApproved, reason, nonce).toString())
     }
 
     fun sendCancel(sessionId: String) {
         val clientMsgId = newClientMsgId()
-        val envelope = JSONObject().apply {
-            put("action", "cancel")
-            put("session_id", sessionId)
-            put("req_id", UUID.randomUUID().toString())
-            put("client_msg_id", clientMsgId)
-        }
-        sendEnvelope("cancel", envelope, clientMsgId)
+        sendEnvelope("cancel", RelayMessageFactory.cancel(sessionId, clientMsgId), clientMsgId)
     }
 
     fun disconnect() {
