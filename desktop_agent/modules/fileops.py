@@ -55,6 +55,13 @@ def _get_file_roots() -> list:
     else:
         roots = [os.path.realpath(os.getcwd())]
     _file_roots_cache = [r for r in roots if os.path.isdir(r)] or [os.path.realpath(os.getcwd())]
+    # 默认根为用户 home 或磁盘根时打印明确警告（沙盒范围过大）
+    if not env_roots:
+        home = os.path.realpath(os.path.expanduser("~"))
+        for r in _file_roots_cache:
+            if r == home or r == os.path.abspath(os.sep):
+                logger.warning("文件浏览器根目录为 %s，沙盒范围过大，"
+                               "建议用 AGENT_FILE_ROOTS 限定到项目目录", r)
     return _file_roots_cache
 
 # 敏感文件名黑名单（即使在允许根内也拒绝；fnmatch 匹配 basename）
@@ -62,9 +69,29 @@ SENSITIVE_FILENAME_PATTERNS = [
     ".opencode_secret", ".env", ".env.*", "id_rsa*", "id_ed25519*", "id_ecdsa*",
     "*.pem", "*.key", "*.p12", "*.pfx", "credentials.json", "secrets.*",
     ".netrc", "_netrc", ".aws", ".gnupg",
+    # 之前只匹配最终文件名，.aws/credentials 这类路径会被放行，在此补强
+    "*.jks", "*.keystore", "keystore.properties", ".git-credentials",
+    ".npmrc", ".pypirc", ".pgpass", "*.tfstate", "*.kdbx",
+    "service-account*.json", "*.p8",
 ]
+# 敏感目录组件黑名单（匹配 realpath 后的任一路径组件）
+SENSITIVE_DIR_NAMES = {
+    ".ssh", ".aws", ".gnupg", ".kube", ".docker", ".azure", "gcloud",
+}
 # 敏感相对路径后缀黑名单
 SENSITIVE_PATH_SUFFIXES = [".git/config", ".ssh/authorized_keys", ".ssh/known_hosts"]
+
+def _has_sensitive_component(real: str) -> bool:
+    """realpath 后的路径中是否含有敏感目录组件。"""
+    import pathlib
+    return any(p in SENSITIVE_DIR_NAMES for p in pathlib.PurePath(real).parts)
+
+def _is_sensitive_name(name: str) -> bool:
+    """单条文件名/目录名是否命中黑名单（用于目录列表过滤）。"""
+    import fnmatch
+    if name in SENSITIVE_DIR_NAMES:
+        return True
+    return any(fnmatch.fnmatch(name, pat) for pat in SENSITIVE_FILENAME_PATTERNS)
 
 def _resolve_sandboxed_path(path: str):
     """解析并校验路径。返回 (real_path, None)；失败返回 (None, "PATH_NOT_ALLOWED: 原因")。
@@ -85,6 +112,10 @@ def _resolve_sandboxed_path(path: str):
     for pat in SENSITIVE_FILENAME_PATTERNS:
         if fnmatch.fnmatch(base, pat):
             return None, f"PATH_NOT_ALLOWED: 敏感文件禁止访问 ({base})"
+    # 按路径组件拦截敏感目录（如 .aws/credentials 的 basename 是 credentials，
+    # 原先只匹配 basename 会被放行）
+    if _has_sensitive_component(real):
+        return None, f"PATH_NOT_ALLOWED: 敏感目录禁止访问 ({real})"
     rel_posix = real.replace(os.sep, "/")
     for suf in SENSITIVE_PATH_SUFFIXES:
         if rel_posix.endswith("/" + suf) or rel_posix.endswith(suf):
@@ -103,6 +134,9 @@ def _list_dir_entries(path: str) -> list:
     entries = []
     with os.scandir(abs_path) as it:
         for entry in it:
+            # 目录列表同步过滤敏感条目，避免它们出现在手机端
+            if _is_sensitive_name(entry.name):
+                continue
             try:
                 is_dir = entry.is_dir(follow_symlinks=False)
                 stat = entry.stat(follow_symlinks=False)

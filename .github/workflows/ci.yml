@@ -28,6 +28,9 @@ jobs:
         run: |
           pip install uvicorn websockets
           python scripts/test_contract_v4.py
+      - name: Run sandbox blacklist tests
+        # 文件沙盒黑名单参数化单测（11 路径 + 目录列表过滤）
+        run: python desktop_agent/modules/test_sandbox.py
 
   supply-chain:
     # v2.6: 供应链安全——秘密扫描（仅 docs/，防文档泄密）与依赖漏洞扫描
