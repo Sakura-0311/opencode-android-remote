@@ -44,6 +44,15 @@ import com.opencode.android.util.StreamReducer
 import com.opencode.android.util.TargetSwitchPolicy
 import com.opencode.android.util.DesktopRoutingPolicy
 import com.opencode.android.util.SessionReducer
+import com.opencode.android.util.TaskStatusReducer
+import com.opencode.android.util.PairingStateReducer
+import com.opencode.android.util.PairingStateReducer.ManualInputError
+import com.opencode.android.util.SendMessageReducer
+import com.opencode.android.util.CloudPairReducer
+import com.opencode.android.util.StreamEndReducer
+import com.opencode.android.util.DeviceListReducer
+import com.opencode.android.util.ConnectionStateReducer
+import com.opencode.android.util.ProjectsReducer
 import com.opencode.android.util.FeatureFlags
 import com.opencode.android.network.RelayConnectionState
 import com.opencode.android.network.RelayWebSocketClient
@@ -97,17 +106,9 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     private fun setTaskStatus(status: TaskStatus, detail: String = "", sessionId: String = "") {
         val sid = sessionId.ifBlank { _uiState.value.currentSessionId }
         prefsManager.saveTaskStatus(status.name, detail, sid)
-        _uiState.update {
-            it.copy(
-                taskStatus = status,
-                taskStatusDetail = detail,
-                // P2-13: 任务中心用——任务开始时间（用于计算耗时）
-                taskStartTimeMs = if (status == TaskStatus.RUNNING) System.currentTimeMillis() else it.taskStartTimeMs,
-                isGenerating = status == TaskStatus.RUNNING
-                        || status == TaskStatus.WAITING_INPUT
-                        || status == TaskStatus.APPROVAL_REQUIRED
-            )
-        }
+        // 阶段 1: 纯状态部分委托 TaskStatusReducer（now 显式传入）
+        val now = System.currentTimeMillis()
+        _uiState.update { TaskStatusReducer.applyTaskStatus(it, status, detail, now) }
     }
 
     init {
@@ -121,12 +122,9 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             TaskStatus.valueOf(savedStatus)
         } catch (e: Exception) { TaskStatus.IDLE }
         // 若上次退出时任务还在进行中，标记为已断开（需重连同步），而非假装仍在运行
-        val effectiveStatus = if (restoredStatus == TaskStatus.RUNNING
-            || restoredStatus == TaskStatus.WAITING_INPUT
-            || restoredStatus == TaskStatus.APPROVAL_REQUIRED) {
-            TaskStatus.DISCONNECTED
-        } else restoredStatus
-        val effectiveDetail = if (effectiveStatus == TaskStatus.DISCONNECTED && restoredStatus != TaskStatus.IDLE) {
+        // 阶段 1: 恢复语义委托 TaskStatusReducer
+        val effectiveStatus = TaskStatusReducer.restoreOnLaunch(restoredStatus)
+        val effectiveDetail = if (TaskStatusReducer.needsRestoreHint(effectiveStatus, restoredStatus)) {
             getApplication<Application>().getString(R.string.vm_001, savedDetail)
         } else savedDetail
 
@@ -357,8 +355,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         onDone: (Boolean, String) -> Unit
     ) {
         viewModelScope.launch {
+            // 阶段 1: 纯状态部分委托 PairingStateReducer
             _uiState.update {
-                it.copy(statusBanner = getApplication<Application>().getString(R.string.vm_007, desktopName), appError = null)
+                PairingStateReducer.applyClaimStarted(
+                    it,
+                    getApplication<Application>().getString(R.string.vm_007, desktopName)
+                )
             }
             // v4.1: E2EE 公钥交换（开关关闭时传空，relay/对端跳过）
             val e2eePubkey = e2eeManager.ownPublicKeyB64() ?: ""
@@ -372,11 +374,14 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 val ok = e2eeManager.storePeerPubkey(
                     result.desktopDeviceId, result.e2eePeerPubkey, result.e2eePubkeySig)
                 if (!ok) {
-                    _uiState.update { it.copy(appError = AppError(
-                        "E2EE_PUBKEY_UNTRUSTED", "对端公钥认证失败，已拒绝（疑似中继篡改）")) }
+                    _uiState.update {
+                        PairingStateReducer.applyE2eePubkeyResult(
+                            it, false, "对端公钥认证失败，已拒绝（疑似中继篡改）"
+                        )
+                    }
                 } else {
                     // v4.3 M-5: 新配对成功，给一次「已建立加密通道」明确提示
-                    _uiState.update { it.copy(showE2eeChannelDialog = true) }
+                    _uiState.update { PairingStateReducer.applyE2eePubkeyResult(it, true, "") }
                 }
                 refreshE2eePeerReady()
             }
@@ -391,31 +396,28 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 )
                 if (!saved) {
                     _uiState.update {
-                        it.copy(
-                            appError = AppError("SECURE_STORAGE_UNAVAILABLE", getApplication<Application>().getString(R.string.vm_009)),
-                            statusBanner = null
+                        PairingStateReducer.applySaveFailed(
+                            it,
+                            getApplication<Application>().getString(R.string.vm_009)
                         )
                     }
                     onDone(false, getApplication<Application>().getString(R.string.vm_010))
                     return@launch
                 }
                 _uiState.update {
-                    it.copy(
-                        appMode = AppMode.DESKTOP_RELAY,
-                        accountId = result.accountId.ifBlank { accountId },
-                        secret = result.deviceSecret,
-                        relayUrl = relayUrl,
-                        isPaired = true,
-                        isAuthenticated = false,
-                        appError = null,
-                        statusBanner = getApplication<Application>().getString(R.string.vm_011, result.desktopName.ifBlank { desktopName })
+                    PairingStateReducer.applyClaimSuccess(
+                        it,
+                        result.accountId.ifBlank { accountId },
+                        result.deviceSecret,
+                        relayUrl,
+                        getApplication<Application>().getString(R.string.vm_011, result.desktopName.ifBlank { desktopName })
                     )
                 }
                 onDone(true, getApplication<Application>().getString(R.string.vm_012))
                 OpLog.record(getApplication(), OpLog.OpType.PAIR, "desktop=${result.desktopName.ifBlank { desktopName }}")
             } else {
                 val err = result.error.ifBlank { getApplication<Application>().getString(R.string.vm_013) }
-                _uiState.update { it.copy(appError = AppError("PAIR_FAILED", err), statusBanner = null) }
+                _uiState.update { PairingStateReducer.applyClaimFailed(it, err) }
                 onDone(false, err)
             }
         }
@@ -426,13 +428,17 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         val trimmedSecret = secret.trim()
         val trimmedRelay = relayUrl.trim()
 
-        if (trimmedAccount.isBlank()) {
-            _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_014))) }
-            return
-        }
-        if (trimmedSecret.isBlank()) {
-            _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_015))) }
-            return
+        // 阶段 1: 输入校验委托 PairingStateReducer（文案映射留在 ViewModel）
+        when (PairingStateReducer.validateManualInput(accountId, secret)) {
+            ManualInputError.BLANK_ACCOUNT -> {
+                _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_014))) }
+                return
+            }
+            ManualInputError.BLANK_SECRET -> {
+                _uiState.update { it.copy(appError = AppError("INPUT_EMPTY", getApplication<Application>().getString(R.string.vm_015))) }
+                return
+            }
+            ManualInputError.NONE -> {}
         }
 
         // v4.3 M-2: 手动配对填的是房间主 secret，可做 E2EE 公钥 HMAC 绑定校验
@@ -446,16 +452,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
 
         _uiState.update {
-            it.copy(
-                appMode = AppMode.DESKTOP_RELAY,
-                accountId = trimmedAccount,
-                secret = trimmedSecret,
-                relayUrl = trimmedRelay,
-                isPaired = true,
-                isAuthenticated = false,
-                appError = null,
-                diagnostics = null,
-                statusBanner = getApplication<Application>().getString(R.string.vm_016)
+            PairingStateReducer.applyManualSuccess(
+                it,
+                trimmedAccount,
+                trimmedSecret,
+                trimmedRelay,
+                getApplication<Application>().getString(R.string.vm_016)
             )
         }
 
@@ -481,7 +483,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
 
         _uiState.update {
-            it.copy(statusBanner = getApplication<Application>().getString(R.string.vm_018))
+            CloudPairReducer.applyHealthCheckStarted(
+                it,
+                getApplication<Application>().getString(R.string.vm_018)
+            )
         }
 
         cloudClient.checkHealth(trimmedUrl, trimmedKey) { isSuccess, message ->
@@ -489,45 +494,24 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 // P0-3: 加密存储不可用时拒绝保存敏感凭据
                 if (!prefsManager.saveCloudConfig(trimmedUrl, trimmedKey, trimmedWorkspace)) {
                     _uiState.update {
-                        it.copy(
-                            appError = AppError("SECURE_STORAGE_UNAVAILABLE", getApplication<Application>().getString(R.string.vm_019)),
-                            statusBanner = null
+                        CloudPairReducer.applySaveFailed(
+                            it,
+                            getApplication<Application>().getString(R.string.vm_019)
                         )
                     }
                     return@checkHealth
                 }
                 _uiState.update {
-                    it.copy(
-                        appMode = AppMode.CLOUD_HOSTED,
-                        cloudServerUrl = trimmedUrl,
-                        cloudApiKey = trimmedKey,
-                        cloudWorkspacePath = trimmedWorkspace,
-                        isPaired = true,
-                        isAuthenticated = true,
-                        isRelayConnected = true,
-                        appError = null,
-                        diagnostics = null,
-                        statusBanner = null
-                    )
+                    CloudPairReducer.applySuccess(it, trimmedUrl, trimmedKey, trimmedWorkspace)
                 }
                 // 拉取云端真实会话列表
                 cloudClient.getSessions(trimmedUrl, trimmedKey) { realSessions ->
                     _uiState.update { state ->
-                        val currentId = realSessions.firstOrNull()?.id ?: ""
-                        state.copy(
-                            availableSessions = SessionReducer.sortSessions(realSessions),
-                            currentSessionId = currentId
-                        )
+                        CloudPairReducer.applySessionsLoaded(state, realSessions)
                     }
                 }
             } else {
-                _uiState.update {
-                    it.copy(
-                        isPaired = false,
-                        statusBanner = null,
-                        appError = AppError("CLOUD_CHECK_FAILED", message)
-                    )
-                }
+                _uiState.update { CloudPairReducer.applyHealthFailed(it, message) }
             }
         }
     }
@@ -554,24 +538,16 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun sendMessage(content: String) {
-        val trimmed = content.trim()
-        if (trimmed.isEmpty()) return
+        // 阶段 1: 乐观消息构造委托 SendMessageReducer（空内容返回 null 即直接返回）
+        val userMsg = SendMessageReducer.buildUserMessage(
+            content,
+            UUID.randomUUID().toString(),
+            System.currentTimeMillis()
+        ) ?: return
 
-        val userMsg = ChatMessage(
-            id = UUID.randomUUID().toString(),
-            role = MessageRole.USER,
-            content = trimmed
-        )
-
-        _uiState.update { state ->
-            val updated = (state.messages + userMsg).takeLast(MAX_MESSAGES_COUNT)
-            state.copy(
-                messages = updated,
-                isGenerating = true,
-                appError = null,
-                isAutoScrollPaused = false
-            )
-        }
+        _uiState.update { SendMessageReducer.appendUserMessage(it, userMsg, MAX_MESSAGES_COUNT) }
+        // 阶段 1: userMsg.content 即 trim 后的原文（buildUserMessage 内部已 trim）
+        val trimmed = userMsg.content
         // v1.6 P0: 任务开始，状态持久化
         setTaskStatus(TaskStatus.RUNNING, getApplication<Application>().getString(R.string.vm_020, trimmed.take(30)))
         // v1.6 P0 任务通知：记录任务信息用于完成通知
@@ -878,28 +854,14 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     // P0-4: 连接状态机——UI 据此区分网络、鉴权、Desktop 的不同故障
     override fun onConnectionStateChanged(state: RelayConnectionState) {
-        _uiState.update { s ->
-            s.copy(
-                relayConnectionState = state,
-                isRelayConnected = when (state) {
-                    RelayConnectionState.CONNECTED,
-                    RelayConnectionState.AUTHENTICATING,
-                    RelayConnectionState.AUTHENTICATED,
-                    RelayConnectionState.DESKTOP_ONLINE -> true
-                    else -> false
-                },
-                isReconnecting = state == RelayConnectionState.RECONNECTING,
-                statusBanner = when (state) {
-                    RelayConnectionState.CONNECTING -> getApplication<Application>().getString(R.string.vm_016)
-                    RelayConnectionState.CONNECTED -> getApplication<Application>().getString(R.string.vm_023)
-                    RelayConnectionState.AUTHENTICATING -> getApplication<Application>().getString(R.string.vm_025)
-                    RelayConnectionState.RECONNECTING -> s.statusBanner // 保持重连倒计时文案
-                    RelayConnectionState.AUTH_FAILED -> null
-                    RelayConnectionState.DISCONNECTED -> null
-                    else -> s.statusBanner
-                }
-            )
-        }
+        // 阶段 1: 纯状态部分委托 ConnectionStateReducer（文案由 ViewModel 传入）
+        val app = getApplication<Application>()
+        val banners = ConnectionStateReducer.ConnectionBanners(
+            connecting = app.getString(R.string.vm_016),
+            connected = app.getString(R.string.vm_023),
+            authenticating = app.getString(R.string.vm_025)
+        )
+        _uiState.update { ConnectionStateReducer.applyConnectionState(it, state, banners) }
     }
 
     override fun onToolApprovalRequest(request: ToolApprovalRequest) {
@@ -986,7 +948,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onStreamEnd(sessionId: String) {
-        _uiState.update { it.copy(cloudConnectionState = CloudConnectionState.DISCONNECTED) }
+        // 阶段 1: 纯状态部分委托 StreamEndReducer（合并原两次 update，无挂起点，语义等价）
+        _uiState.update { StreamEndReducer.applyStreamEnd(it, activeAssistantMessageId) }
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
         // P1-5: 流结束前把缓冲剩余 chunk 全部刷入，保证不丢失
         streamFlushJob?.cancel()
@@ -994,7 +957,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         // v1.6 P0: 任务完成
         setTaskStatus(TaskStatus.COMPLETED, getApplication<Application>().getString(R.string.vm_029))
         // v1.6 P0 任务通知：完成通知（任务名、耗时、修改文件数，点击直达会话）
-        val durationMs = if (taskStartTimeMs > 0) System.currentTimeMillis() - taskStartTimeMs else 0L
+        val durationMs = StreamEndReducer.computeDurationMs(taskStartTimeMs, System.currentTimeMillis())
         OpenCodeKeepAliveService.notifyTaskCompleted(
             getApplication(),
             taskName.ifBlank { "OpenCode" },
@@ -1002,19 +965,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             taskModifiedFiles.size,
             sessionId
         )
-        _uiState.update { state ->
-            val updatedMessages = state.messages.map { msg ->
-                if (msg.id == activeAssistantMessageId) {
-                    msg.copy(isStreaming = false)
-                } else {
-                    msg
-                }
-            }
-            state.copy(
-                messages = updatedMessages,
-                isGenerating = false
-            )
-        }
         activeAssistantMessageId = null
     }
 
@@ -1199,26 +1149,21 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     override fun onDesktopList(desktops: List<DesktopInfo>) {
         val prevTarget = _uiState.value.targetDesktopId
         // 已选目标不在在线列表中 → 清空选择，回主 desktop 路由
-        val targetAlive = prevTarget.isEmpty() || desktops.any { it.deviceId == prevTarget }
+        // 阶段 1: 存活判定委托 DeviceListReducer
+        val (targetAlive, _) = DeviceListReducer.resolveTarget(prevTarget, desktops)
         if (!targetAlive) {
             prefsManager.saveTargetDesktopId("")
             AppLog.i("DesktopRouting", "target $prevTarget offline, fallback to primary")
         }
-        _uiState.update {
-            it.copy(
-                desktopList = desktops,
-                targetDesktopId = if (targetAlive) prevTarget else ""
-            )
-        }
+        _uiState.update { DeviceListReducer.applyDesktopList(it, desktops) }
         refreshE2eePeerReady()
     }
 
     /** v4.3 M-5: 按当前目标（targetDesktopId 或主 desktop）刷新 E2EE 就绪状态。 */
     private fun refreshE2eePeerReady() {
         val s = _uiState.value
-        val target = s.targetDesktopId.ifEmpty {
-            s.desktopList.firstOrNull { it.isPrimary }?.deviceId.orEmpty()
-        }
+        // 阶段 1: 目标选择委托 DeviceListReducer
+        val target = DeviceListReducer.selectE2eeTarget(s.targetDesktopId, s.desktopList)
         val ready = target.isNotEmpty() && e2eeManager.hasPeerKey(target)
         if (s.e2eePeerReady != ready) {
             _uiState.update { it.copy(e2eePeerReady = ready) }
@@ -1309,20 +1254,16 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun toggleFavoriteProject(projectId: String) {
-        val current = _uiState.value.favoriteProjectIds.toMutableSet()
-        if (current.contains(projectId)) current.remove(projectId) else current.add(projectId)
-        prefsManager.saveFavoriteProjects(current.toList())
-        _uiState.update { it.copy(favoriteProjectIds = current) }
+        // 阶段 1: 收藏切换委托 ProjectsReducer（返回不可变集合）
+        val updated = ProjectsReducer.toggleFavorite(_uiState.value.favoriteProjectIds, projectId)
+        prefsManager.saveFavoriteProjects(updated.toList())
+        _uiState.update { it.copy(favoriteProjectIds = updated) }
     }
 
     override fun onProjectsDataReceived(projects: List<ProjectInfo>, projectsError: String?) {
-        _uiState.update {
-            it.copy(
-                projects = projects,
-                projectsError = projectsError,
-                favoriteProjectIds = prefsManager.getFavoriteProjects().toSet()
-            )
-        }
+        // 阶段 1: 纯状态部分委托 ProjectsReducer
+        val favorites = prefsManager.getFavoriteProjects().toSet()
+        _uiState.update { ProjectsReducer.applyProjectsData(it, projects, projectsError, favorites) }
     }
 
     // =========================================================================

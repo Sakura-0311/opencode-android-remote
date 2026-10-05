@@ -55,7 +55,8 @@ class CloudPairReducerTest {
         val sessions = listOf(sess("b", 1000L), sess("a", 2000L))
         val out = CloudPairReducer.applySessionsLoaded(base, sessions)
         assertEquals(listOf("a", "b"), out.availableSessions.map { it.id }) // 更新时间倒序
-        assertEquals("a", out.currentSessionId)
+        // currentSessionId 取未排序首个（与原逻辑一致）
+        assertEquals("b", out.currentSessionId)
     }
 
     @Test fun sessionsLoaded_emptyClearsCurrent() {

@@ -51,15 +51,18 @@ object CloudPairReducer {
             appError = AppError("CLOUD_CHECK_FAILED", message)
         )
 
-    /** 会话列表拉取完成：排序 + 选中首个（空列表时 currentSessionId 置空） */
+    /**
+     * 会话列表拉取完成：排序 + 选中首个。
+     * 注意：currentSessionId 取未排序列表的首个（与原 pairCloud 内联逻辑一致），
+     * availableSessions 取排序后的列表。
+     */
     fun applySessionsLoaded(
         state: OpenCodeUiState,
         sessions: List<SessionItem>
     ): OpenCodeUiState {
-        val sorted = SessionReducer.sortSessions(sessions)
         return state.copy(
-            availableSessions = sorted,
-            currentSessionId = sorted.firstOrNull()?.id ?: ""
+            availableSessions = SessionReducer.sortSessions(sessions),
+            currentSessionId = sessions.firstOrNull()?.id ?: ""
         )
     }
 }
