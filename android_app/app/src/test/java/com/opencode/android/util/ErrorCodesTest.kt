@@ -54,7 +54,9 @@ class ErrorCodesTest {
             .filter { it.isFile && it.extension == "kt" }
             .forEach { f ->
                 pattern.findAll(f.readText()).forEach { m ->
-                    used.add(m.groups.filterNotNull().first().value)
+                    // 注意：groups[0] 是整个匹配串，取 groups[1]/[2] 才是捕获的错误码
+                    val code = m.groups[1]?.value ?: m.groups[2]?.value ?: return@forEach
+                    used.add(code)
                 }
             }
         assertTrue("main 源码里没扫到任何 AppError 码，扫描可能失效", used.isNotEmpty())
