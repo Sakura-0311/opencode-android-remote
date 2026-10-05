@@ -604,4 +604,5 @@
     <string name="pair_036">%1$s は暗号化されていない ws:// または http:// を使用しています。鍵やチャット内容がネットワーク上で盗聴される可能性があります。信頼できるネットワーク（自宅 LAN など）でのみ続行してください。</string>
     <string name="pair_037">接続する</string>
     <string name="pair_038">キャンセル</string>
+    <string name="vm_040">キュー済み、%1$sは再接続後に自動送信されます（%2$d 件）。</string>
 </resources>

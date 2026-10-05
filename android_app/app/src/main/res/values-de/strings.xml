@@ -603,4 +603,5 @@
     <string name="pair_036">%1$s verwendet unverschlüsseltes ws:// oder http://; Schlüssel und Chatinhalte können im Netzwerk mitgelesen werden. Nur in einem vertrauenswürdigen Netzwerk (z. B. Heim-LAN) fortfahren.</string>
     <string name="pair_037">Trotzdem verbinden</string>
     <string name="pair_038">Abbrechen</string>
+    <string name="vm_040">Eingereiht, %1$s wird nach Wiederverbindung gesendet (%2$d).</string>
 </resources>

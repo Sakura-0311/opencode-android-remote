@@ -922,6 +922,26 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    // v4.10.0: 消息已排队（断线时），重连后自动补发，给用户一个明确提示
+    override fun onMessageQueued(action: String, clientMsgId: String, queueSize: Int) {
+        val what = when (action) {
+            "send_prompt" -> getApplication<Application>().getString(R.string.vm_033)
+            "cancel" -> getApplication<Application>().getString(R.string.vm_034)
+            else -> getApplication<Application>().getString(R.string.vm_035)
+        }
+        _uiState.update { state ->
+            val notice = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                role = MessageRole.SYSTEM,
+                content = getApplication<Application>().getString(R.string.vm_040, what, queueSize),
+                isError = false
+            )
+            state.copy(
+                messages = (state.messages + notice).takeLast(MAX_MESSAGES_COUNT),
+            )
+        }
+    }
+
     /**
      * v1.6 P0 任务通知：AI 等待用户输入（高优先级通知 + 状态）
      */

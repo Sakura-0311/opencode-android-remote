@@ -604,4 +604,5 @@
     <string name="crash_005">数据只发送到你自己配置的 Relay 服务器（/api/crash-report），不经过任何第三方。重启应用后生效，可随时在菜单中关闭。</string>
     <string name="crash_006">确认开启</string>
     <string name="crash_007">取消</string>
+    <string name="vm_040">已排队，%1$s重连后自动发送（队列 %2$d 条）。</string>
 </resources>

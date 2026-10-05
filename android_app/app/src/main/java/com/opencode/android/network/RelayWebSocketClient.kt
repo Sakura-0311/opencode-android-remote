@@ -67,6 +67,8 @@ interface RelayListener {
     fun onResyncRequired(message: String) {}
     // v2.3: 写操作未确认（socket 不可用，发送失败），由用户手动重试，不自动重发
     fun onWriteUnconfirmed(action: String, clientMsgId: String) {}
+    // v4.10.0: 消息已排队（断线时），重连后自动补发
+    fun onMessageQueued(action: String, clientMsgId: String, queueSize: Int) {}
     fun onError(error: String)
     fun onToolApprovalRequest(request: ToolApprovalRequest) {}
     fun onSessionsListReceived(sessions: List<SessionItem>) {}
@@ -602,6 +604,8 @@ class RelayWebSocketClient(private val appContext: Context) {
                         listener?.onResyncRequired(appContext.getString(R.string.relay_007))
                     }
                     listener?.onAuthenticated()
+                    // v4.10.0: 鉴权成功后补发排队中的消息
+                    flushSendQueue()
                 }
                 "auth_error" -> {
                     val msg = json.optString("message", appContext.getString(R.string.relay_009))
@@ -920,7 +924,10 @@ class RelayWebSocketClient(private val appContext: Context) {
     }
 
     fun sendCreateSession(title: String) {
-        webSocket?.send(RelayMessageFactory.createSession(title).toString())
+        val clientMsgId = newClientMsgId()
+        sendEnvelope("create_session",
+            RelayMessageFactory.createSession(title, reqId = clientMsgId),
+            clientMsgId, queueOnFail = true)
     }
 
     /**
@@ -994,7 +1001,57 @@ class RelayWebSocketClient(private val appContext: Context) {
     private fun newClientMsgId(): String = UUID.randomUUID().toString()
 
     /** 发送信封；返回 false 表示 socket 不可用（未确认），由调用方处理 */
-    private fun sendEnvelope(action: String, envelope: JSONObject, clientMsgId: String): Boolean {
+    /**
+     * v4.10.0: 出站消息队列——socket 不可用时用户操作类消息排队，
+     * 鉴权成功后按序补发，避免断线丢消息。查询类消息不排队（会过期）。
+     */
+    private data class PendingSend(
+        val action: String,
+        val envelopeJson: String,
+        val clientMsgId: String,
+        val enqueuedAt: Long = System.currentTimeMillis()
+    )
+    private val sendQueue = ArrayDeque<PendingSend>()
+    private val maxQueueSize = 50
+    private val queueTtlMs = 5 * 60 * 1000L
+
+    private fun enqueueSend(action: String, envelope: JSONObject, clientMsgId: String) {
+        // 丢弃过期项，保持队列新鲜
+        val now = System.currentTimeMillis()
+        sendQueue.removeAll { now - it.enqueuedAt > queueTtlMs }
+        if (sendQueue.size >= maxQueueSize) {
+            val dropped = sendQueue.removeFirst()
+            AppLog.w("Relay", "send queue full, drop oldest: action=${dropped.action}")
+        }
+        sendQueue.addLast(PendingSend(action, envelope.toString(), clientMsgId))
+        AppLog.i("Relay", "queued: action=$action (queue=${sendQueue.size})")
+        listener?.onMessageQueued(action, clientMsgId, sendQueue.size)
+    }
+
+    /** 鉴权成功后调用：按序补发队列里的消息 */
+    private fun flushSendQueue() {
+        if (sendQueue.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val toSend = sendQueue.filter { now - it.enqueuedAt <= queueTtlMs }
+        val expired = sendQueue.size - toSend.size
+        sendQueue.clear()
+        if (expired > 0) AppLog.w("Relay", "flush: drop $expired expired")
+        var sent = 0
+        for (p in toSend) {
+            val ok = try {
+                webSocket?.send(p.envelopeJson) ?: false
+            } catch (e: Exception) {
+                false
+            }
+            if (ok) sent++ else {
+                // 补发失败：剩下的重新排队等下次
+                sendQueue.addLast(p)
+            }
+        }
+        AppLog.i("Relay", "flush send queue: sent=$sent/${toSend.size}")
+    }
+
+    private fun sendEnvelope(action: String, envelope: JSONObject, clientMsgId: String, queueOnFail: Boolean = false): Boolean {
         val ok = try {
             webSocket?.send(envelope.toString()) ?: false
         } catch (e: Exception) {
@@ -1002,7 +1059,11 @@ class RelayWebSocketClient(private val appContext: Context) {
         }
         if (!ok) {
             AppLog.w("Relay", "write unconfirmed: action=$action")
-            listener?.onWriteUnconfirmed(action, clientMsgId)
+            if (queueOnFail) {
+                enqueueSend(action, envelope, clientMsgId)
+            } else {
+                listener?.onWriteUnconfirmed(action, clientMsgId)
+            }
         }
         return ok
     }
@@ -1069,16 +1130,19 @@ class RelayWebSocketClient(private val appContext: Context) {
         if (payloadResult is E2eeManager.PayloadResult.Encrypted) {
             AppLog.i("Relay", "v4.1 E2EE: send_prompt 已加密 -> $effectiveTarget")
         }
-        sendEnvelope("send_prompt", envelope, clientMsgId)
+        sendEnvelope("send_prompt", envelope, clientMsgId, queueOnFail = true)
     }
 
     fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "", nonce: String? = null) {
-        webSocket?.send(RelayMessageFactory.approvalResponse(callId, isApproved, reason, nonce).toString())
+        val clientMsgId = newClientMsgId()
+        sendEnvelope("approval_response",
+            RelayMessageFactory.approvalResponse(callId, isApproved, reason, nonce, reqId = clientMsgId),
+            clientMsgId, queueOnFail = true)
     }
 
     fun sendCancel(sessionId: String) {
         val clientMsgId = newClientMsgId()
-        sendEnvelope("cancel", RelayMessageFactory.cancel(sessionId, clientMsgId), clientMsgId)
+        sendEnvelope("cancel", RelayMessageFactory.cancel(sessionId, clientMsgId), clientMsgId, queueOnFail = true)
     }
 
     fun disconnect() {

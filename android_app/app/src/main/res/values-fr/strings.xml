@@ -603,4 +603,5 @@
     <string name="pair_036">%1$s utilise ws:// ou http:// sans chiffrement ; les clés et le contenu des discussions peuvent être interceptés sur le réseau. Continuez uniquement sur un réseau de confiance (p. ex. votre LAN domestique).</string>
     <string name="pair_037">Connecter quand même</string>
     <string name="pair_038">Annuler</string>
+    <string name="vm_040">En file, %1$s sera envoyé à la reconnexion (%2$d en file).</string>
 </resources>

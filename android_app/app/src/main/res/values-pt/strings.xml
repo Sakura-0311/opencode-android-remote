@@ -603,4 +603,5 @@
     <string name="pair_036">%1$s usa ws:// ou http:// sem criptografia; chaves e conteúdo do chat podem ser interceptados na rede. Continue apenas em uma rede confiável (p. ex., sua LAN doméstica).</string>
     <string name="pair_037">Conectar mesmo assim</string>
     <string name="pair_038">Cancelar</string>
+    <string name="vm_040">Na fila, %1$s será enviado ao reconectar (%2$d na fila).</string>
 </resources>
