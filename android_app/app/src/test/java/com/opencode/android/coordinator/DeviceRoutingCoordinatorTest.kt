@@ -10,14 +10,14 @@ import org.junit.Test
 /** 阶段 3: DeviceRoutingPrefs / DeviceRoutingSystem 的测试替身。 */
 class FakeDeviceRoutingPrefs : DeviceRoutingPrefs {
     var savedTargetId: String? = null
-    var favoriteProjects: List<String> = emptyList()
+    var favoriteProjectsValue: List<String> = emptyList()
     var savedFavorites: List<String>? = null
 
     override fun saveTargetDesktopId(deviceId: String) {
         savedTargetId = deviceId
     }
 
-    override fun getFavoriteProjects(): List<String> = favoriteProjects
+    override fun getFavoriteProjects(): List<String> = favoriteProjectsValue
 
     override fun saveFavoriteProjects(ids: List<String>) {
         savedFavorites = ids
@@ -122,7 +122,7 @@ class DeviceRoutingCoordinatorTest {
     }
 
     @Test fun onProjectsDataReceived_setsProjectsAndFavorites() {
-        val prefs = FakeDeviceRoutingPrefs().apply { favoriteProjects = listOf("p1") }
+        val prefs = FakeDeviceRoutingPrefs().apply { favoriteProjectsValue = listOf("p1") }
         val (c, d) = setup(prefs = prefs)
         val projects = listOf(ProjectInfo(id = "p1", name = "n1"))
         c.onProjectsDataReceived(projects, null)
