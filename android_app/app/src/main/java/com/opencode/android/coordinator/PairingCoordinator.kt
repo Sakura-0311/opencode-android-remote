@@ -68,6 +68,11 @@ interface PairingTransports {
  * [StateDispatcher]——因此可在纯 JVM 单测里验证并发与失败路径。
  *
  * 行为约定：与迁移前逐行一致；ViewModel 保留同名方法做转发，UI 签名不变。
+ *
+ * 并发安全：prefs 凭据写与配对状态更新在 [pairingLock] 下原子完成——并发配对
+ * （如双击配对按钮）不会出现「prefs 存 A、state 显示 B」的不一致。
+ * 临界区内只有快速操作（prefs apply / state 更新 / 内存 E2EE），网络 I/O
+ * 始终在锁外，因此可用 JVM monitor，不会阻塞主线程。
  */
 class PairingCoordinator(
     private val prefs: PairingPrefs,
@@ -75,6 +80,8 @@ class PairingCoordinator(
     private val transports: PairingTransports,
     private val dispatch: StateDispatcher,
 ) {
+    /** 配对链路串行锁，见类 KDoc。 */
+    private val pairingLock = Any()
     /**
      * v1.6 P0 一键扫码配对：凭扫码得到的配对信息认领设备密钥。
      * 成功后凭据保存到加密存储（Android Keystore），之后用设备密钥连接。
@@ -100,56 +107,59 @@ class PairingCoordinator(
             } catch (e: Exception) {
                 PairClaimResult(success = false, error = e.message ?: dispatch.getString(R.string.vm_008))
             }
-            // v4.3 M-2: 保存 desktop 的 E2EE 公钥（按 device_id 绑定，HMAC 验签）
-            if (result.success && result.e2eePeerPubkey.isNotEmpty() && result.desktopDeviceId.isNotEmpty()) {
-                val ok = e2ee.storePeerPubkey(
-                    result.desktopDeviceId, result.e2eePeerPubkey, result.e2eePubkeySig)
-                if (!ok) {
-                    dispatch.updateState {
-                        PairingStateReducer.applyE2eePubkeyResult(
-                            it, false, "对端公钥认证失败，已拒绝（疑似中继篡改）"
-                        )
+            // 临界区：E2EE 存储 + 凭据保存 + 状态更新原子完成（与 pairDesktop/pairCloud 互斥）
+            synchronized(pairingLock) {
+                // v4.3 M-2: 保存 desktop 的 E2EE 公钥（按 device_id 绑定，HMAC 验签）
+                if (result.success && result.e2eePeerPubkey.isNotEmpty() && result.desktopDeviceId.isNotEmpty()) {
+                    val ok = e2ee.storePeerPubkey(
+                        result.desktopDeviceId, result.e2eePeerPubkey, result.e2eePubkeySig)
+                    if (!ok) {
+                        dispatch.updateState {
+                            PairingStateReducer.applyE2eePubkeyResult(
+                                it, false, "对端公钥认证失败，已拒绝（疑似中继篡改）"
+                            )
+                        }
+                    } else {
+                        // v4.3 M-5: 新配对成功，给一次「已建立加密通道」明确提示
+                        dispatch.updateState { PairingStateReducer.applyE2eePubkeyResult(it, true, "") }
                     }
-                } else {
-                    // v4.3 M-5: 新配对成功，给一次「已建立加密通道」明确提示
-                    dispatch.updateState { PairingStateReducer.applyE2eePubkeyResult(it, true, "") }
+                    refreshE2eePeerReady()
                 }
-                refreshE2eePeerReady()
-            }
-            if (result.success && result.deviceSecret.isNotBlank()) {
-                // v1.6: 设备密钥保存到加密存储；P0-3: 加密不可用时拒绝保存并报错
-                // v4.3 M-2: 扫码配对存的是 device_secret（非主 secret），标记之
-                prefs.secretIsMaster = false
-                val saved = prefs.savePairingInfo(
-                    result.accountId.ifBlank { accountId },
-                    result.deviceSecret,
-                    relayUrl
-                )
-                if (!saved) {
-                    dispatch.updateState {
-                        PairingStateReducer.applySaveFailed(
-                            it,
-                            dispatch.getString(R.string.vm_009)
-                        )
-                    }
-                    onDone(false, dispatch.getString(R.string.vm_010))
-                    return@launch
-                }
-                dispatch.updateState {
-                    PairingStateReducer.applyClaimSuccess(
-                        it,
+                if (result.success && result.deviceSecret.isNotBlank()) {
+                    // v1.6: 设备密钥保存到加密存储；P0-3: 加密不可用时拒绝保存并报错
+                    // v4.3 M-2: 扫码配对存的是 device_secret（非主 secret），标记之
+                    prefs.secretIsMaster = false
+                    val saved = prefs.savePairingInfo(
                         result.accountId.ifBlank { accountId },
                         result.deviceSecret,
-                        relayUrl,
-                        dispatch.getString(R.string.vm_011, result.desktopName.ifBlank { desktopName })
+                        relayUrl
                     )
+                    if (!saved) {
+                        dispatch.updateState {
+                            PairingStateReducer.applySaveFailed(
+                                it,
+                                dispatch.getString(R.string.vm_009)
+                            )
+                        }
+                        onDone(false, dispatch.getString(R.string.vm_010))
+                        return@launch
+                    }
+                    dispatch.updateState {
+                        PairingStateReducer.applyClaimSuccess(
+                            it,
+                            result.accountId.ifBlank { accountId },
+                            result.deviceSecret,
+                            relayUrl,
+                            dispatch.getString(R.string.vm_011, result.desktopName.ifBlank { desktopName })
+                        )
+                    }
+                    onDone(true, dispatch.getString(R.string.vm_012))
+                    transports.logPair("desktop=${result.desktopName.ifBlank { desktopName }}")
+                } else {
+                    val err = result.error.ifBlank { dispatch.getString(R.string.vm_013) }
+                    dispatch.updateState { PairingStateReducer.applyClaimFailed(it, err) }
+                    onDone(false, err)
                 }
-                onDone(true, dispatch.getString(R.string.vm_012))
-                transports.logPair("desktop=${result.desktopName.ifBlank { desktopName }}")
-            } else {
-                val err = result.error.ifBlank { dispatch.getString(R.string.vm_013) }
-                dispatch.updateState { PairingStateReducer.applyClaimFailed(it, err) }
-                onDone(false, err)
             }
         }
     }
@@ -177,26 +187,29 @@ class PairingCoordinator(
         }
 
         // v4.3 M-2: 手动配对填的是房间主 secret，可做 E2EE 公钥 HMAC 绑定校验
-        prefs.secretIsMaster = true
-        // P0-3: 加密存储不可用时拒绝保存敏感凭据
-        if (!prefs.savePairingInfo(trimmedAccount, trimmedSecret, trimmedRelay)) {
-            dispatch.updateState {
-                it.copy(appError = AppError(
-                    "SECURE_STORAGE_UNAVAILABLE",
-                    dispatch.getString(R.string.vm_009)
-                ))
+        // 临界区：凭据保存 + 状态更新原子完成（与 claimPairingByQr/pairCloud 互斥）
+        synchronized(pairingLock) {
+            prefs.secretIsMaster = true
+            // P0-3: 加密存储不可用时拒绝保存敏感凭据
+            if (!prefs.savePairingInfo(trimmedAccount, trimmedSecret, trimmedRelay)) {
+                dispatch.updateState {
+                    it.copy(appError = AppError(
+                        "SECURE_STORAGE_UNAVAILABLE",
+                        dispatch.getString(R.string.vm_009)
+                    ))
+                }
+                return
             }
-            return
-        }
 
-        dispatch.updateState {
-            PairingStateReducer.applyManualSuccess(
-                it,
-                trimmedAccount,
-                trimmedSecret,
-                trimmedRelay,
-                dispatch.getString(R.string.vm_016)
-            )
+            dispatch.updateState {
+                PairingStateReducer.applyManualSuccess(
+                    it,
+                    trimmedAccount,
+                    trimmedSecret,
+                    trimmedRelay,
+                    dispatch.getString(R.string.vm_016)
+                )
+            }
         }
 
         // v3.0: 走 Transport（connect/send/close 统一入口）
@@ -231,23 +244,31 @@ class PairingCoordinator(
 
         transports.checkCloudHealth(trimmedUrl, trimmedKey) { isSuccess, message ->
             if (isSuccess) {
-                // P0-3: 加密存储不可用时拒绝保存敏感凭据
-                if (!prefs.saveCloudConfig(trimmedUrl, trimmedKey, trimmedWorkspace)) {
-                    dispatch.updateState {
-                        CloudPairReducer.applySaveFailed(
-                            it,
-                            dispatch.getString(R.string.vm_019)
-                        )
+                // 临界区：凭据保存 + 状态更新原子完成（与 pairDesktop/claimPairingByQr 互斥）；
+                // 拉会话是网络 I/O，在锁外执行
+                val proceed = synchronized(pairingLock) {
+                    // P0-3: 加密存储不可用时拒绝保存敏感凭据
+                    if (!prefs.saveCloudConfig(trimmedUrl, trimmedKey, trimmedWorkspace)) {
+                        dispatch.updateState {
+                            CloudPairReducer.applySaveFailed(
+                                it,
+                                dispatch.getString(R.string.vm_019)
+                            )
+                        }
+                        false
+                    } else {
+                        dispatch.updateState {
+                            CloudPairReducer.applySuccess(it, trimmedUrl, trimmedKey, trimmedWorkspace)
+                        }
+                        true
                     }
-                    return@checkCloudHealth
                 }
-                dispatch.updateState {
-                    CloudPairReducer.applySuccess(it, trimmedUrl, trimmedKey, trimmedWorkspace)
-                }
-                // 拉取云端真实会话列表
-                transports.getCloudSessions(trimmedUrl, trimmedKey) { realSessions ->
-                    dispatch.updateState { state ->
-                        CloudPairReducer.applySessionsLoaded(state, realSessions)
+                if (proceed) {
+                    // 拉取云端真实会话列表
+                    transports.getCloudSessions(trimmedUrl, trimmedKey) { realSessions ->
+                        dispatch.updateState { state ->
+                            CloudPairReducer.applySessionsLoaded(state, realSessions)
+                        }
                     }
                 }
             } else {
@@ -261,26 +282,31 @@ class PairingCoordinator(
         transports.disconnectRelay()
         transports.cancelCloudStream()
         transports.stopTaskProgress()
-        dispatch.updateState {
-            it.copy(
-                isPaired = false,
-                isRelayConnected = false,
-                isAuthenticated = false,
-                isDesktopOnline = false,
-                isGenerating = false,
-                isReconnecting = false,
-                statusBanner = null
-            )
+        synchronized(pairingLock) {
+            dispatch.updateState {
+                it.copy(
+                    isPaired = false,
+                    isRelayConnected = false,
+                    isAuthenticated = false,
+                    isDesktopOnline = false,
+                    isGenerating = false,
+                    isReconnecting = false,
+                    statusBanner = null
+                )
+            }
         }
     }
 
     /** v4.3 M-5: 按当前目标（targetDesktopId 或主 desktop）刷新 E2EE 就绪状态。 */
     fun refreshE2eePeerReady() {
-        val s = dispatch.currentState
-        val target = DeviceListReducer.selectE2eeTarget(s.targetDesktopId, s.desktopList)
-        val ready = target.isNotEmpty() && e2ee.hasPeerKey(target)
-        if (s.e2eePeerReady != ready) {
-            dispatch.updateState { it.copy(e2eePeerReady = ready) }
+        // synchronized 可重入：在 claim 临界区内调用时是同一线程，不会死锁
+        synchronized(pairingLock) {
+            val s = dispatch.currentState
+            val target = DeviceListReducer.selectE2eeTarget(s.targetDesktopId, s.desktopList)
+            val ready = target.isNotEmpty() && e2ee.hasPeerKey(target)
+            if (s.e2eePeerReady != ready) {
+                dispatch.updateState { it.copy(e2eePeerReady = ready) }
+            }
         }
     }
 }

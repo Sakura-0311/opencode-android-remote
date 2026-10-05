@@ -169,9 +169,8 @@ class PairingCoordinatorTest {
     }
 
     @Test fun pairDesktop_concurrent_noCrashAndConsistent() {
-        // docx §9 场景：并发两次 pairDesktop——不崩溃，各自内部一致。
-        // 注意：存 prefs 与更新 state 是两个非原子操作（原代码亦如此），
-        // 因此只断言每一侧内部是完整的一次写入，不断言两侧是同一胜出者。
+        // docx §9 场景：并发两次 pairDesktop——不崩溃，终态一致（其一胜出）。
+        // pairingLock 保证 prefs 写与 state 更新原子完成，两侧必为同一胜出者。
         val (c, d) = setup()
         val latch = CountDownLatch(1)
         val errors = mutableListOf<Throwable>()
@@ -190,18 +189,33 @@ class PairingCoordinatorTest {
         assertTrue("并发抛异常: $errors", errors.isEmpty())
         val s = d.dispatch.currentState
         assertTrue(s.isPaired)
-        // state 内部一致：accountId 与 relayUrl 来自同一次完整写入
-        val statePair = s.accountId to s.relayUrl
-        assertTrue(
-            "state 内部不一致: $statePair",
-            statePair == ("a1" to "http://r1") || statePair == ("a2" to "http://r2")
+        // 终态一致：state 与 prefs 是同一胜出者（不出现混合）
+        val winner = d.prefs.savedPairing!!
+        assertEquals(winner.first, s.accountId)
+        assertEquals(winner.second, s.secret)
+        assertEquals(winner.third, s.relayUrl)
+    }
+
+    @Test fun pairDesktop_concurrentWithClaim_finalStateConsistent() {
+        // 混合并发：扫码配对进行中时又手动配对——终态仍一致（其一完整胜出）
+        val (c, d) = setup()
+        d.transports.claimResult = PairClaimResult(
+            success = true, deviceSecret = "qr-secret", accountId = "qr-acc"
         )
-        // prefs 内部一致：是某一次完整的保存
+        var doneOk = false
+        c.claimPairingByQr("http://r", "qr-acc", "tok", "desk") { ok, _ -> doneOk = ok }
+        // claim 的协程块被捕获尚未执行；此时在另一线程手动配对
+        val t = Thread { c.pairDesktop("a2", "s2", "http://r2") }
+        t.start(); t.join(5000)
+        d.dispatch.runLaunched() // 再执行 claim
+
+        assertTrue(doneOk)
+        val s = d.dispatch.currentState
         val saved = d.prefs.savedPairing!!
-        assertTrue(
-            "prefs 内部不一致: $saved",
-            saved == Triple("a1", "s1", "http://r1") || saved == Triple("a2", "s2", "http://r2")
-        )
+        // 两侧来自同一次完整配对：(qr-acc, qr-secret, http://r) 或 (a2, s2, http://r2)
+        assertEquals(saved.first, s.accountId)
+        assertEquals(saved.second, s.secret)
+        assertEquals(saved.third, s.relayUrl)
     }
 
     // ============ pairCloud ============
