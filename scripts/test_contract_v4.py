@@ -355,7 +355,17 @@ async def test_desktop_routing():
     await m.send(json.dumps({"type": "list_desktops"}))
     lst = None
     try:
-        lst = json.loads(await asyncio.wait_for(m.recv(), timeout=3))
+        # 健壮接收：CI 负载高时单次 recv 可能拿到残留旧消息，
+        # 循环直到收到带 desktops 键的响应（总超时 10 秒）
+        deadline = asyncio.get_event_loop().time() + 10
+        while True:
+            timeout = deadline - asyncio.get_event_loop().time()
+            if timeout <= 0:
+                break
+            cand = json.loads(await asyncio.wait_for(m.recv(), timeout=timeout))
+            if "desktops" in cand:
+                lst = cand
+                break
     except asyncio.TimeoutError:
         pass
     ds = (lst or {}).get("desktops", [])
