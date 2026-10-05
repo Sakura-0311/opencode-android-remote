@@ -8,9 +8,10 @@ name: Cloud Device（长期保留·云端真机）
 # 要 24 小时常驻得另租一台云服务器。
 #
 # 模式：
-#   smoke  - 装 APK 启动，检查无 FATAL 崩溃、进程存活
-#   rtl    - 切阿拉伯语 + 大字体，重启后启动截图（R-4 验证），无崩溃即过
-#   manual - 开机后 tmate 等你连进来，adb 随便玩，最长 ~5.5 小时
+#   smoke   - 装 APK 启动，检查无 FATAL 崩溃、进程存活
+#   rtl     - 切阿拉伯语 + 大字体，重启后启动截图（R-4 验证），无崩溃即过
+#   manual  - 开机后 tmate 等你连进来，adb 随便玩，最长 ~5.5 小时
+#   upgrade - 装 v3.1.0 启动，再覆盖安装新版，验证安全存储迁移无崩溃
 
 on:
   workflow_dispatch:
@@ -24,7 +25,7 @@ on:
         description: '测试模式'
         type: choice
         default: 'smoke'
-        options: ['smoke', 'rtl', 'manual']
+        options: ['smoke', 'rtl', 'manual', 'upgrade']
       api_level:
         description: '模拟器 API（29 是仓库验证过的配置）'
         type: choice
@@ -78,7 +79,17 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk /tmp/apk/
           ls /tmp/apk
 
-      # ---------- smoke / rtl：用 reactivecircus 一键起模拟器 ----------
+      - name: Get old APK (upgrade mode)
+        if: ${{ (inputs.mode || 'smoke') == 'upgrade' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/old-apk
+          gh release download v3.1.0 --pattern 'app-release.apk' --dir /tmp/old-apk \
+            -R Sakura-0311/opencode-android-remote
+          ls /tmp/old-apk
+
+      # ---------- smoke / rtl / upgrade：用 reactivecircus 一键起模拟器 ----------
       - name: Write test script
         if: ${{ (inputs.mode || 'smoke') != 'manual' }}
         run: |
@@ -100,15 +111,32 @@ jobs:
             timeout 300 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 5; done'
             sleep 5
           fi
-          adb install -r "$APK"
-          adb shell am start -n com.opencode.android/.MainActivity
-          sleep 25
+          if [ "$MODE" = "upgrade" ]; then
+            OLD_APK=$(ls /tmp/old-apk/*.apk | head -1)
+            echo "先装旧版 v3.1.0: $OLD_APK"
+            adb install -r "$OLD_APK"
+            adb shell monkey -p com.opencode.android -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1
+            sleep 20
+            echo "覆盖安装新版: $APK"
+            adb install -r "$APK"
+            adb shell monkey -p com.opencode.android -c android.intent.category.LAUNCHER 1 > /dev/null 2>&1
+            sleep 25
+          else
+            adb install -r "$APK"
+            adb shell am start -n com.opencode.android/.MainActivity
+            sleep 25
+          fi
           if [ "$MODE" = "rtl" ]; then
             adb exec-out screencap -p > /tmp/rtl-ar.png && echo "截图已保存"
           fi
           if adb logcat -d | grep -q "FATAL EXCEPTION"; then
             echo "::error::模拟器出现 FATAL 崩溃"
             adb logcat -d | grep -A15 "FATAL EXCEPTION" | head -30
+            exit 1
+          fi
+          if [ "$MODE" = "upgrade" ] && adb logcat -d | grep -q "存储迁移失败"; then
+            echo "::error::安全存储迁移失败（回退 LEGACY）"
+            adb logcat -d | grep -B2 -A8 "存储迁移失败" | head -30
             exit 1
           fi
           PID=$(adb shell pidof com.opencode.android | tr -d '\r')
