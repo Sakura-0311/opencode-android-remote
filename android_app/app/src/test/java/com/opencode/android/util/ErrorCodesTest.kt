@@ -22,6 +22,11 @@ class ErrorCodesTest {
         assertEquals(R.string.err_061, ErrorCodes.lookup("PAIR_FAILED").titleRes)
         assertEquals(R.string.err_064, ErrorCodes.lookup("INPUT_EMPTY").titleRes)
         assertEquals(R.string.err_067, ErrorCodes.lookup("CLOUD_CHECK_FAILED").titleRes)
+        assertEquals(R.string.err_070, ErrorCodes.lookup("E2EE_PUBKEY_UNTRUSTED").titleRes)
+        assertEquals(R.string.err_073, ErrorCodes.lookup("CLOUD_UNREACHABLE").titleRes)
+        assertEquals(R.string.err_076, ErrorCodes.lookup("RELAY_ERROR").titleRes)
+        assertEquals(R.string.err_079, ErrorCodes.lookup("SEND_FAILED").titleRes)
+        assertEquals(R.string.err_082, ErrorCodes.lookup("UNKNOWN_ERROR").titleRes)
     }
 
     @Test
@@ -41,7 +46,9 @@ class ErrorCodesTest {
         )
         val root = roots.firstOrNull { it.isDirectory }
             ?: error("找不到 main 源码目录，候选：$roots（工作目录=${File(".").absolutePath}）")
-        val pattern = Regex("""AppError\("([A-Z0-9_]+)"|onAppError\("([A-Z0-9_]+)"""")
+        // 错误码发射点：AppError(/onAppError(/onTransportError(/onError( 的第一个字符串参数，
+        // 以及 relay 下发 code 缺失时的默认值 optString("code", "X")；允许换行
+        val pattern = Regex("""(?:AppError|onAppError|onTransportError|onError)\(\s*"([A-Z0-9_]+)"|optString\("code",\s*"([A-Z0-9_]+)"""")
         val used = mutableSetOf<String>()
         root.walkTopDown()
             .filter { it.isFile && it.extension == "kt" }

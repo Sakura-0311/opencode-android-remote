@@ -128,6 +128,32 @@ object ErrorCodes {
             R.string.err_068,
             R.string.err_069,
         ),
+        // v4.3.2 A3: 补齐实际会到达 ErrorCodes.lookup 的错误码
+        "E2EE_PUBKEY_UNTRUSTED" to ErrorInfo(
+            R.string.err_070,
+            R.string.err_071,
+            R.string.err_072,
+        ),
+        "CLOUD_UNREACHABLE" to ErrorInfo(
+            R.string.err_073,
+            R.string.err_074,
+            R.string.err_075,
+        ),
+        "RELAY_ERROR" to ErrorInfo(
+            R.string.err_076,
+            R.string.err_077,
+            R.string.err_078,
+        ),
+        "SEND_FAILED" to ErrorInfo(
+            R.string.err_079,
+            R.string.err_080,
+            R.string.err_081,
+        ),
+        "UNKNOWN_ERROR" to ErrorInfo(
+            R.string.err_082,
+            R.string.err_083,
+            R.string.err_084,
+        ),
     )
 
     /** 未知错误码回退为通用条目，不抛异常。 */
