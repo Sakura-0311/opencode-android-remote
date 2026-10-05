@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     // v2.6: SBOM 生成（cyclonedx-bom.json，随 release 产物发布）
     id("org.cyclonedx.bom") version "2.3.1"
 }
@@ -47,7 +48,7 @@ gradle.taskGraph.whenReady {
 
 android {
     namespace = "com.opencode.android"
-    compileSdk = 34
+    compileSdk = 35
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000；4.0.0 -> 40000）
     val appVersionName = "4.3.3"
@@ -58,7 +59,7 @@ android {
     defaultConfig {
         applicationId = "com.opencode.android"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 35
         versionCode = appVersionCode
         versionName = appVersionName
 
@@ -110,9 +111,6 @@ android {
         // B-12: UpdateChecker 需要读取 BuildConfig.VERSION_NAME
         buildConfig = true
     }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
-    }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -127,7 +125,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.8.2")
 
     // Jetpack Compose
-    implementation(platform("androidx.compose:compose-bom:2024.02.00"))
+    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
