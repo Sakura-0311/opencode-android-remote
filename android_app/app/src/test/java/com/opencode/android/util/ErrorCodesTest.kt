@@ -40,7 +40,7 @@ class ErrorCodesTest {
             File("../app/src/main/java")
         )
         val root = roots.firstOrNull { it.isDirectory }
-            ?: fail("找不到 main 源码目录，候选：$roots（工作目录=${File(".").absolutePath}）")
+            ?: error("找不到 main 源码目录，候选：$roots（工作目录=${File(".").absolutePath}）")
         val pattern = Regex("""AppError\("([A-Z0-9_]+)"|onAppError\("([A-Z0-9_]+)"""")
         val used = mutableSetOf<String>()
         root.walkTopDown()
