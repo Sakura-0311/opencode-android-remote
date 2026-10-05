@@ -117,7 +117,14 @@ jobs:
             adb install -r "$OLD_APK"
             adb shell am start -n com.opencode.android/.MainActivity
             sleep 30
-            echo "=== 诊断：v3.1.0 留下的 shared_prefs ==="
+            echo "=== 诊断1：v3.1.0 杀掉重进，看它自己能不能读 ESP ==="
+            adb shell am force-stop com.opencode.android
+            sleep 3
+            adb logcat -c
+            adb shell am start -n com.opencode.android/.MainActivity
+            sleep 15
+            adb logcat -d | grep "PrefsManager" | head -8
+            echo "=== 诊断2：v3.1.0 留下的 shared_prefs ==="
             adb root
             adb wait-for-device
             adb shell "ls -la /data/data/com.opencode.android/shared_prefs/ 2>&1"
