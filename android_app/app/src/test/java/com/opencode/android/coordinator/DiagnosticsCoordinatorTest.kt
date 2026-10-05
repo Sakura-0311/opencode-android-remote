@@ -26,7 +26,7 @@ class DiagnosticsCoordinatorTest {
         var gotUrl: String? = null
         var gotKey: String? = null
         val (c, d) = coordinator(
-            state = OpenCodeUiState(appMode = AppMode.DESKTOP, relayUrl = "wss://r/x", secret = "s3cr3t"),
+            state = OpenCodeUiState(appMode = AppMode.DESKTOP_RELAY, relayUrl = "wss://r/x", secret = "s3cr3t"),
             diagnose = { url, key, cb -> gotUrl = url; gotKey = key; cb(DiagnosticsResult(false, "ok")) },
         )
         c.testConnectivity()
