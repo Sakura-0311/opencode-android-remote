@@ -56,8 +56,8 @@ class SendMessageReducerTest {
         val state = base.copy(messages = many)
         val out = SendMessageReducer.appendUserMessage(state, msg("new", "n"), 5)
         assertEquals(5, out.messages.size)
-        assertEquals("new", out.messages.last().content)
-        assertEquals("m7", out.messages.first().content) // takeLast 语义
+        assertEquals("n", out.messages.last().content)
+        assertEquals("c7", out.messages.first().content) // takeLast 语义
     }
 
     @Test fun append_doesNotMutateInput() {
