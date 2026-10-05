@@ -37,6 +37,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None):
+    # C1: Windows 控制台默认非 UTF-8（如 GBK/CP1252），中文 help 与日志输出会
+    # UnicodeEncodeError 直接崩溃（CI windows-latest 实测）。强制 stdout/stderr
+    # 用 UTF-8（失败则忽略，保持原样）。
+    try:
+        import sys as _sys
+        if _sys.platform == "win32":
+            _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     args = build_parser().parse_args(argv)
     if args.account_id is None and args.pos_account:
         args.account_id = args.pos_account
