@@ -19,7 +19,8 @@ services:
     ports:
       - "${PORT:-8765}:8765"
     env_file:
-      - .env
+      - path: .env
+        required: false # 不存在时用 environment 默认值；生产按文档 cp .env.example .env
     environment:
       HOST: "0.0.0.0"
       PORT: "8765"

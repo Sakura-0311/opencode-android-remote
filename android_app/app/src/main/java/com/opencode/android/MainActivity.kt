@@ -35,6 +35,7 @@ import com.opencode.android.ui.screens.FileBrowserDialog
 import com.opencode.android.ui.screens.TaskCenterDialog
 import com.opencode.android.ui.screens.ConnectionDiagnoseDialog
 import com.opencode.android.ui.screens.PrivacyDialog
+import com.opencode.android.ui.screens.CrashConsentDialog
 import com.opencode.android.ui.screens.ModelAgentDialog
 import com.opencode.android.ui.screens.ProjectCenterDialog
 import com.opencode.android.ui.screens.ProfileManagerDialog
