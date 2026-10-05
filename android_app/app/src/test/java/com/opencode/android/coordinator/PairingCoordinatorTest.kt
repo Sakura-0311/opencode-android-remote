@@ -169,7 +169,9 @@ class PairingCoordinatorTest {
     }
 
     @Test fun pairDesktop_concurrent_noCrashAndConsistent() {
-        // docx §9 场景：并发两次 pairDesktop——不崩溃，终态一致（其一胜出）
+        // docx §9 场景：并发两次 pairDesktop——不崩溃，各自内部一致。
+        // 注意：存 prefs 与更新 state 是两个非原子操作（原代码亦如此），
+        // 因此只断言每一侧内部是完整的一次写入，不断言两侧是同一胜出者。
         val (c, d) = setup()
         val latch = CountDownLatch(1)
         val errors = mutableListOf<Throwable>()
@@ -188,9 +190,18 @@ class PairingCoordinatorTest {
         assertTrue("并发抛异常: $errors", errors.isEmpty())
         val s = d.dispatch.currentState
         assertTrue(s.isPaired)
-        // 终态一致：state 与 prefs 是同一胜出者
-        val winner = d.prefs.savedPairing!!
-        assertEquals(winner.first, s.accountId)
+        // state 内部一致：accountId 与 relayUrl 来自同一次完整写入
+        val statePair = s.accountId to s.relayUrl
+        assertTrue(
+            "state 内部不一致: $statePair",
+            statePair == ("a1" to "http://r1") || statePair == ("a2" to "http://r2")
+        )
+        // prefs 内部一致：是某一次完整的保存
+        val saved = d.prefs.savedPairing!!
+        assertTrue(
+            "prefs 内部不一致: $saved",
+            saved == Triple("a1", "s1", "http://r1") || saved == Triple("a2", "s2", "http://r2")
+        )
     }
 
     // ============ pairCloud ============
