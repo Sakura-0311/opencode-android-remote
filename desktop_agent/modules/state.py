@@ -46,10 +46,12 @@ from opencode_api import (
     get_vcs_info,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [DesktopAgent] %(message)s"
-)
+# v4.7.0/A5: 只在调用方还没配过 handler 时给默认配置（import 时不改写 root logger）
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] [DesktopAgent] %(message)s"
+    )
 logger = logging.getLogger("DesktopAgent")
 from modules import config
 class TaskManager:
@@ -166,6 +168,9 @@ class KnownSessionRegistry:
 
 known_session_ids = KnownSessionRegistry(ttl_sec=config.KNOWN_SESSION_TTL_SEC)
 
+# v4.7.0/A2: 空注册表告警节流时间戳
+_empty_guard_warned_at = 0.0
+
 def _extract_event_session(event: Dict[str, Any]) -> Optional[str]:
     """B-2: 优先从 properties 取会话 ID，顶层字段仅作兼容分支"""
     props = event.get("properties") or {}
@@ -198,7 +203,16 @@ def _extract_event_delta(event: Dict[str, Any]) -> str:
 # ==============================================================================
 # B-10: SSE 游标持久化（断线重连断点续传）
 # ==============================================================================
-config.SSE_CURSOR_FILE = os.getenv("OPENCODE_SSE_CURSOR_FILE", ".opencode_sse_cursor")
+# v4.7.0/A1: 默认放配置目录（而非当前工作目录）；OPENCODE_SSE_CURSOR_FILE 可覆盖
+def _default_cursor_file() -> str:
+    d = os.path.join(os.path.expanduser("~"), ".config", "opencode-remote")
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+    except OSError:
+        pass
+    return os.path.join(d, ".opencode_sse_cursor")
+
+config.SSE_CURSOR_FILE = os.getenv("OPENCODE_SSE_CURSOR_FILE", _default_cursor_file())
 
 def load_sse_cursor() -> Optional[str]:
     try:
@@ -207,12 +221,31 @@ def load_sse_cursor() -> Optional[str]:
     except Exception:
         return None
 
+# v4.7.0/A1: 节流——最多每 3 秒写一次盘（流式输出每秒数十次事件时不阻塞事件循环）
+_cursor_last_write = 0.0
+_cursor_pending = None
+
 def save_sse_cursor(event_id: str):
+    global _cursor_last_write, _cursor_pending
+    now = time.time()
+    if now - _cursor_last_write < 3:
+        _cursor_pending = event_id
+        return
+    _cursor_last_write = now
+    _cursor_pending = None
     try:
         with open(config.SSE_CURSOR_FILE, "w", encoding="utf-8") as f:
             f.write(event_id)
     except Exception as e:
         logger.warning(f"Failed to persist SSE cursor: {e}")
+
+def flush_sse_cursor():
+    """v4.7.0/A1: 会话 idle / 重连时把被节流拦下的游标写盘。"""
+    global _cursor_last_write, _cursor_pending
+    if _cursor_pending:
+        pending, _cursor_pending = _cursor_pending, None
+        _cursor_last_write = 0.0  # 强制绕过节流
+        save_sse_cursor(pending)
 
 
 # ==============================================================================
@@ -232,25 +265,44 @@ async def listen_opencode_events_stream(
     if last_id:
         logger.info(f"B-10: Resuming SSE stream from last-event-id: {last_id}")
     last_cleanup = time.time()
+    # v4.7.0/A7: 重连退避（成功一次后重置）
+    _reconnect_delay = 3.0
     while True:
         try:
             async for event in subscribe_events_stream(
                 http_session, config.OPENCODE_API_URL, config.OPENCODE_PASSWORD,
                 last_event_id=last_id, event_id_sink=cursor_sink
             ):
+                _reconnect_delay = 3.0  # 成功收到事件，退避重置
                 # B-10: 收到新游标即持久化
                 new_id = cursor_sink.get("last_event_id")
                 if new_id and new_id != last_id:
                     last_id = new_id
                     save_sse_cursor(new_id)
                 event_type = event.get("type", "")
+                _now = time.time()
                 # B-2: 会话 ID 优先从 properties 取；B-3: 无归属或非已知会话的事件直接丢弃，防串台
+                # v4.7.0/A2: 注册表为空时（启动初期 / 1 小时无活跃被清理）守卫失效——
+                # 打警告日志；AGENT_STRICT_SESSION_GUARD=1 时空注册表=丢弃全部事件
                 session_id = _extract_event_session(event)
-                if not session_id or (known_session_ids and session_id not in known_session_ids):
+                if not session_id:
                     continue
+                if session_id not in known_session_ids:
+                    if not known_session_ids:
+                        if os.getenv("AGENT_STRICT_SESSION_GUARD", "0") == "1":
+                            continue
+                        # 告警节流：10 分钟一次，避免刷屏
+                        global _empty_guard_warned_at
+                        if _now - _empty_guard_warned_at > 600:
+                            _empty_guard_warned_at = _now
+                            logger.warning(
+                                "A2: known_session_ids 为空，B-3 防串台守卫暂不生效 "
+                                "(AGENT_STRICT_SESSION_GUARD=1 可改为丢弃)")
+                    else:
+                        continue
                 # P1-10: 活跃会话刷新 last_seen；每 5 分钟清理过期条目
                 known_session_ids.touch(session_id)
-                now_ts = time.time()
+                now_ts = _now
                 if now_ts - last_cleanup > 300:
                     last_cleanup = now_ts
                     known_session_ids.cleanup()
@@ -334,6 +386,8 @@ async def listen_opencode_events_stream(
 
                 # 3. 会话空闲或执行完成 (session.idle / message.complete)
                 elif event_type in ("session.idle", "message.complete", "stream.end"):
+                    # v4.7.0/A1: idle 时把被节流拦下的游标写盘
+                    flush_sse_cursor()
                     await ws_relay.send(json.dumps({
                         "type": "stream_end",
                         "session_id": session_id
@@ -342,8 +396,10 @@ async def listen_opencode_events_stream(
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.exception(f"SSE /event connection interrupted ({e}). Reconnecting in 3s...")
-            await asyncio.sleep(3.0)
+            # v4.7.0/A7: 指数退避（3s 起，最大 60s）+ 降噪（只打 warning，不再每次刷堆栈）
+            logger.warning(f"SSE /event 连接中断 ({e})，{_reconnect_delay:.0f}s 后重连")
+            await asyncio.sleep(_reconnect_delay)
+            _reconnect_delay = min(60.0, _reconnect_delay * 2)
 
 # ==============================================================================
 # 手机端消息调度与处理

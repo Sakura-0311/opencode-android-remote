@@ -15,7 +15,7 @@ import argparse
 import asyncio
 
 from modules import config
-from modules.secrets import get_or_create_secret
+from modules.keystore import get_or_create_secret
 from modules.protocol import run_desktop_agent, run_pairing_flow
 # 兼容：冒烟测试与外部引用经由 agent 模块访问 tool_guard / ToolApprovalManager
 from modules.state import tool_guard, ToolApprovalManager  # noqa: F401
@@ -28,8 +28,13 @@ def build_parser() -> argparse.ArgumentParser:
     # v2.6: CLI 参数，默认从环境变量读取（优先级：CLI > 环境变量 > 内置默认）
     p.add_argument("--account-id", default=None, help="房间/账号 ID（默认 $OPENCODE_ACCOUNT_ID）")
     p.add_argument("--secret", default=None, help="设备密钥（默认 $OPENCODE_SECRET_FILE 或自动生成）")
+    # v4.7.0/P1-7: --secret 会暴露在进程列表里，推荐用文件
+    p.add_argument("--secret-file", default=None, help="从文件读取设备密钥（推荐，避免进进程列表）")
+    p.add_argument("--show-secret", action="store_true", help="打印当前 secret 明文后退出（pair 时用）")
     p.add_argument("--relay-url", default=None, help="Relay 地址（默认 $RELAY_SERVER_URL）")
     p.add_argument("--workspace", default=None, help="覆盖文件沙盒根目录（默认 $AGENT_FILE_ROOTS）")
+    # v4.7.0/P1-6: 建房管理令牌（默认 $RELAY_ADMIN_TOKEN）
+    p.add_argument("--admin-token", default=None, help="建房管理令牌（默认 $RELAY_ADMIN_TOKEN）")
     # 兼容旧位置参数：python agent.py [account_id] [relay_url]
     p.add_argument("pos_account", nargs="?")
     p.add_argument("pos_relay", nargs="?")
@@ -56,7 +61,22 @@ def main(argv=None):
 
     account_id = args.account_id or config.DEFAULT_ACCOUNT_ID
     relay_url = args.relay_url or config.RELAY_SERVER_URL
-    secret = args.secret or get_or_create_secret()
+    # v4.7.0/P1-7: --secret-file 优先于 --secret（避免密钥进进程列表）
+    if args.secret_file:
+        try:
+            with open(args.secret_file, "r", encoding="utf-8") as f:
+                secret = f.read().strip()
+        except Exception as e:
+            print(f"[错误] 无法从 {args.secret_file} 读取 secret: {e}")
+            raise SystemExit(1)
+    else:
+        secret = args.secret or get_or_create_secret()
+        if args.secret:
+            print("[警告] --secret 会把密钥暴露在进程列表里，建议改用 --secret-file")
+
+    if args.show_secret:
+        print(secret)
+        return
 
     try:
         if args.command == "pair":

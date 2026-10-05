@@ -10,6 +10,7 @@
  7. 线格式：公钥 32B、载荷 nonce(12B)||ct base64
 """
 import base64
+import json
 import os
 import stat
 import sys
@@ -106,12 +107,17 @@ try:
 except ValueError:
     check("非法公钥被拒绝", True)
 
-# 9. 钩子：decrypt_incoming / encrypt_outgoing
-msg_in = {"type": "send_prompt", "session_id": "s1",
-          "payload": {"prompt": ""}, "e2ee": True, "encrypted_payload": ct}
-# 注意：ct 是用 k_m2d_a（mobile 方）加密的；decrypt_incoming 用对端 mobile-1 的 k_m2m 解密
+# 9. 钩子：decrypt_incoming / encrypt_outgoing（v4.6.0 内层格式 v2）
+inner_v2 = {"action": "send_prompt",
+            "payload": {"prompt": "hello e2ee"}, "seq": 1}
+ct_v2 = e2ee.encrypt(json.dumps(inner_v2).encode(), k_m2d_a, "mobile-1", "s1")
+msg_in = {"action": "send_prompt", "session_id": "s1",
+          "payload": {}, "e2ee": True, "encrypted_payload": ct_v2,
+          "client_msg_id": "m1"}
+# 注意：ct_v2 是用 k_m2d_a（mobile 方）加密的；decrypt_incoming 用对端 mobile-1 的 k_m2d 解密
 out = e2ee.decrypt_incoming(dict(msg_in, payload=dict(msg_in["payload"])))
-check("decrypt_incoming 还原 prompt", out["payload"]["prompt"] == "hello e2ee")
+check("decrypt_incoming 还原 payload", out["payload"]["prompt"] == "hello e2ee"
+      and out.get("_e2ee_ok") is True)
 
 msg_out = {"type": "stream_chunk", "session_id": "s1", "chunk": "world"}
 sealed = e2ee.encrypt_outgoing(msg_out, peer_device_id="mobile-1",
@@ -119,10 +125,10 @@ sealed = e2ee.encrypt_outgoing(msg_out, peer_device_id="mobile-1",
 check("encrypt_outgoing 加信封", sealed.get("e2ee") is True
       and "encrypted_payload" in sealed and "chunk" not in sealed
       and sealed["session_id"] == "s1" and sealed["type"] == "stream_chunk")
-# 用 d2m 解开验证（本机=B，对端=mobile-1）
+# 用 d2m 解开验证（本机=B，对端=mobile-1）；v2 内层为 JSON
 _, k_d2m_check = e2ee.derive_msg_keys(shared_b)
 pt2 = e2ee.decrypt(sealed["encrypted_payload"], k_d2m_check, "desktop-1", "s1")
-check("d2m 方向解密成功", pt2 == b"world")
+check("d2m 方向解密成功", json.loads(pt2)["chunk"] == "world")
 
 # 10. 开关关闭时钩子透传
 os.environ["E2EE_ENABLED"] = "0"

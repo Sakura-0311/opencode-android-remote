@@ -1,3 +1,60 @@
+# OpenCode Android Remote - Release v4.7.0（安全默认值与运维）
+
+## 内容
+
+- **建房令牌强制**（P1-6）：未设置/占位符/短于 16 字符则 relay 拒绝启动；
+  `.env.example` 留空附生成命令；agent 新增 `--admin-token` 参数
+- **Secret 不再明文打印**（P1-7）：启动 banner 默认打码，仅首次生成或
+  `pair --show-secret` 时打印；新增 `--secret-file`（`--secret` 会进进程列表）；
+  README 修正 128 bit
+- **relay 加固**（R1–R9）：扇出 gather+超时（慢连接断开）；单帧上限 2 MiB +
+  每会话 100 条/10 秒限速；mobile→desktop 无 target 时跳过解析；设备按
+  device_id 识别、重名自动加后缀；存盘节流 + 90 天未活跃设备清理；
+  XFF 取最右侧可信地址；握手类型校验 + 超时计入失败；版本号统一来源；
+  lifespan 替代 on_event，任务引用防回收
+- **部署**（D1–D3）：compose 默认绑 127.0.0.1；Dockerfile 改 `python server.py`
+  启动；cloud_server README 对齐现实 + 暴力破解防护指引
+- **agent 质量**（A1–A8）：SSE 游标节流 + 放配置目录；空注册表告警 +
+  `AGENT_STRICT_SESSION_GUARD`；黑名单大小写不敏感 + O_NOFOLLOW；
+  e2ee 密钥原子 0600 创建 + keyring 优先；`secrets.py` 改名 `keystore.py`；
+  依赖锁定；SSE 指数退避；.gitignore 补运行时文件
+
+## 兼容性
+
+- relay：无令牌的旧部署启动会失败，需先配 `RELAY_ADMIN_TOKEN`（破坏性默认值变更，
+  按路线图要求执行）
+- 其余非破坏性。versionCode 40700
+
+## 验证
+
+- CI 全绿；Python 单测（sandbox/e2ee/e2ee_v2）全过；relay 导入 + 令牌强制本地验证
+
+---
+
+# OpenCode Android Remote - Release v4.6.0（E2EE 互操作修复）
+
+## 内容
+
+- AAD 身份统一：relay 的 `device_paired` 带手机 relay device_id，
+  desktop 以它做 peer id 和 AAD
+- 内层格式统一为 JSON v2：m2d `{action,payload,seq}`，d2m `{type,...,seq}`
+- 序号按对端、按方向独立计数，落盘持久化，防重放
+- 协商对端后控制类消息无合法信封一律拒绝（fail-closed）
+- d2m 加密覆盖扩大到审批请求、文件内容/目录列表
+- 互操作向量 `tests/e2ee/interop_vectors.json`（Kotlin/Python 共用）+
+  真实代码整链 19 项
+- 威胁模型文档如实更新保护范围
+
+## 兼容性
+
+- E2EE 默认关闭，此前实际不可用，无迁移成本；开启后需重新配对
+
+## 验证
+
+- CI 全绿；APK 验签通过（包名/40600/指纹 D9:21:…9E:78）
+
+---
+
 # OpenCode Android Remote - Release v4.5.0（工具链升级 + 序号追踪拆分）
 
 ## 内容

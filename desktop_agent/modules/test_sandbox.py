@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# fileops 经 modules/secrets.py 间接依赖 opencode_api（desktop_agent/ 下）
+# fileops 经 modules/keystore.py 间接依赖 opencode_api（desktop_agent/ 下）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 自测用临时项目根，不碰真实目录

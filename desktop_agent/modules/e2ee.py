@@ -87,8 +87,36 @@ def generate_keypair() -> tuple:
     return priv_raw, pub_raw
 
 
+def _atomic_write_0600(path: str, data: str) -> None:
+    """v4.7.0/A4: 原子创建 0600 文件——os.open 一步到位，无宽权限窗口。"""
+    _ensure_config_dir()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise
+
+
 def get_or_create_keypair() -> tuple:
-    """读取或创建本机密钥对。返回 (priv_raw_32B, pub_b64)。私钥文件 0600。"""
+    """读取或创建本机密钥对。返回 (priv_raw_32B, pub_b64)。
+    v4.7.0/A4: 优先系统密钥库（keyring），回退 0600 文件（原子创建）。"""
+    # 先试 keyring
+    try:
+        from modules.keystore import _keyring_get, _keyring_save
+        stored = _keyring_get("e2ee-privkey")
+        if stored:
+            priv_raw = base64.b64decode(stored)
+            if len(priv_raw) == 32:
+                priv = X25519PrivateKey.from_private_bytes(priv_raw)
+                pub_raw = priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+                return priv_raw, base64.b64encode(pub_raw).decode("ascii")
+    except Exception:
+        pass
     path = _privkey_path()
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -96,11 +124,13 @@ def get_or_create_keypair() -> tuple:
         if len(priv_raw) != 32:
             raise ValueError(f"E2EE 私钥文件损坏（{path}），请删除后重试")
     else:
-        _ensure_config_dir()
         priv_raw, _ = generate_keypair()
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(base64.b64encode(priv_raw).decode("ascii"))
-        os.chmod(path, 0o600)
+        _atomic_write_0600(path, base64.b64encode(priv_raw).decode("ascii"))
+        try:
+            from modules.keystore import _keyring_save as _ks
+            _ks(base64.b64encode(priv_raw).decode("ascii"), "e2ee-privkey")
+        except Exception:
+            pass
     priv = X25519PrivateKey.from_private_bytes(priv_raw)
     pub_raw = priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     return priv_raw, base64.b64encode(pub_raw).decode("ascii")
@@ -151,11 +181,9 @@ def save_peer_pubkey(device_id: str, pub_b64: str) -> None:
         raise ValueError(f"E2EE: 对端公钥须为 32 字节，实得 {len(pub_raw)}")
     # 预校验：可构造公钥对象
     X25519PublicKey.from_public_bytes(pub_raw)
-    _ensure_config_dir()
-    path = _peer_pubkey_path(device_id)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(base64.b64encode(pub_raw).decode("ascii"))
-    os.chmod(path, 0o600)
+    # v4.7.0/A4: 原子 0600 创建，无宽权限窗口
+    _atomic_write_0600(_peer_pubkey_path(device_id),
+                       base64.b64encode(pub_raw).decode("ascii"))
 
 
 def load_peer_pubkey(device_id: str):

@@ -28,4 +28,7 @@ ENV RELAY_STATE_FILE=/app/data/relay_state.json \
 
 EXPOSE 8765
 
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8765"]
+# v4.7.0/D2: 用 python server.py 启动（而非 uvicorn CLI），使 server.py __main__
+# 里的参数解析（--admin-token / --port / --trusted-proxies）与
+# SSL_CERTFILE/SSL_KEYFILE 环境变量在容器中生效
+CMD ["python", "server.py"]

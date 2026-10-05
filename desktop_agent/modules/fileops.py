@@ -61,16 +61,21 @@ SENSITIVE_DIR_NAMES = {
 SENSITIVE_PATH_SUFFIXES = [".git/config", ".ssh/authorized_keys", ".ssh/known_hosts"]
 
 def _has_sensitive_component(real: str) -> bool:
-    """realpath 后的路径中是否含有敏感目录组件。"""
+    """realpath 后的路径中是否含有敏感目录组件。
+    v4.7.0/A3: 大小写不敏感（macOS 文件系统默认不区分大小写，.SSH 可绕过）。"""
     import pathlib
-    return any(p in SENSITIVE_DIR_NAMES for p in pathlib.PurePath(real).parts)
+    lowered = {p.lower() for p in SENSITIVE_DIR_NAMES}
+    return any(p.lower() in lowered for p in pathlib.PurePath(real).parts)
 
 def _is_sensitive_name(name: str) -> bool:
-    """单条文件名/目录名是否命中黑名单（用于目录列表过滤）。"""
+    """单条文件名/目录名是否命中黑名单（用于目录列表过滤）。
+    v4.7.0/A3: 大小写不敏感。"""
     import fnmatch
-    if name in SENSITIVE_DIR_NAMES:
+    nl = name.lower()
+    if nl in {p.lower() for p in SENSITIVE_DIR_NAMES}:
         return True
-    return any(fnmatch.fnmatch(name, pat) for pat in SENSITIVE_FILENAME_PATTERNS)
+    return any(fnmatch.fnmatchcase(nl, pat.lower())
+               for pat in SENSITIVE_FILENAME_PATTERNS)
 
 def _resolve_sandboxed_path(path: str):
     """解析并校验路径。返回 (real_path, None)；失败返回 (None, "PATH_NOT_ALLOWED: 原因")。
@@ -88,16 +93,18 @@ def _resolve_sandboxed_path(path: str):
     if not allowed:
         return None, f"PATH_NOT_ALLOWED: 路径超出允许范围（仅可访问: {', '.join(roots)}）"
     base = os.path.basename(real)
+    # v4.7.0/A3: 大小写不敏感（macOS 文件系统默认不区分，.ENV/ID_RSA 可绕过）
+    base_l = base.lower()
     for pat in SENSITIVE_FILENAME_PATTERNS:
-        if fnmatch.fnmatch(base, pat):
+        if fnmatch.fnmatchcase(base_l, pat.lower()):
             return None, f"PATH_NOT_ALLOWED: 敏感文件禁止访问 ({base})"
     # 按路径组件拦截敏感目录（如 .aws/credentials 的 basename 是 credentials，
     # 原先只匹配 basename 会被放行）
     if _has_sensitive_component(real):
         return None, f"PATH_NOT_ALLOWED: 敏感目录禁止访问 ({real})"
-    rel_posix = real.replace(os.sep, "/")
+    rel_posix = real.replace(os.sep, "/").lower()
     for suf in SENSITIVE_PATH_SUFFIXES:
-        if rel_posix.endswith("/" + suf) or rel_posix.endswith(suf):
+        if rel_posix.endswith("/" + suf.lower()) or rel_posix.endswith(suf.lower()):
             return None, f"PATH_NOT_ALLOWED: 敏感路径禁止访问 ({suf})"
     return real, None
 
@@ -131,7 +138,8 @@ def _list_dir_entries(path: str) -> list:
     return entries
 
 def _read_text_file(path: str) -> tuple:
-    """读取文本文件；二进制或超大文件拒绝/截断。返回 (content, truncated)。"""
+    """读取文本文件；二进制或超大文件拒绝/截断。返回 (content, truncated)。
+    v4.7.0/A3: O_NOFOLLOW 打开，防 read 时符号链接被替换（TOCTOU）。"""
     real_path, err = _resolve_sandboxed_path(path)
     if err:
         raise PathNotAllowedError(err)
@@ -140,7 +148,15 @@ def _read_text_file(path: str) -> tuple:
         raise FileNotFoundError(f"不是文件: {abs_path}")
     size = os.path.getsize(abs_path)
     truncated = size > config.FILE_READ_MAX_BYTES
-    with open(abs_path, "rb") as f:
+    # O_NOFOLLOW: 若路径是符号链接直接失败（Windows 无此标志则跳过）
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(abs_path, flags)
+    except OSError as e:
+        raise PathNotAllowedError(f"PATH_NOT_ALLOWED: 无法安全打开 ({e})")
+    with os.fdopen(fd, "rb") as f:
         raw = f.read(config.FILE_READ_MAX_BYTES)
     if b"\x00" in raw:
         raise ValueError("二进制文件不支持预览")

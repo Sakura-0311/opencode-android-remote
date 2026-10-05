@@ -60,3 +60,6 @@ def apply_cli_overrides(args):
         mod.DEFAULT_ACCOUNT_ID = args.account_id
     if getattr(args, "workspace", None):
         os.environ["AGENT_FILE_ROOTS"] = args.workspace
+    # v4.7.0/P1-6: --admin-token 覆盖建房管理令牌
+    if getattr(args, "admin_token", None):
+        mod.RELAY_ADMIN_TOKEN = args.admin_token

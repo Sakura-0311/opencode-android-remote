@@ -27,10 +27,12 @@ from opencode_api import (
     get_vcs_info,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [DesktopAgent] %(message)s"
-)
+# v4.7.0/A5: 只在调用方还没配过 handler 时给默认配置（import 时不改写 root logger）
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] [DesktopAgent] %(message)s"
+    )
 logger = logging.getLogger("DesktopAgent")
 from modules import config
 def _ensure_secret_dir():
@@ -67,28 +69,28 @@ def _migrate_legacy_secret() -> None:
 _KEYRING_SERVICE = "opencode-remote"
 _KEYRING_ACCOUNT = "pairing-secret"
 
-def _keyring_get() -> Optional[str]:
+def _keyring_get(account: str = _KEYRING_ACCOUNT) -> Optional[str]:
     """从 OS 密钥库读取配对密钥。无 keyring 依赖或后端时返回 None。"""
     try:
         import keyring
     except ImportError:
         return None
     try:
-        stored = keyring.get_password(_KEYRING_SERVICE, _KEYRING_ACCOUNT)
+        stored = keyring.get_password(_KEYRING_SERVICE, account)
         if stored and len(stored) >= 16:
             return stored
     except Exception as e:
         logger.debug(f"keyring read failed, fallback to file: {e}")
     return None
 
-def _keyring_save(new_value: str) -> bool:
+def _keyring_save(new_value: str, account: str = _KEYRING_ACCOUNT) -> bool:
     """写入 OS 密钥库。成功返回 True，无依赖/后端时返回 False。"""
     try:
         import keyring
     except ImportError:
         return False
     try:
-        keyring.set_password(_KEYRING_SERVICE, _KEYRING_ACCOUNT, new_value)
+        keyring.set_password(_KEYRING_SERVICE, account, new_value)
         return True
     except Exception as e:
         logger.debug(f"keyring write failed, fallback to file: {e}")
@@ -97,8 +99,19 @@ def _keyring_save(new_value: str) -> bool:
 # ==============================================================================
 # P0-1: 本地密钥管理（0600 受限权限，内存保管，绝不打日志）
 # ==============================================================================
+# v4.7.0/P1-7: 本次调用是否新生成了 secret（控制启动 banner 是否打印明文）
+_secret_just_generated = False
+
+
+def was_secret_just_generated() -> bool:
+    """本次进程启动是否新生成了 secret（供 banner 决定是否打印明文）。"""
+    return _secret_just_generated
+
+
 def get_or_create_secret() -> str:
     """获取或初始化持久化配对 Secret，确保权限仅当前用户可读写 (0600)"""
+    global _secret_just_generated
+    _secret_just_generated = False
     # v4.2.0/V2: 优先系统密钥库（Windows Credential Manager / macOS Keychain）
     stored = _keyring_get()
     if stored:
@@ -115,8 +128,9 @@ def get_or_create_secret() -> str:
         except Exception as e:
             logger.warning(f"Failed to read existing secret file: {e}")
 
-    # 生成 32 字节高熵随机十六进制密钥
+    # 生成 128 bit 高熵随机十六进制密钥（32 hex 字符）
     new_secret = secrets.token_hex(16)
+    _secret_just_generated = True
     # v4.2.0/V2: 先尝试系统密钥库，成功则不再落盘文件（文件作为回退）
     try:
         if _keyring_save(new_secret):
@@ -137,7 +151,10 @@ def get_or_create_secret() -> str:
 # ==============================================================================
 # P2-9: 终端配对信息渲染
 # ==============================================================================
-def print_pairing_banner(account_id: str, secret: str, relay_url: str):
+def print_pairing_banner(account_id: str, secret: str, relay_url: str,
+                        show_secret: bool = False):
+    """v4.7.0/P1-7: 默认不再打印明文 secret（会进 systemd/journald 日志）；
+    仅首次生成或显式 --show-secret 时打印。"""
     pairing_payload = json.dumps({
         "account_id": account_id,
         "relay_url": relay_url
@@ -147,7 +164,10 @@ def print_pairing_banner(account_id: str, secret: str, relay_url: str):
     print("  🚀 OpenCode Desktop Bridge Agent (v1.4 - Real Protocol Edition)")
     print("=" * 64)
     print(f"  🔑 Account ID (房间名):      \033[1;36m{account_id}\033[0m")
-    print(f"  🔒 Secret (访问鉴权密钥):    \033[1;32m{secret}\033[0m  (严禁泄露给未授权第三方)")
+    if show_secret:
+        print(f"  🔒 Secret (访问鉴权密钥):    \033[1;32m{secret}\033[0m  (严禁泄露给未授权第三方)")
+    else:
+        print("  🔒 Secret:                   ********（已保存；查看用 pair --show-secret）")
     print(f"  🌐 Relay Server URL:         {relay_url}")
     print(f"  🤖 Local OpenCode Target:     {config.OPENCODE_API_URL}")
     if config.OPENCODE_PASSWORD:

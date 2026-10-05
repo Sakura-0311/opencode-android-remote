@@ -29,14 +29,16 @@ from opencode_api import (
 # B1: 上游契约探测（GET /doc）
 from endpoints import ENDPOINTS, verify_contract
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [DesktopAgent] %(message)s"
-)
+# v4.7.0/A5: 只在调用方还没配过 handler 时给默认配置（import 时不改写 root logger）
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] [DesktopAgent] %(message)s"
+    )
 logger = logging.getLogger("DesktopAgent")
 from modules import config
 
-from modules.secrets import get_or_create_secret, print_pairing_banner
+from modules.keystore import get_or_create_secret, print_pairing_banner, was_secret_just_generated
 
 _e2ee_mod = None
 _e2ee_tried = False
@@ -465,7 +467,9 @@ async def do_hello_handshake(ws) -> dict:
 # Agent 主运行循环与自动重连
 # ==============================================================================
 async def run_desktop_agent(account_id: str, secret: str, relay_url: str):
-    print_pairing_banner(account_id, secret, relay_url)
+    # v4.7.0/P1-7: 仅首次生成 secret 时打印明文，常驻启动不再打印（防进日志）
+    print_pairing_banner(account_id, secret, relay_url,
+                         show_secret=was_secret_just_generated())
 
     base_ws_url = relay_url.rstrip("/")
     if base_ws_url.endswith("/desktop"):

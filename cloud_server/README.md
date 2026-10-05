@@ -7,9 +7,16 @@
 ## ⚠️ 生产安全规范 (P0-4 安全加固)
 
 为杜绝携带模型 Key 及具备执行 Shell 命令的 Agent 裸奔公网：
-1. **本地回环绑定**：OpenCode 容器端口仅绑定在服务器内部 `127.0.0.1:4096`，禁止直接对公网 `0.0.0.0` 开放。
-2. **强制密码保护**：必须配置 `OPENCODE_SERVER_PASSWORD` 强密码。
-3. **强制启用 HTTPS**：必须经由反向代理（Nginx / Caddy / Cloudflare Tunnel）配置 SSL 证书对外提供服务。
+1. **容器网络隔离**：OpenCode 容器端口**不发布到宿主机**（compose 里只用 `expose`，
+   仅 Docker 内部网络可达）；唯一的公网入口是 Caddy（80/443）。不要加 `ports` 把
+   4096 直接暴露出去。
+2. **强制密码保护**：必须配置 `OPENCODE_SERVER_PASSWORD` 强密码（compose 用
+   `${OPENCODE_SERVER_PASSWORD:?}` 强制显式指定，严禁弱口令）。
+3. **强制启用 HTTPS**：Caddy 自动申请 Let's Encrypt 证书对外提供 HTTPS。
+4. **暴力破解防护**（v4.7.0/D3）：Caddy 本身只有 HTTP Basic 认证、无失败限流。
+   建议二选一：
+   - 用 Cloudflare Tunnel / Zero Trust 在边缘挡（推荐）；
+   - 或在宿主机装 fail2ban，监控 Caddy 日志里 401 密集的 IP 并封禁。
 
 ---
 
@@ -30,7 +37,8 @@ export OPENAI_API_KEY="sk-..."            # 或 ANTHROPIC_API_KEY / DEEPSEEK_API
 docker compose up -d
 ```
 
-启动完成后，容器将在宿主机 `127.0.0.1:4096` 运行服务。
+启动完成后，OpenCode 只在 Docker 内部网络监听（不对宿主机发布端口），
+对外统一走 Caddy 的 80/443（自动 HTTPS）。
 
 ---
 

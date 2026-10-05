@@ -10,6 +10,7 @@ import secrets
 import sys
 import time
 from collections import deque
+from contextlib import asynccontextmanager
 from typing import Dict, Set, Optional, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse
@@ -21,7 +22,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("OpenCodeRelay")
 
-app = FastAPI(title="OpenCode Cloud Relay Server", version="1.1.0")
+# v4.7.0/R8: 版本号单一来源
+RELAY_VERSION = "4.7.0"
+
+app = FastAPI(title="OpenCode Cloud Relay Server", version=RELAY_VERSION)
 
 # ==============================================================================
 # v4.0: 协议版本与能力协商（唯一破坏性版本）
@@ -60,7 +64,11 @@ def get_client_ip(ws: WebSocket) -> str:
     if direct in TRUSTED_PROXIES:
         xff = ws.headers.get("x-forwarded-for")
         if xff:
-            return xff.split(",")[0].strip()
+            # v4.7.0/R6: 取最右侧第一个不在 TRUSTED_PROXIES 里的地址——
+            # 客户端自带的 XFF 最左侧值可伪造，不能直接取第一个
+            for ip in reversed([p.strip() for p in xff.split(",") if p.strip()]):
+                if ip not in TRUSTED_PROXIES:
+                    return ip
     return direct
 
 class RateLimiter:
@@ -154,6 +162,19 @@ class ClientSession:
         # v2.4: 设备身份（设备密钥登录时填充）
         self.device_id = ""
         self.device_name = str()
+        # v4.7.0/R2: 每会话滑动窗口限速（时间戳队列）
+        self.msg_timestamps: deque = deque()
+
+    def check_rate_limit(self, max_msgs: int = 100, window_sec: int = 10) -> bool:
+        """v4.7.0/R2: 滑动窗口限速。超限返回 False（调用方丢弃消息）。"""
+        now = time.time()
+        q = self.msg_timestamps
+        while q and now - q[0] > window_sec:
+            q.popleft()
+        if len(q) >= max_msgs:
+            return False
+        q.append(now)
+        return True
 
 
 class RoomBuffer:
@@ -242,15 +263,30 @@ class ConnectionManager:
             logger.warning(f"[v2.2.1-B] 加载 relay_state 失败: {e}")
             return {}
 
-    def _save_state(self) -> None:
-        """把内存中的 device_secrets/secret_hash 与已保存的合并后原子写入磁盘（0600）。"""
+    def _save_state(self, _force: bool = False) -> None:
+        """把内存中的 device_secrets/secret_hash 与已保存的合并后原子写入磁盘（0600）。
+
+        v4.7.0/R5: 节流（5 秒内只写一次，尾调用由心跳 flush）+ 清理 90 天未活跃设备。
+        """
+        now = time.time()
+        if not _force and now - getattr(self, "_last_save_ts", 0) < 5:
+            self._save_pending = True
+            return
+        self._last_save_ts = now
+        self._save_pending = False
         try:
             merged = dict(self._saved_state)
+            # v4.7.0/R5: 设备密钥 90 天未活跃则过期清理
+            expiry = now - 90 * 24 * 3600
             for account_id, room in self.rooms.items():
+                secrets = room.get("device_secrets", {})
+                for k in [k for k, v in secrets.items()
+                          if v.get("last_active", v.get("created_at", 0)) < expiry]:
+                    del secrets[k]
                 merged[account_id] = {
                     "secret_hash": room.get("secret_hash", ""),
-                    "device_secrets": room.get("device_secrets", {}),
-                    "updated_at": time.time(),
+                    "device_secrets": secrets,
+                    "updated_at": now,
                 }
             data = {"schema_version": self.STATE_SCHEMA_VERSION, "rooms": merged}
             d = os.path.dirname(self.state_file)
@@ -440,10 +476,19 @@ class ConnectionManager:
         device_secret = secrets.token_urlsafe(32)
         secret_hash = hashlib.sha256(device_secret.encode("utf-8")).hexdigest()
         now_ts = time.time()
+        # v4.7.0/R4: 设备名重名时自动加后缀（"Android"、"Android (2)"…），展示用；
+        # 身份识别一律按 device_id
+        base_name = (device_name or "Android")[:64]
+        taken = {i.get("device_name") for i in room.get("device_secrets", {}).values()}
+        uniq_name = base_name
+        _n = 2
+        while uniq_name in taken:
+            uniq_name = f"{base_name} ({_n})"
+            _n += 1
         room.setdefault("device_secrets", {})[secret_hash] = {
             # v2.4: 设备以 device_id（UUID）标识，名称仅展示
             "device_id": uuid.uuid4().hex,
-            "device_name": device_name or "Android",
+            "device_name": uniq_name,
             "created_at": now_ts,
             "last_active": now_ts,
         }
@@ -453,6 +498,8 @@ class ConnectionManager:
         return True, {
             "device_secret": device_secret,
             "device_id": dev_entry.get("device_id", ""),
+            # v4.7.0/R4: 返回去重后的展示名
+            "device_name": uniq_name,
             "account_id": account_id,
             "desktop_name": ps["desktop_name"],
             # E2EE: desktop 公钥（create_pairing 时上报，若无则为空）
@@ -520,13 +567,9 @@ class ConnectionManager:
         room = self.rooms.get(account_id)
         if not room:
             return []
-        # 当前在线的设备名集合
-        online_names = set()
+        # 当前在线的设备 ID 集合（v4.7.0/R4: 只按 device_id 判定，同名不再串台）
         online_ids = set()
         for m in room.get("mobiles", set()):
-            name = getattr(m, "device_name", None)
-            if name:
-                online_names.add(name)
             did = getattr(m, "device_id", None)
             if did:
                 online_ids.add(did)
@@ -538,7 +581,7 @@ class ConnectionManager:
                 "device_id": did,
                 "device_name": name,
                 "created_at": info.get("created_at", 0),
-                "is_online": (did and did in online_ids) or (name in online_names),
+                "is_online": bool(did and did in online_ids),
                 "last_active": info.get("last_active", info.get("created_at", 0)),
             })
         return result
@@ -562,13 +605,13 @@ class ConnectionManager:
         result.sort(key=lambda d: d["last_active"], reverse=True)
         return result
 
-    def mark_device_active(self, account_id: str, device_name: str):
-        """更新设备最近活动时间。"""
+    def mark_device_active(self, account_id: str, device_id: str):
+        """更新设备最近活动时间。v4.7.0/R4: 按 device_id 识别（同名设备不再串台）。"""
         room = self.rooms.get(account_id)
-        if not room or not device_name:
+        if not room or not device_id:
             return
         for info in room.get("device_secrets", {}).values():
-            if info.get("device_name") == device_name:
+            if info.get("device_id") == device_id:
                 info["last_active"] = time.time()
                 break
 
@@ -628,14 +671,20 @@ class ConnectionManager:
         if not sender_session.is_authenticated:
             return
 
+        # v4.7.0/R2: 每会话限速（100 条 / 10 秒），超限丢弃
+        if not sender_session.check_rate_limit():
+            logger.warning(f"R2: 会话限速丢弃消息 "
+                           f"({sender_session.client_type}/{sender_session.account_id})")
+            return
+
         account_id = sender_session.account_id
         if account_id not in self.rooms:
             return
 
-        # v1.6 P0 多设备管理：更新设备活跃时间
-        device_name = getattr(sender_session, "device_name", None)
-        if device_name:
-            self.mark_device_active(account_id, device_name)
+        # v1.6 P0 多设备管理：更新设备活跃时间（v4.7.0/R4: 按 device_id）
+        _did = getattr(sender_session, "device_id", None)
+        if _did:
+            self.mark_device_active(account_id, _did)
         # v3.1: desktop 会话的最近活动（在线 desktop 列表用）
         if sender_session.client_type == "desktop":
             sender_session.last_active = time.time()
@@ -643,13 +692,15 @@ class ConnectionManager:
         room = self.rooms[account_id]
         if sender_session.client_type == "mobile":
             # v3.1: 可选 target_device_id 定向路由；缺省仍走主 desktop
+            # v4.7.0/R3: 快路径——消息里没有 target_device_id 子串时跳过 json 解析
             target_id = ""
-            try:
-                _m = json.loads(message_str)
-                if isinstance(_m, dict):
-                    target_id = str(_m.get("target_device_id", "") or "")
-            except Exception:
-                pass
+            if '"target_device_id"' in message_str:
+                try:
+                    _m = json.loads(message_str)
+                    if isinstance(_m, dict):
+                        target_id = str(_m.get("target_device_id", "") or "")
+                except Exception:
+                    pass
             desktop = None
             if target_id:
                 cand = room.get("desktops", {}).get(target_id)
@@ -671,7 +722,11 @@ class ConnectionManager:
                 desktop = room.get("desktop")
             if desktop and desktop.websocket:
                 try:
-                    await desktop.websocket.send_text(message_str)
+                    # v4.7.0/R1: 单发也加超时，慢 desktop 不卡住 mobile 的读循环
+                    await asyncio.wait_for(desktop.websocket.send_text(message_str),
+                                           timeout=10)
+                except asyncio.TimeoutError:
+                    logger.warning(f"R1: 发送到 desktop 超时 ({account_id})")
                 except Exception as e:
                     logger.error(f"Error routing mobile -> desktop in {account_id}: {e}")
             else:
@@ -704,11 +759,24 @@ class ConnectionManager:
             buf = room.get("msg_buffer")
             if buf is not None:
                 buf.append(seq, sequenced_str)
-            for m_session in list(room.get("mobiles", [])):
+            # v4.7.0/R1: 扇出改 gather+超时——慢连接不再阻塞整个房间，
+            # 发送超时（10s）的连接直接断开
+            async def _fanout(sess, data):
                 try:
-                    await m_session.websocket.send_text(sequenced_str)
+                    await asyncio.wait_for(sess.websocket.send_text(data), timeout=10)
+                except asyncio.TimeoutError:
+                    logger.warning(f"R1: 发送超时，断开慢连接 "
+                                   f"({getattr(sess, 'device_name', '?')})")
+                    try:
+                        await sess.websocket.close(code=1013, reason="send timeout")
+                    except Exception:
+                        pass
                 except Exception as e:
                     logger.error(f"Error routing desktop -> mobile in {account_id}: {e}")
+            targets = list(room.get("mobiles", []))
+            if targets:
+                await asyncio.gather(*(_fanout(s, sequenced_str) for s in targets),
+                                     return_exceptions=True)
 
     async def check_heartbeats(self):
         """
@@ -734,6 +802,11 @@ class ConnectionManager:
             except Exception:
                 pass
             self.disconnect(ws)
+
+        # v4.7.0/R5: flush 被节流拦下的存盘（丢到线程池，不阻塞事件循环）
+        if getattr(self, "_save_pending", False):
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: self._save_state(_force=True))
 
 
 manager = ConnectionManager()
@@ -781,9 +854,35 @@ def _check_proxy_hint() -> None:
                 "建议在环境变量 TRUSTED_PROXIES 中配置反代出口 IP（见 docs/SECURITY.md）。"
             )
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(heartbeat_background_task())
+# v4.7.0/R9: lifespan 替代已弃用的 @app.on_event("startup")；
+# 后台任务引用保存在集合里，防被 GC 回收
+_bg_tasks: set = set()
+
+
+def _require_admin_token() -> None:
+    """v4.7.0/P1-6: 建房令牌强制——未设置/占位符/太短则拒绝启动。"""
+    token = (RELAY_ADMIN_TOKEN or "").strip()
+    placeholders = {"", "changeme", "change-me", "换成你自己的随机字符串",
+                    "your-secret-here", "test", "password", "123456"}
+    if token.lower() in placeholders or len(token) < 16:
+        raise RuntimeError(
+            "P1-6: RELAY_ADMIN_TOKEN 未设置、为占位符或太短（<16 字符），拒绝启动。\n"
+            "请设置强随机令牌后重试：\n"
+            "  export RELAY_ADMIN_TOKEN=$(openssl rand -hex 24)\n"
+            "  python server.py --admin-token $(openssl rand -hex 24)\n"
+            "  Docker: 在 .env 里填 RELAY_ADMIN_TOKEN（见 .env.example）")
+
+
+@asynccontextmanager
+async def _lifespan(app):
+    _require_admin_token()
+    _bg_tasks.add(asyncio.ensure_future(heartbeat_background_task()))
+    yield
+    for t in _bg_tasks:
+        t.cancel()
+
+
+app.router.lifespan_context = _lifespan
 
 @app.get("/")
 def index():
@@ -791,7 +890,7 @@ def index():
         "status": "ok",
         "service": "OpenCode Secure Relay Server",
         "security": "Transport Layer Encryption (WSS/TLS) Supported",
-        "version": "1.1.0"
+        "version": RELAY_VERSION
     }
 
 # v4.0: 运行统计。本机/内网运维用，不含敏感信息。
@@ -836,6 +935,9 @@ async def websocket_endpoint(
     try:
         raw_auth_msg = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
         auth_data = json.loads(raw_auth_msg)
+        # v4.7.0/R7: 首帧必须为 JSON 对象
+        if not isinstance(auth_data, dict):
+            raise ValueError("first frame must be a JSON object")
     except asyncio.TimeoutError:
         logger.warning(f"Handshake timeout from {client_ip}: No auth message within 10s.")
         rate_limiter.record_auth_failure(client_ip)
@@ -886,11 +988,12 @@ async def websocket_endpoint(
                     # E2EE: device_paired 带 mobile 公钥（若有），desktop 用它做 ECDH
                     device_paired_msg = {
                         "type": "device_paired",
-                        "device_name": device_name,
+                        # v4.7.0/R4: 用去重后的展示名
+                        "device_name": result.get("device_name", device_name),
                         # v4.6.0: 带上 relay 分配的 device_id，desktop 用它做 E2EE
                         # peer id 和 AAD（与手机加密时的 sender 一致）
                         "device_id": result.get("device_id", ""),
-                        "message": f"新设备已配对：{device_name}"
+                        "message": f"新设备已配对：{result.get('device_name', device_name)}"
                     }
                     if result.get("mobile_e2ee_pubkey"):
                         device_paired_msg["e2ee_pubkey"] = result["mobile_e2ee_pubkey"]
@@ -931,13 +1034,26 @@ async def websocket_endpoint(
     try:
         auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
         auth_data = json.loads(auth_raw)
+        # v4.7.0/R7: 首帧 JSON 必须为对象（如 [] 会导致后续 .get 抛未捕获异常）
+        if not isinstance(auth_data, dict):
+            raise ValueError("auth frame must be a JSON object")
     except Exception:
+        # v4.7.0/R7: hello 后等 auth 的超时/异常同样计入认证失败
+        rate_limiter.record_auth_failure(client_ip)
         await websocket.close(code=4401, reason="hello without auth")
         return
     msg_type = auth_data.get("type")
     account_id = auth_data.get("account_id") or path_account_id
     client_type = auth_data.get("client_type") or path_client_type
     secret = auth_data.get("secret", "")
+    # v4.7.0/R7: 关键字段必须为字符串（防非字符串类型导致下游异常）
+    for _f in ("account_id", "client_type", "secret", "device_name", "admin_token"):
+        _v = auth_data.get(_f)
+        if _v is not None and not isinstance(_v, str):
+            logger.warning(f"R7: 非法字段类型 {_f}={type(_v).__name__} from {client_ip}")
+            rate_limiter.record_auth_failure(client_ip)
+            await websocket.close(code=4400, reason=f"field {_f} must be string")
+            return
 
     if msg_type != "auth" or not account_id or client_type not in ["desktop", "mobile"] or not secret:
         logger.warning(f"Auth rejected from {client_ip}: missing required auth fields.")
@@ -1128,11 +1244,22 @@ if __name__ == "__main__":
     _ap.add_argument("--admin-token", default=None, help="建房管理令牌（默认 $RELAY_ADMIN_TOKEN）")
     _ap.add_argument("--trusted-proxies", default=None,
                      help="信任的代理 IP，逗号分隔（默认 $TRUSTED_PROXIES）")
+    # v4.7.0/R2: WebSocket 单帧上限（默认 2 MiB；文件预览上限仅 200 KB）
+    _ap.add_argument("--ws-max-size", type=int, default=None,
+                     help="WebSocket 单帧字节上限（默认 $WS_MAX_SIZE 或 2097152）")
     _args = _ap.parse_args()
     if _args.admin_token is not None:
         globals()["RELAY_ADMIN_TOKEN"] = _args.admin_token
     if _args.trusted_proxies is not None:
         globals()["TRUSTED_PROXIES"] = set(filter(None, _args.trusted_proxies.split(",")))
+
+    # v4.7.0/P1-6: 建房令牌强制——未设置或仍为占位符则拒绝启动
+    # （否则任何客户端都能建房/抢注 account_id）
+    try:
+        _require_admin_token()
+    except RuntimeError as e:
+        logger.error(str(e))
+        raise SystemExit(2)
 
     host = os.getenv("HOST", "0.0.0.0")
     port = _args.port or int(os.getenv("PORT", "8765"))
@@ -1140,6 +1267,10 @@ if __name__ == "__main__":
     ssl_key = os.getenv("SSL_KEYFILE")
 
     kwargs = {"host": host, "port": port, "workers": 1}
+    # v4.7.0/R2: 单帧上限（默认 2 MiB，可用 --ws-max-size / $WS_MAX_SIZE 调整）
+    _ws_max = _args.ws_max_size or int(os.getenv("WS_MAX_SIZE", str(2 * 1024 * 1024)))
+    kwargs["ws_max_size"] = _ws_max
+    logger.info(f"WebSocket 单帧上限: {_ws_max} 字节")
     logger.info("Ensuring single-worker operation to preserve in-memory room state.")
     if ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key):
         logger.info(f"Starting WSS (TLS) server with cert: {ssl_cert}")

@@ -65,6 +65,27 @@ curl http://127.0.0.1:8765/api/stats
 > 地址选择：`ws://` 只用于同一局域网/可信网络调试；任何经公网的
 > release 部署请用 `wss://`（或经反代的 https），否则 secret 与消息明文传输。
 
+### 反代部署要点（v4.7.0/D1/R8）
+
+- compose 默认只绑宿主机回环（`${BIND_ADDR:-127.0.0.1}`），反代与 relay
+  同机时直接反代 `127.0.0.1:8765`；需局域网直连才在 `.env` 设
+  `BIND_ADDR=0.0.0.0`。
+- 反代**只放行 `/ws` 与健康检查**（`/`、`/api/stats` 含版本/房间数/在线数，
+  公网可见会泄露运维信息）。Caddy 示例：
+  ```
+  relay.example.com {
+      reverse_proxy 127.0.0.1:8765
+      # 只放行 WebSocket 与健康检查
+      @blocked {
+          not path /ws* /api/health
+      }
+      respond @blocked 404
+  }
+  ```
+- `TRUSTED_PROXIES`：填反代的出口 IP（Docker 部署通常是网关如 `172.18.0.1`，
+  可用 `docker network inspect` 查）。不填时限流会把所有客户端当成一个 IP，
+  一个人输错 5 次封所有人 15 分钟。
+
 ## 崩溃上报接收端（可选，默认关闭）
 
 `.env` 里 `RELAY_ENABLE_CRASH_REPORT=1` 后重启，relay 开始接收已 opt-in

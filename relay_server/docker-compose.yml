@@ -16,14 +16,20 @@ services:
     container_name: opencode-relay
     # C2: 自动重启 —— 宿主机重启 / 进程崩溃后自动恢复
     restart: unless-stopped
+    # v4.7.0/D1: 默认只绑宿主机回环（反代场景下不明文端口暴露公网）；
+    # 需局域网直连时，在 .env 里设 BIND_ADDR=0.0.0.0
     ports:
-      - "${PORT:-8765}:8765"
+      - "${BIND_ADDR:-127.0.0.1}:${PORT:-8765}:8765"
     env_file:
       - path: .env
         required: false # 不存在时用 environment 默认值；生产按文档 cp .env.example .env
     environment:
       HOST: "0.0.0.0"
       PORT: "8765"
+      # v4.7.0/D1: Docker 里反代来源 IP 不在默认 TRUSTED_PROXIES 里时，
+      # 限流会把所有客户端当成一个 IP。反代部署时在 .env 填反代出口 IP：
+      # TRUSTED_PROXIES=172.18.0.1（docker 网关）或反代容器 IP
+      TRUSTED_PROXIES: "${TRUSTED_PROXIES:-127.0.0.1,::1}"
     volumes:
       # 状态/配对数据落盘，容器重建不丢
       - relay-data:/app/data

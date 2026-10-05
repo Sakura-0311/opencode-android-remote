@@ -31,3 +31,8 @@ venv/
 # Runtime
 *.log
 sessions/
+
+# v4.7.0/A8: agent 运行时文件（别进仓库）
+.opencode_secret*
+.opencode_sse_cursor
+.desktop_device_id
