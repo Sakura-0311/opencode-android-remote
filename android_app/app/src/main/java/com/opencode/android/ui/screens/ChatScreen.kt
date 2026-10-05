@@ -602,10 +602,14 @@ fun ChatScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .padding(paddingValues)
         ) {
-            val filteredMessages = if (uiState.logSearchQuery.isBlank()) {
-                uiState.messages
-            } else {
-                uiState.messages.filter { it.content.contains(uiState.logSearchQuery, ignoreCase = true) }
+            // remember 缓存过滤结果，避免每次重组全量 filter；
+            // items 加 key = id，避免无 key 时 500+ 条消息的错位与全量重组
+            val filteredMessages = remember(uiState.messages, uiState.logSearchQuery) {
+                if (uiState.logSearchQuery.isBlank()) {
+                    uiState.messages
+                } else {
+                    uiState.messages.filter { it.content.contains(uiState.logSearchQuery, ignoreCase = true) }
+                }
             }
 
             if (filteredMessages.isEmpty()) {
@@ -638,7 +642,7 @@ fun ChatScreen(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(filteredMessages) { message ->
+                    items(filteredMessages, key = { it.id }) { message ->
                         MessageBubbleWithHighlight(message, uiState.appMode, uiState.logSearchQuery)
                     }
                 }

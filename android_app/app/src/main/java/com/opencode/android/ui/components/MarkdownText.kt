@@ -71,6 +71,23 @@ private data class InlineSpan(
 
 // ---------- 行内解析 ----------
 
+// parseBlocks 循环内反复构造的 Regex 提到顶层，避免每行重复编译
+private val HR_RE = Regex("^(---+|\\*\\*\\*+|___+)$")
+private val HEADING_RE = Regex("^(#{1,6})\\s+(.*)$")
+private val TABLE_SEP_RE = Regex("^\\|?[\\s:|-]+\\|?$")
+private val BULLET_RE = Regex("^[-*+]\\s+.*")
+private val BULLET_STRIP_RE = Regex("^[-*+]\\s+")
+private val ORDERED_RE = Regex("^\\d+[.)]\\s+.*")
+private val ORDERED_STRIP_RE = Regex("^\\d+[.)]\\s+")
+
+// looksLikeMarkdown 每消息调用一次，正则同样提到顶层
+private val LM_HEADING_RE = Regex("^#{1,6}\\s", RegexOption.MULTILINE)
+private val LM_BOLD_RE = Regex("\\*\\*.+?\\*\\*")
+private val LM_BULLET_RE = Regex("^\\s*[-*+]\\s+", RegexOption.MULTILINE)
+private val LM_ORDERED_RE = Regex("^\\s*\\d+[.)]\\s+", RegexOption.MULTILINE)
+private val LM_QUOTE_RE = Regex("^\\s*>\\s+", RegexOption.MULTILINE)
+private val LM_LINK_RE = Regex("\\[[^\\]]+\\]\\([^)]+\\)")
+
 private val INLINE_PATTERN = Regex(
     """(\*\*.+?\*\*|\*[^*\n]+?\*|~~.+?~~|`[^`\n]+?`|\[[^\]\n]+\]\([^)\n]+\))"""
 )
@@ -153,7 +170,7 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
         }
 
         // 分割线
-        if (trimmed.matches(Regex("^(---+|\\*\\*\\*+|___+)$"))) {
+        if (trimmed.matches(HR_RE)) {
             flushParagraph()
             blocks.add(MdBlock.Hr)
             i++
@@ -161,7 +178,7 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
         }
 
         // 标题
-        val headingMatch = Regex("^(#{1,6})\\s+(.*)$").find(trimmed)
+        val headingMatch = HEADING_RE.find(trimmed)
         if (headingMatch != null) {
             flushParagraph()
             blocks.add(MdBlock.Heading(headingMatch.groupValues[1].length, headingMatch.groupValues[2]))
@@ -183,7 +200,7 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
 
         // 简单表格：表头行 + 分隔行
         if (trimmed.startsWith("|") && i + 1 < lines.size &&
-            lines[i + 1].trim().matches(Regex("^\\|?[\\s:|-]+\\|?$"))
+            lines[i + 1].trim().matches(TABLE_SEP_RE)
         ) {
             flushParagraph()
             val header = trimmed.trim('|').split("|").map { it.trim() }
@@ -198,11 +215,11 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
         }
 
         // 无序列表
-        if (trimmed.matches(Regex("^[-*+]\\s+.*"))) {
+        if (trimmed.matches(BULLET_RE)) {
             flushParagraph()
             val items = mutableListOf<String>()
-            while (i < lines.size && lines[i].trim().matches(Regex("^[-*+]\\s+.*"))) {
-                items.add(lines[i].trim().replaceFirst(Regex("^[-*+]\\s+"), ""))
+            while (i < lines.size && lines[i].trim().matches(BULLET_RE)) {
+                items.add(lines[i].trim().replaceFirst(BULLET_STRIP_RE, ""))
                 i++
             }
             blocks.add(MdBlock.BulletList(items))
@@ -210,11 +227,11 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
         }
 
         // 有序列表
-        if (trimmed.matches(Regex("^\\d+[.)]\\s+.*"))) {
+        if (trimmed.matches(ORDERED_RE)) {
             flushParagraph()
             val items = mutableListOf<String>()
-            while (i < lines.size && lines[i].trim().matches(Regex("^\\d+[.)]\\s+.*"))) {
-                items.add(lines[i].trim().replaceFirst(Regex("^\\d+[.)]\\s+"), ""))
+            while (i < lines.size && lines[i].trim().matches(ORDERED_RE)) {
+                items.add(lines[i].trim().replaceFirst(ORDERED_STRIP_RE, ""))
                 i++
             }
             blocks.add(MdBlock.OrderedList(items))
@@ -531,10 +548,10 @@ fun MarkdownText(
 fun looksLikeMarkdown(text: String): Boolean {
     if (text.length < 3) return false
     return text.contains("```") ||
-        Regex("^#{1,6}\\s", RegexOption.MULTILINE).containsMatchIn(text) ||
-        Regex("\\*\\*.+?\\*\\*").containsMatchIn(text) ||
-        Regex("^\\s*[-*+]\\s+", RegexOption.MULTILINE).containsMatchIn(text) ||
-        Regex("^\\s*\\d+[.)]\\s+", RegexOption.MULTILINE).containsMatchIn(text) ||
-        Regex("^\\s*>\\s+", RegexOption.MULTILINE).containsMatchIn(text) ||
-        Regex("\\[[^\\]]+\\]\\([^)]+\\)").containsMatchIn(text)
+        LM_HEADING_RE.containsMatchIn(text) ||
+        LM_BOLD_RE.containsMatchIn(text) ||
+        LM_BULLET_RE.containsMatchIn(text) ||
+        LM_ORDERED_RE.containsMatchIn(text) ||
+        LM_QUOTE_RE.containsMatchIn(text) ||
+        LM_LINK_RE.containsMatchIn(text)
 }
