@@ -40,6 +40,9 @@ import com.opencode.android.network.TransportFactory
 import com.opencode.android.network.TransportListener
 import com.opencode.android.network.TransportParams
 import com.opencode.android.util.AppLog
+import com.opencode.android.util.ApprovalReducer
+import com.opencode.android.util.StreamReducer
+import com.opencode.android.util.TargetSwitchPolicy
 import com.opencode.android.util.DesktopRoutingPolicy
 import com.opencode.android.util.FeatureFlags
 import com.opencode.android.network.RelayConnectionState
@@ -277,7 +280,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     fun approveTool(callId: String) {
         val state = _uiState.value
         val nonce = state.pendingApproval?.nonce
-        _uiState.update { it.copy(pendingApproval = null) }
+        _uiState.update { it.copy(pendingApproval = ApprovalReducer.reduce(it.pendingApproval, ApprovalReducer.Event.Approved)) }
         OpLog.record(getApplication(), OpLog.OpType.APPROVE, "callId=$callId")
         // P0-3 修复：直接回传真实权限审批决定，绝不再把 "/approve" 作为普通 prompt 发给大模型！
         // B-5: nonce 原样回传；B-9: 云端模式直调 OpenCode 权限端点
@@ -294,7 +297,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     fun rejectTool(callId: String) {
         val state = _uiState.value
         val nonce = state.pendingApproval?.nonce
-        _uiState.update { it.copy(pendingApproval = null) }
+        _uiState.update { it.copy(pendingApproval = ApprovalReducer.reduce(it.pendingApproval, ApprovalReducer.Event.Rejected)) }
         OpLog.record(getApplication(), OpLog.OpType.REJECT, "callId=$callId")
         // P0-3 修复：回传真实拒绝决定；B-9: 云端模式同上
         if (state.appMode == AppMode.DESKTOP_RELAY) {
@@ -917,7 +920,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onToolApprovalRequest(request: ToolApprovalRequest) {
-        _uiState.update { it.copy(pendingApproval = request) }
+        _uiState.update { it.copy(pendingApproval = ApprovalReducer.reduce(it.pendingApproval, ApprovalReducer.Event.Requested(request))) }
         // v1.6 P0: 统计修改文件 + 明确进入"权限审批"状态
         request.filePath?.takeIf { it.isNotBlank() }?.let { taskModifiedFiles.add(it) }
         setTaskStatus(TaskStatus.APPROVAL_REQUIRED, getApplication<Application>().getString(R.string.vm_026, request.toolName))
@@ -982,27 +985,20 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         if (text.isEmpty()) return
         streamBuffer.clear()
         val msgId = activeAssistantMessageId ?: return
+        val app = getApplication<Application>()
         _uiState.update { state ->
-            val updatedMessages = state.messages.map { msg ->
-                if (msg.id == msgId) {
-                    msg.copy(content = applyStreamGuard(msg.content + text))
-                } else {
-                    msg
-                }
-            }
-            state.copy(messages = updatedMessages)
+            state.copy(messages = StreamReducer.appendToMessage(
+                state.messages, msgId, text, MAX_STREAM_LINES
+            ) { header, hidden, tail -> app.getString(R.string.vm_028, header, hidden, tail) })
         }
     }
 
     /** P1-5: 超长输出折叠保护（原 onStreamChunk 内联逻辑抽取，行为不变） */
     private fun applyStreamGuard(combined: String): String {
-        val lines = combined.split("\n")
-        return if (lines.size > MAX_STREAM_LINES) {
-            val header = lines.take(50).joinToString("\n")
-            val tail = lines.takeLast(MAX_STREAM_LINES - 50).joinToString("\n")
-            getApplication<Application>().getString(R.string.vm_028, header, lines.size - MAX_STREAM_LINES, tail)
-        } else {
-            combined
+        return when (val r = StreamReducer.collapseIfNeeded(combined, MAX_STREAM_LINES)) {
+            is StreamReducer.CollapseResult.NoCollapse -> combined
+            is StreamReducer.CollapseResult.Collapsed ->
+                getApplication<Application>().getString(R.string.vm_028, r.header, r.hiddenCount, r.tail)
         }
     }
 
@@ -1286,7 +1282,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
      */
     fun requestTargetSwitch(deviceId: String) {
         val st = _uiState.value
-        if (st.isGenerating || st.currentSessionId.isNotEmpty()) {
+        if (TargetSwitchPolicy.needsConfirm(st.isGenerating, st.currentSessionId)) {
             _uiState.update { it.copy(pendingTargetSwitch = deviceId) }
         } else {
             applyTargetSwitch(deviceId)

@@ -112,6 +112,22 @@ object ErrorCodes {
             R.string.err_056,
             R.string.err_057,
         ),
+        // v4.3.2 A3: 补齐 ViewModel 实际使用的三个错误码（之前走通用回退文案）
+        "PAIR_FAILED" to ErrorInfo(
+            R.string.err_061,
+            R.string.err_062,
+            R.string.err_063,
+        ),
+        "INPUT_EMPTY" to ErrorInfo(
+            R.string.err_064,
+            R.string.err_065,
+            R.string.err_066,
+        ),
+        "CLOUD_CHECK_FAILED" to ErrorInfo(
+            R.string.err_067,
+            R.string.err_068,
+            R.string.err_069,
+        ),
     )
 
     /** 未知错误码回退为通用条目，不抛异常。 */
@@ -121,4 +137,7 @@ object ErrorCodes {
             reasonRes = R.string.err_059,
             suggestionRes = R.string.err_060
         )
+
+    /** v4.3.2 A3: 供单测做映射完整性校验（代码里用到的错误码必须都在表里）。 */
+    internal fun allCodes(): Set<String> = TABLE.keys
 }
