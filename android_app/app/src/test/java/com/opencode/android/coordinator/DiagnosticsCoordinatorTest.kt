@@ -27,7 +27,7 @@ class DiagnosticsCoordinatorTest {
         var gotKey: String? = null
         val (c, d) = coordinator(
             state = OpenCodeUiState(appMode = AppMode.DESKTOP_RELAY, relayUrl = "wss://r/x", secret = "s3cr3t"),
-            diagnose = { url, key, cb -> gotUrl = url; gotKey = key; cb(DiagnosticsResult(false, "ok")) },
+            diagnose = { url, key, cb -> gotUrl = url; gotKey = key; cb(DiagnosticsResult(isChecking = false, statusTitle = "ok")) },
         )
         c.testConnectivity()
         assertEquals("wss://r/x", gotUrl)
@@ -45,7 +45,7 @@ class DiagnosticsCoordinatorTest {
                 appMode = AppMode.CLOUD_HOSTED,
                 cloudServerUrl = "https://cloud/x", cloudApiKey = "k",
             ),
-            diagnose = { url, key, cb -> gotUrl = url; cb(DiagnosticsResult(false, "ok")) },
+            diagnose = { url, key, cb -> gotUrl = url; cb(DiagnosticsResult(isChecking = false, statusTitle = "ok")) },
         )
         c.testConnectivity()
         assertEquals("https://cloud/x", gotUrl)
@@ -53,7 +53,7 @@ class DiagnosticsCoordinatorTest {
 
     @Test
     fun `clearDiagnostics nulls result`() {
-        val (c, d) = coordinator(state = OpenCodeUiState(diagnostics = DiagnosticsResult(false, "x")))
+        val (c, d) = coordinator(state = OpenCodeUiState(diagnostics = DiagnosticsResult(isChecking = false, statusTitle = "x")))
         c.clearDiagnostics()
         assertNull(d.currentState.diagnostics)
     }
