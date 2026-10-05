@@ -588,4 +588,12 @@
     <string name="e2ee_002">等待握手</string>
     <string name="e2ee_003">已建立加密通道</string>
     <string name="e2ee_004">加密通道已建立，此设备与桌面之间的消息将端到端加密。中继只能看到路由元数据（谁、何时、多少字节），看不到内容。</string>
+    <!-- C3: 崩溃上报开启前知情弹窗 -->
+    <string name="crash_001">开启崩溃上报？</string>
+    <string name="crash_002">开启后，应用崩溃时将自动上报以下信息，用于定位和修复 bug：</string>
+    <string name="crash_003">• 应用版本、手机型号、Android 版本\n• 崩溃堆栈、崩溃发生时间</string>
+    <string name="crash_004">不会收集：聊天记录、密钥、设备唯一标识、完整系统日志。</string>
+    <string name="crash_005">数据只发送到你自己配置的 Relay 服务器（/api/crash-report），不经过任何第三方。重启应用后生效，可随时在菜单中关闭。</string>
+    <string name="crash_006">确认开启</string>
+    <string name="crash_007">取消</string>
 </resources>

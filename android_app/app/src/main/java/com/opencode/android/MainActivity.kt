@@ -115,6 +115,8 @@ class MainActivity : ComponentActivity() {
                 var showLanguage by remember { mutableStateOf(false) }
                 // 对外分发：崩溃上报开关状态
                 var crashReportEnabled by remember { mutableStateOf(CrashReporting.isOptedIn(this@MainActivity)) }
+                // C3: 崩溃上报开启前知情弹窗
+                var showCrashConsent by remember { mutableStateOf(false) }
                 // v4.2: E2EE 运行时开关
                 var e2eeEnabled by remember { mutableStateOf(viewModel.prefsManager.isE2eeEnabled) }
 
@@ -269,13 +271,18 @@ class MainActivity : ComponentActivity() {
                             ).show()
                         },
                         onToggleCrashReport = { enabled ->
-                            CrashReporting.setOptedIn(this@MainActivity, enabled)
-                            crashReportEnabled = enabled
-                            Toast.makeText(
-                                this@MainActivity,
-                                if (enabled) getString(R.string.main_003) else getString(R.string.main_004),
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            // C3: 开启前先弹窗说明收集内容，确认后才 opt-in；关闭直接生效
+                            if (enabled) {
+                                showCrashConsent = true
+                            } else {
+                                CrashReporting.setOptedIn(this@MainActivity, false)
+                                crashReportEnabled = false
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    getString(R.string.main_004),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
                     )
                 }
@@ -472,6 +479,23 @@ class MainActivity : ComponentActivity() {
                 // 对外分发：隐私说明
                 if (showPrivacy) {
                     PrivacyDialog(onDismiss = { showPrivacy = false })
+                }
+
+                // C3: 崩溃上报开启前知情弹窗（确认后才 opt-in）
+                if (showCrashConsent) {
+                    CrashConsentDialog(
+                        onConfirm = {
+                            CrashReporting.setOptedIn(this@MainActivity, true)
+                            crashReportEnabled = true
+                            showCrashConsent = false
+                            Toast.makeText(
+                                this@MainActivity,
+                                getString(R.string.main_003),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        },
+                        onDismiss = { showCrashConsent = false }
+                    )
                 }
 
                 // v4.3: 语言切换（选择后保存偏好并 recreate 即时生效；API 33+ 同步系统应用语言设置）
