@@ -1,0 +1,57 @@
+name: Desktop Agent binaries
+
+# C1: desktop_agent 打包可执行文件（PyInstaller，一文件）。
+# 三平台矩阵构建，产物为 workflow artifact（不进 Release，除非手动）。
+# 触发：desktop_agent/ 有变更的 push、每周日、手动。
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 0'   # 周日 13:00 CST
+  push:
+    branches: [main]
+    paths:
+      - 'desktop_agent/**'
+      - '.github/workflows/desktop-agent.yml'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps + PyInstaller
+        run: |
+          pip install -r desktop_agent/requirements.txt pyinstaller
+
+      - name: Build onefile binary
+        run: |
+          cd desktop_agent
+          pyinstaller agent.spec --noconfirm
+
+      - name: Smoke test binary
+        shell: bash
+        run: |
+          cd desktop_agent
+          BIN="dist/opencode-desktop-agent"
+          if [ "${{ runner.os }}" = "Windows" ]; then BIN="$BIN.exe"; fi
+          "$BIN" --help | head -5
+          test -f "$BIN" && echo "binary OK: $(du -h "$BIN" | cut -f1)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-desktop-agent-${{ runner.os }}-${{ runner.arch }}
+          path: desktop_agent/dist/opencode-desktop-agent*
+          if-no-files-found: error
+          retention-days: 30
