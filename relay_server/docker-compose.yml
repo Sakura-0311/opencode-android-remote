@@ -1,0 +1,43 @@
+# C2: relay 一键部署 —— docker compose up -d 即可。
+# 构建上下文为本目录（relay_server/），Dockerfile 同目录。
+#
+# 首次使用：
+#   cp .env.example .env   # 填 RELAY_ADMIN_TOKEN（建房令牌，强烈建议设置）
+#   docker compose up -d --build
+# 常用：
+#   docker compose ps              # 看状态（含 health）
+#   docker compose logs -f relay   # 看日志
+#   docker compose down            # 停服（数据在 ./data 卷里保留）
+
+services:
+  relay:
+    build: .
+    image: opencode-relay:latest
+    container_name: opencode-relay
+    # C2: 自动重启 —— 宿主机重启 / 进程崩溃后自动恢复
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8765}:8765"
+    env_file:
+      - .env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8765"
+    volumes:
+      # 状态/配对数据落盘，容器重建不丢
+      - relay-data:/app/data
+    # C2: 健康检查 —— /api/stats 正常才算 healthy；unhealthy 时 compose 可联动重启
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/api/stats', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  relay-data:

@@ -324,3 +324,16 @@ jobs:
           # 注：runner 将 script 逐行以 sh -c 执行，故必须写成单行；变量跨行不保留
           script: |
             adb install /tmp/smoke-apk/app-release.apk && adb shell am start -n com.opencode.android/.MainActivity && sleep 30 && { adb logcat -d | grep -q "FATAL EXCEPTION" && { echo "::error::模拟器启动出现 FATAL 崩溃"; adb logcat -d | grep -A15 "FATAL EXCEPTION" | head -30; echo "FATAL_FOUND"; } || echo "NO_FATAL"; } | grep -q "NO_FATAL" && test -n "$(adb shell pidof com.opencode.android | tr -d '\r')" && echo "smoke OK：进程存活，无 FATAL"
+
+  # C2: relay 一键部署文件校验（compose 语法 + healthcheck/自动重启配置存在）
+  relay-compose-lint:
+    name: Relay compose lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose.yml
+        run: |
+          cd relay_server
+          docker compose config > /dev/null && echo "compose 语法 OK"
+          docker compose config | grep -q "unless-stopped" && echo "自动重启 OK"
+          docker compose config | grep -q "healthcheck:" && echo "healthcheck OK"
