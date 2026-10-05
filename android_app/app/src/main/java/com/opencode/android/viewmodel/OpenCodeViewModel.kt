@@ -38,6 +38,7 @@ import com.opencode.android.network.TransportListener
 import com.opencode.android.util.AppLog
 import com.opencode.android.util.ApprovalReducer
 import com.opencode.android.util.StreamReducer
+import com.opencode.android.util.StreamWindow
 import com.opencode.android.util.TargetSwitchPolicy
 import com.opencode.android.util.DesktopRoutingPolicy
 import com.opencode.android.util.SessionReducer

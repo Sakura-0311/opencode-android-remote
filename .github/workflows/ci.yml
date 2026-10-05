@@ -16,7 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          # 与 relay 生产镜像（python:3.11-slim）一致；websockets 17.x 需要 3.11+
+          python-version: "3.11"
           cache: 'pip'  # v4.2.0/O4: pip 依赖缓存提速
       - name: Run Smoke Test Contract
         run: |
