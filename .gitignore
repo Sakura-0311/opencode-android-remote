@@ -37,3 +37,10 @@ sessions/
 .opencode_sse_cursor
 .desktop_device_id
 icon_concepts/
+
+# 截图防泄漏（agent 截图别进公开仓库，存量 assets 在 res/ 下不受影响）
+Screenshots/
+screenshots/
+screenshot*.png
+Screenshot*.png
+ScreenShot*.png
