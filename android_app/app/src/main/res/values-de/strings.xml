@@ -630,4 +630,10 @@
     <string name="pair_n03">Cloud-Schlüssel ein-/ausblenden</string>
     <string name="relay_n01">E2EE-Verschlüsselung fehlgeschlagen, Senden abgelehnt: %1$s</string>
     <string name="vm_n01">Verifizierung des öffentlichen Schlüssels fehlgeschlagen; abgelehnt (mögliche Relay-Manipulation)</string>
+    <string name="approval_005">Diese Genehmigung ist abgelaufen und kann nicht mehr genehmigt oder abgelehnt werden</string>
+    <string name="approval_006">L盲uft in %1$d Sekunden ab</string>
+    <string name="vm_041">Der Desktop hat diese Genehmigung abgelehnt (%1$s); die Aufgabe wartet m枚glicherweise weiterhin auf eine Genehmigung.</string>
+    <string name="vm_042">Genehmigung %1$s ist abgelaufen; es wurde nichts gesendet.</string>
+    <string name="chat_055">Neu verbinden</string>
+    <string name="chat_056">Automatische Wiederverbindung gestoppt. Bitte Netzwerk pr眉fen und manuell neu verbinden.</string>
 </resources>

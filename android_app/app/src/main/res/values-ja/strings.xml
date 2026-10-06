@@ -631,4 +631,10 @@
     <string name="pair_n03">クラウドキーの表示切替</string>
     <string name="relay_n01">E2EE 暗号化に失敗したため送信を中止しました：%1$s</string>
     <string name="vm_n01">相手の公開鍵の検証に失敗したため拒否しました（中継による改ざんの疑い）</string>
+    <string name="approval_005">この承認は期限切れで、承認も拒否もできません</string>
+    <string name="approval_006">残り %1$d 秒で期限切れ</string>
+    <string name="vm_041">パソコン側がこの承認を拒否しました（%1$s）。タスクは承認待ちの可能性があります。</string>
+    <string name="vm_042">承認 %1$s は期限切れです。何も送信されていません。</string>
+    <string name="chat_055">再接続</string>
+    <string name="chat_056">自動再接続を停止しました。ネットワークを確認して手動で再接続してください。</string>
 </resources>

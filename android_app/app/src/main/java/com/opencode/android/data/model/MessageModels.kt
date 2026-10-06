@@ -159,6 +159,8 @@ data class OpenCodeUiState(
     val isDesktopOnline: Boolean = false,
     val isGenerating: Boolean = false,
     val isReconnecting: Boolean = false,
+    // v5.0.3 (B-1): 自动重连已用尽退避次数，停止重连等用户手动触发
+    val relayRetryExhausted: Boolean = false,
     // P0-4: Relay 连接状态机（UI 据此区分网络/鉴权/Desktop 故障）
     val relayConnectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED,
     // v4.9.0: 诊断中心用——最近一次 ping/pong 往返延迟毫秒数，未测到为 null

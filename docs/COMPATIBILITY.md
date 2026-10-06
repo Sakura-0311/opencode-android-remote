@@ -58,6 +58,12 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 | 4.11.0 | 41100 | 防截屏录屏（FLAG_SECURE） |
 | 5.0.0 | 50000 | 版本号里程碑（协议 v4 / API / 配置格式冻结） |
 | 5.0.1 | 50001 | 高危修复：审批链路契约、E2EE 多对端 fail-closed、relay XFF/Origin（**待你发版时使用**） |
+| 5.0.2 | 50002 | Tink 取代 security-crypto、多手机 E2EE、relay 控制消息限速、i18n 补齐 |
+| 5.0.3 | 50003 | 优化审查批次：控制类消息补齐 E2EE 加密（A-1）、通知不再清空聊天（A-2）、退避归零时机与最大重试（B-1）、发送队列归属与审批/取消不排队（B-2）、审批过期与被拒反馈（B-3）、发送结果三态（B-4）、分发层容错（B-5）、聊天本地缓存（B-6）、relay 封禁按账号（B-7）、C-1~C-6 与 P3 项 |
+
+> v5.0.3 的 `versionCode` 公式新增 `require(次版本/补丁号 < 100)` 守卫：
+> 此前 `5.0.100` 与 `5.1.0` 会派生出同一个 versionCode（50099 vs 50100 本身不撞，
+> 但 `5.1.0` 与 `5.0.100` 之后的组合会撞），现在越界直接构建失败。
 
 > v5.0.1 说明：本表此前停在 4.3.0 且把 `4.0.0 | 40000` 重复了三行（其中一行还落在
 > 4.3.0 之后），versionCode 对照表已失修；上面按 `RELEASE_NOTES.md` 与各 tag 补全。
@@ -93,6 +99,13 @@ v2.0 换过一次密钥（v1.x 用户必须卸载重装）；**v2.x 之间永不
 - Agent：主 Secret 默认位置从启动目录 `.opencode_secret` 迁移到 `~/.config/opencode-remote/.opencode_secret`；旧位置有有效密钥时自动迁移（目录 0700 / 文件 0600）。
 - v2.3：`PreferencesManager` 新增 `schema_version`（当前 1），只增不改 key。
 - v4.3：`PreferencesManager` 新增 `app_locale`（明文，空字符串=跟随系统），只增不改 key。
+- v5.0.3：Android 新增三个存储位置，只增不改 key——`opencode_e2ee_seq`（E2EE
+  收发序号，从主 prefs 搬出，避免每个 chunk 重写大 XML）、主 prefs 的
+  `e2ee_last_peer_id`（最近协商成功的对端）、`files/chat_cache/msg_<session>.json`
+  （按会话缓存最近 200 条聊天，纯本地、不含凭据，清除聊天时同步删除）。
+  E2EE 序号换了文件，但**首次读取时会自动把主 prefs 里的旧值搬过来**并删除旧键
+  ——否则序号从 0 重发会被 desktop 按「未严格递增」判为重放、拒收所有帧。
+  升级无需停用 E2EE，也无需与 agent 同版本。
 
 ## 发布顺序
 

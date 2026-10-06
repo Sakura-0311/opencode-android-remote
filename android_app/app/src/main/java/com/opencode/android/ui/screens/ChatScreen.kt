@@ -111,7 +111,9 @@ fun ChatScreen(
     // v4.3 M-5: E2EE 状态可见
     e2eePeerReady: Boolean = false,
     showE2eeChannelDialog: Boolean = false,
-    onDismissE2eeChannelDialog: () -> Unit = {}
+    onDismissE2eeChannelDialog: () -> Unit = {},
+    // v5.0.3 (B-1): 退避重试用尽后的手动重连
+    onReconnect: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var inputText by remember { mutableStateOf("") }
@@ -532,6 +534,34 @@ fun ChatScreen(
                             fontSize = 11.sp,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                         )
+                    }
+                }
+
+                // v5.0.3 (B-1): 自动重连已用尽退避次数——给一个手动重连入口
+                if (uiState.relayRetryExhausted) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.chat_056),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontSize = 11.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = onReconnect) {
+                                Text(
+                                    text = stringResource(R.string.chat_055),
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -26,10 +26,9 @@ interface CloudStreamListener {
 
 class CloudApiClient(private val appContext: Context) {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
+    // v5.0.3 (P3): 从共享 base 派生，连接池/线程池与 Relay 共用
+    private val client = HttpClients.base.newBuilder()
         .readTimeout(0, TimeUnit.MILLISECONDS) // SSE 长连接无超时
-        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -62,6 +61,22 @@ class CloudApiClient(private val appContext: Context) {
     fun setEventIdPersistence(prefs: SharedPreferences) {
         eventIdPrefs = prefs
     }
+
+    /**
+     * v5.0.3 (C-4): 当前生效的监听器。
+     *
+     * 此前 listener 是 sendPromptStream 的参数，被 SSE 回调一直引用着：
+     * Activity 退出、ViewModel 被清除后，流继续把回调写进已销毁的实例，
+     * 重建的新 ViewModel 看不到进行中的流（Relay 侧本来就有 setListener 重挂）。
+     */
+    @Volatile private var currentListener: CloudStreamListener? = null
+
+    fun setListener(listener: CloudStreamListener) {
+        currentListener = listener
+    }
+
+    private fun live(fallback: CloudStreamListener): CloudStreamListener =
+        currentListener ?: fallback
 
     private fun eventKey() = currentEventKey
 
@@ -143,6 +158,9 @@ class CloudApiClient(private val appContext: Context) {
     ) {
         cancelCurrentStream()
 
+        // v5.0.3 (C-4): 记下当前监听器，供 ViewModel 重建后重挂与回调解析
+        currentListener = listener
+
         val cleanUrl = baseUrl.trim().removeSuffix("/")
 
         // v1.6 P0 断线恢复：按服务器+会话恢复游标
@@ -193,6 +211,8 @@ class CloudApiClient(private val appContext: Context) {
             }
 
             override fun onResponse(call: Call, response: Response) {
+                // v5.0.3 (C-4): 每次回调都重新解析当前监听器（ViewModel 可能已重建）
+                val activeListener = live(listener)
                 if (!response.isSuccessful) {
                     val code = response.code
                     response.close()
@@ -202,7 +222,7 @@ class CloudApiClient(private val appContext: Context) {
                     } else {
                         sseStreamActive = false
                         mainHandler.post {
-                            listener.onError("HTTP_$code", appContext.getString(R.string.cloud_008, code))
+                            activeListener.onError("HTTP_$code", appContext.getString(R.string.cloud_008, code))
                         }
                     }
                     return
@@ -212,17 +232,17 @@ class CloudApiClient(private val appContext: Context) {
                 onSseOpened()
 
                 mainHandler.post {
-                    listener.onStreamStart(sessionId)
+                    activeListener.onStreamStart(sessionId)
                 }
 
                 // 2. 首次订阅时发送 POST /session/:id/message 指令；重连时不重发
                 if (sendPrompt) {
-                    sendPromptMessagePayload(cleanUrl, sessionId, prompt, auth, listener)
+                    sendPromptMessagePayload(cleanUrl, sessionId, prompt, auth, activeListener)
                 }
 
                 val responseBody = response.body
                 if (responseBody == null) {
-                    mainHandler.post { listener.onStreamEnd(sessionId) }
+                    mainHandler.post { activeListener.onStreamEnd(sessionId) }
                     return
                 }
 
@@ -262,14 +282,14 @@ class CloudApiClient(private val appContext: Context) {
                                     ?: eventObj.optString("delta", eventObj.optString("text", ""))
                                 if (delta.isNotEmpty()) {
                                     mainHandler.post {
-                                        listener.onStreamChunk(sessionId, delta)
+                                        activeListener.onStreamChunk(sessionId, delta)
                                     }
                                 }
                             } else if (type == "session.idle" || type == "message.complete") {
                                 // P1-8: 正常结束标记流完成，不再重连
                                 sseStreamActive = false
                                 mainHandler.post {
-                                    listener.onStreamEnd(sessionId)
+                                    activeListener.onStreamEnd(sessionId)
                                 }
                             }
                         } catch (e: Exception) {
@@ -285,7 +305,7 @@ class CloudApiClient(private val appContext: Context) {
                     response.close()
                     // P1-8: 只有流仍标记为活跃且未安排重连时才发 onStreamEnd
                     if (sseStreamActive && sseRetryRunnable == null) {
-                        mainHandler.post { listener.onStreamEnd(sessionId) }
+                        mainHandler.post { activeListener.onStreamEnd(sessionId) }
                     }
                 }
             }
@@ -322,7 +342,7 @@ class CloudApiClient(private val appContext: Context) {
         client.newCall(requestBuilder.build()).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 mainHandler.post {
-                    listener.onError("SEND_FAILED", appContext.getString(R.string.cloud_010, e.message))
+                    live(listener).onError("SEND_FAILED", appContext.getString(R.string.cloud_010, e.message))
                 }
             }
 
@@ -332,7 +352,7 @@ class CloudApiClient(private val appContext: Context) {
                     val errBody = response.body?.string() ?: ""
                     response.close()
                     mainHandler.post {
-                        listener.onError("HTTP_$code", appContext.getString(R.string.cloud_011, code, errBody))
+                        live(listener).onError("HTTP_$code", appContext.getString(R.string.cloud_011, code, errBody))
                     }
                 } else {
                     response.close()
@@ -459,16 +479,23 @@ class CloudApiClient(private val appContext: Context) {
             sseRetryRunnable = null
             AppLog.w("Cloud", "SSE retry exhausted after 30min offline")
             mainHandler.post {
-                params.listener.onSseStateChanged(false, sseRetryCount)
-                params.listener.onError("SSE_RETRY_EXHAUSTED", appContext.getString(R.string.cloud_014, reason))
+                val l = live(params.listener)
+                l.onSseStateChanged(false, sseRetryCount)
+                l.onError("SSE_RETRY_EXHAUSTED", appContext.getString(R.string.cloud_014, reason))
             }
             return
         }
-        val delayMs = sseBackoff.nextDelayMs()
+        val delayMs = sseBackoff.nextDelayMs() ?: run {
+            // Backoff 未设上限（默认 MAX_RETRIES_UNLIMITED），这里是防御性兜底
+            sseStreamActive = false
+            sseRetryRunnable = null
+            mainHandler.post { live(params.listener).onError("SSE_RETRY_EXHAUSTED", reason) }
+            return
+        }
         sseRetryCount++
         AppLog.i("Cloud", "SSE retry #$sseRetryCount in ${delayMs}ms: $reason")
         mainHandler.post {
-            params.listener.onSseStateChanged(true, sseRetryCount)
+            live(params.listener).onSseStateChanged(true, sseRetryCount)
         }
         val runnable = Runnable {
             sseRetryRunnable = null
@@ -485,7 +512,8 @@ class CloudApiClient(private val appContext: Context) {
         sseBackoff.reset()
         sseRetryCount = 0
         sseFirstFailureAt = 0L
-        val listener = sseLastParams?.listener ?: return
+        val params = sseLastParams ?: return
+        val listener = live(params.listener)
         mainHandler.post {
             listener.onSseStateChanged(false, 0)
         }

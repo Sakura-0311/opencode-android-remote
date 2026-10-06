@@ -51,9 +51,17 @@ android {
     compileSdk = 36
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000；4.0.0 -> 40000）
-    val appVersionName = "5.0.2"
+    val appVersionName = "5.0.3"
+    // v5.0.3 (C-5): 次版本与补丁号必须 < 100，否则 5.0.100 与 5.1.0 会算出同一个
+    // versionCode（50099+1 撞 50100）。这里直接 fail-fast，不靠人记住。
     val appVersionCode = appVersionName.split(".").let { p ->
-        p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
+        val major = p[0].toInt()
+        val minor = p.getOrElse(1) { "0" }.toInt()
+        val patch = p.getOrElse(2) { "0" }.toInt()
+        require(minor in 0..99 && patch in 0..99) {
+            "versionName 的次版本号与补丁号必须都在 0..99（当前 $appVersionName），否则 versionCode 会撞号"
+        }
+        major * 10000 + minor * 100 + patch
     }
 
     defaultConfig {
@@ -129,6 +137,9 @@ dependencies {
     // 想要再往前升，前提是把 AGP 提到 9.1+ / Gradle 9 / compileSdk 37，属于整链迁移。
     implementation("androidx.core:core-ktx:1.18.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
+    // v5.0.3 (C-5): collectAsStateWithLifecycle 需要它
+    // （此前 MainActivity 用 collectAsState，后台仍持续重组）
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.activity:activity-compose:1.13.0")
 

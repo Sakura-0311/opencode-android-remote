@@ -18,6 +18,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import com.opencode.android.data.model.ToolApprovalRequest
 
 @Composable
@@ -26,6 +32,24 @@ fun ToolApprovalDialog(
     onApprove: (String) -> Unit,
     onReject: (String) -> Unit
 ) {
+    // v5.0.3 (B-3): 按 agent 下发的 expires_at 倒计时，过期后禁用按钮。
+    // 此前 expiresAt 全工程无人读取：过期后按钮仍可点，用户点了批准，
+    // agent 按「nonce 失效」丢弃，任务永远卡在等审批且毫无提示。
+    var nowMs by remember(request.callId) { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(request.callId, request.expiresAt) {
+        val expiresAt = request.expiresAt
+        if (expiresAt == null || expiresAt <= 0L) return@LaunchedEffect
+        while (true) {
+            nowMs = System.currentTimeMillis()
+            if (nowMs >= expiresAt) break
+            delay(1000L)
+        }
+    }
+    val secondsLeft = request.expiresAt
+        ?.takeIf { it > 0L }
+        ?.let { ((it - nowMs) / 1000L).coerceAtLeast(0L) }
+    val expired = secondsLeft != null && secondsLeft <= 0L
+
     AlertDialog(
         onDismissRequest = { /* 强制用户明确选择同意或拒绝，避免误触外部关闭 */ },
         title = {
@@ -106,6 +130,24 @@ fun ToolApprovalDialog(
                     )
                 }
 
+                // v5.0.3 (B-3): 剩余时间 / 已过期提示
+                if (expired) {
+                    Text(
+                        text = stringResource(R.string.approval_005),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                } else if (secondsLeft != null) {
+                    Text(
+                        text = stringResource(R.string.approval_006, secondsLeft),
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+
                 // 专为移动端设计的精简代码 Diff 预览
                 CompactDiffView(
                     diffLines = request.diffLines,
@@ -116,6 +158,7 @@ fun ToolApprovalDialog(
         confirmButton = {
             Button(
                 onClick = { onApprove(request.callId) },
+                enabled = !expired,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.height(44.dp)
@@ -126,6 +169,7 @@ fun ToolApprovalDialog(
         dismissButton = {
             OutlinedButton(
                 onClick = { onReject(request.callId) },
+                enabled = !expired,
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 modifier = Modifier.height(44.dp)

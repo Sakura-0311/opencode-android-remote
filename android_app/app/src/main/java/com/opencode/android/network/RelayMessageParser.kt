@@ -11,6 +11,12 @@ import org.json.JSONObject
  */
 class RelayMessageParser(
     private val decrypt: ((payloadB64: String, srcId: String, sessId: String) -> String?)? = null,
+    /**
+     * v5.0.3 (C-3): 外层明文 relay_seq 的重复预检（解密**之前**调用）。
+     * 进程被杀后 relay 会补发已处理过的帧；先去重再解密，那些帧不会走到
+     * 解密失败分支，也就不会弹出误导性的「E2EE 解密失败，消息已丢弃」。
+     */
+    private val isDuplicateSeq: (Long) -> Boolean = { false },
 ) {
     sealed interface Outcome {
         /** 解析成功；decryptedFrom 非空表示经过 E2EE 解密（值为来源 deviceId）。 */
@@ -21,6 +27,8 @@ class RelayMessageParser(
         data object DecryptFailed : Outcome
         /** 解密成功但内层不是合法 JSON。 */
         data class BadInnerJson(val error: String) : Outcome
+        /** 外层 relay_seq 已处理过，解密前就被拦掉（C-3） */
+        data object Duplicate : Outcome
     }
 
     fun parseAndDecrypt(jsonText: String): Outcome {
@@ -29,6 +37,12 @@ class RelayMessageParser(
             json = JSONObject(jsonText)
         } catch (e: Exception) {
             return Outcome.BadJson(e.message ?: "JSON 解析失败")
+        }
+        if (json.has("relay_seq")) {
+            val outerSeq = json.optLong("relay_seq", -1L)
+            if (outerSeq >= 0 && isDuplicateSeq(outerSeq)) {
+                return Outcome.Duplicate
+            }
         }
         // E2EE：解密内容载荷（路由字段保持明文），解密出的字段合并进外层
         if (json.optBoolean("e2ee", false) && json.has("encrypted_payload")) {

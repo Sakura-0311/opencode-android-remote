@@ -1,3 +1,36 @@
+# OpenCode Android Remote - Release v5.0.3（优化审查批次）
+
+## 说明
+
+v5.0.3 按 `docs/OPTIMIZATION_v5.0.3.md` 的对照表落实 v5.0.2 的优化审查报告
+（P0 + P1 + P2 + P3）。**协议 v4 既有帧语义与字段未改动**，唯一新增是附加帧
+`approval_rejected`（旧版 App 直接忽略）。
+
+## 重点
+
+- **A-1（P0）开启 E2EE 后审批/取消/新建会话/文件浏览全部失效**：控制类消息
+  此前只有 `send_prompt` 走加密，其余五类发明文，被电脑端静默丢弃。现在六类
+  统一经 `sendControl` 出口，加密失败即拒发。另修了一个报告未发现的阻塞点：
+  多桌面路由关闭时 relay 不下发 `desktop_list`，加密目标原本恒解析不出来，
+  E2EE 实际等于没开——现在按「显式目标 → 主 desktop → 最近协商过的对端」
+  三级回退。
+- **A-2（P0）点通知清空当前聊天**：切到同一会话不再清屏。
+- **B-7（P1）反代部署下一个人输错密码封所有人 15 分钟**：封禁改按
+  `(IP, account_id)` 记账；反代提示的判据修回「未配置 `TRUSTED_PROXIES`」。
+- **B-1（B-3/B-4/B-5/B-6）**：退避归零移到 `auth_ok` 并加最大重试次数；
+  审批过期倒计时 + 被拒反馈；发送结果三态（只有真发出才算「运行中」）；
+  分发层容错；聊天记录本地缓存。
+- 新增 relay 统计接口可选鉴权（`RELAY_STATS_TOKEN`）、共享 OkHttpClient、
+  `collectAsStateWithLifecycle`、`versionCode` 撞号守卫；删除不可达的旧流式路径。
+
+## 验证
+
+Python 侧 12 个套件 192 项全过（含 2 个新增套件），v4 协议契约端到端测试
+25/25 全过。**Android 侧未编译**——本次改动环境无 Java/Android SDK，
+编译与真机验证清单见 `docs/OPTIMIZATION_v5.0.3.md` 第 3 节。
+
+---
+
 # OpenCode Android Remote - Release v5.0.2（安全修复 + 工程质量）
 
 ## 说明

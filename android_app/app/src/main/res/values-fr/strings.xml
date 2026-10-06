@@ -630,4 +630,10 @@
     <string name="pair_n03">Afficher/masquer la clé cloud</string>
     <string name="relay_n01">Échec du chiffrement E2EE, envoi refusé : %1$s</string>
     <string name="vm_n01">Échec de la vérification de la clé publique du pair ; refusé (altération possible du relais)</string>
+    <string name="approval_005">Cette approbation a expir茅 et ne peut plus 锚tre approuv茅e ni refus茅e</string>
+    <string name="approval_006">Expire dans %1$d secondes</string>
+    <string name="vm_041">Le bureau a rejet茅 cette approbation (%1$s) ; la t芒che attend peut-锚tre encore une approbation.</string>
+    <string name="vm_042">L'approbation %1$s a expir茅 ; rien n'a 茅t茅 envoy茅.</string>
+    <string name="chat_055">Se reconnecter</string>
+    <string name="chat_056">Reconnexion automatique arr锚t茅e. V茅rifiez le r茅seau et reconnectez-vous manuellement.</string>
 </resources>

@@ -37,6 +37,13 @@ interface E2eePrefs {
     fun getSecret(): String
     /** 存储的 secret 是否为房间主 secret（手动配对时 true，扫码配对时 false）。 */
     var secretIsMaster: Boolean
+
+    // v5.0.3 (A-1): 最近一次成功绑定公钥的对端 deviceId（非敏感，明文存储）。
+    // 多桌面路由关闭时 relay 不下发 desktop_list，客户端没有别的途径知道该把
+    // 密文加密给谁——没有这个回退，A-1 的加密根本不会触发，E2EE 等于没开。
+    // 默认实现保证既有假实现（单测）无需改动。
+    fun getE2eeLastPeerId(): String? = null
+    fun setE2eeLastPeerId(deviceId: String) {}
 }
 
 class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
@@ -96,6 +103,9 @@ class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
         }
         return try {
             prefs.setE2eePeerPubkey(deviceId, pubkeyB64)
+            // v5.0.3 (A-1): 记住这个对端——多桌面路由关闭时没有 desktop_list，
+            // 出站加密只能靠它确定目标
+            prefs.setE2eeLastPeerId(deviceId)
             AppLog.i("E2EE", "已保存 $deviceId 的公钥")
             true
         } catch (e: Exception) {
@@ -103,6 +113,10 @@ class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
             false
         }
     }
+
+    /** v5.0.3 (A-1): 最近一次协商成功的对端 deviceId；没有则 null（走明文）。 */
+    fun lastNegotiatedPeerId(): String? =
+        prefs.getE2eeLastPeerId()?.takeIf { it.isNotBlank() }
 
     private fun constantTimeEq(a: String, b: String): Boolean {
         if (a.length != b.length) return false

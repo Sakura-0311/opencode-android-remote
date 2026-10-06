@@ -82,9 +82,17 @@ curl http://127.0.0.1:8765/api/stats
       respond @blocked 404
   }
   ```
-- `TRUSTED_PROXIES`：填反代的出口 IP（Docker 部署通常是网关如 `172.18.0.1`，
-  可用 `docker network inspect` 查）。不填时限流会把所有客户端当成一个 IP，
-  一个人输错 5 次封所有人 15 分钟。
+- `TRUSTED_PROXIES`：**反代部署必填**。填反代的出口 IP（Docker 部署通常是网关
+  如 `172.18.0.1`，可用 `docker network inspect` 查）。不填时 relay 忽略
+  `X-Forwarded-For`，所有客户端会被当成同一个来源 IP——v5.0.3 起认证失败封禁
+  已按 `(IP, 账号)` 记账，不会再牵连其他用户，但**连接频次限流仍是按 IP**
+  （30 次/分钟共享），反代后建议把该上限按实际用户数上调，或让反代按
+  `X-Forwarded-For` 透传并配好 `TRUSTED_PROXIES`。
+  relay 每 10 分钟会检查「所有连接是否来自同一私网地址」，未配置时在日志里
+  打印一条 warning 提醒你。
+- `RELAY_STATS_TOKEN`（可选，v5.0.3 新增）：设置后 `/api/stats` 需要带
+  `X-Stats-Token` 头，否则 401。公网暴露统计接口时建议设置；未设置保持原有
+  的无鉴权行为（内网部署零改动）。
 
 ## 崩溃上报接收端（可选，默认关闭）
 

@@ -50,6 +50,24 @@ enum class CloudConnectionState {
     RECONNECTING   // SSE 断线退避等待中
 }
 
+/**
+ * v5.0.3 (B-4): 出站消息结果三态。
+ *
+ * 此前 sendPrompt 返回 Unit，调用方无从区分「已写入 socket」「断线进了队列」
+ * 「E2EE 加密失败被 fail-closed 拒发」，于是三种情况都先把任务状态置成
+ * RUNNING 并启动前台计时通知——加密失败时任务永远卡在运行中。
+ */
+enum class SendResult {
+    /** 已写入 socket */
+    SENT,
+
+    /** socket 不可用，已进重连队列（仅 send_prompt / create_session 会排队） */
+    QUEUED,
+
+    /** 未发出：E2EE 加密失败（fail-closed），或写 socket 失败且该动作不排队 */
+    FAILED
+}
+
 interface RelayListener {
     fun onConnected()
     fun onAuthenticated()
@@ -69,6 +87,10 @@ interface RelayListener {
     fun onWriteUnconfirmed(action: String, clientMsgId: String) {}
     // v4.10.0: 消息已排队（断线时），重连后自动补发
     fun onMessageQueued(action: String, clientMsgId: String, queueSize: Int) {}
+    // v5.0.3 (B-3): agent 拒绝了审批决定（nonce 缺失/失效/已过期）
+    fun onApprovalRejected(callId: String, reason: String) {}
+    // v5.0.3 (B-1): 退避重试用尽，已停止自动重连，等待用户手动重连
+    fun onRetryExhausted() {}
     fun onError(error: String)
     fun onToolApprovalRequest(request: ToolApprovalRequest) {}
     fun onSessionsListReceived(sessions: List<SessionItem>) {}
@@ -177,9 +199,9 @@ class RelayWebSocketClient(private val appContext: Context) {
         }
 
 
-    private val client = OkHttpClient.Builder()
+    // v5.0.3 (P3): 从共享 base 派生（连接池/线程池与 Cloud 共用），只保留 WS 专属设置
+    private val client = HttpClients.base.newBuilder()
         .pingInterval(20, TimeUnit.SECONDS)
-        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
@@ -190,8 +212,14 @@ class RelayWebSocketClient(private val appContext: Context) {
     // 解析线程只做 JSON 解析与 E2EE 解密（不碰共享状态），序号去重与分发仍在主线程。
     private val parseExecutor = Executors.newSingleThreadExecutor()
     private val messageParser = RelayMessageParser(
-        decrypt = { payload, srcId, sessId -> e2eeManager?.decryptFromDesktop(payload, srcId, sessId) }
+        decrypt = { payload, srcId, sessId -> e2eeManager?.decryptFromDesktop(payload, srcId, sessId) },
+        // v5.0.3 (C-3): 解密前用外层明文 relay_seq 预检。lastSeq 由主线程写，
+        // 这里只读，故需 @Volatile（seqTracker.lastSeq 本身只在主线程访问）。
+        isDuplicateSeq = { seq -> seq <= lastSeenRelaySeq }
     )
+
+    /** v5.0.3 (C-3): 主线程已处理到的最大 relay_seq，供解析线程预检去重 */
+    @Volatile private var lastSeenRelaySeq: Long = 0L
 
     private var currentUrl: String = ""
     private var currentAccountId: String = ""
@@ -237,11 +265,14 @@ class RelayWebSocketClient(private val appContext: Context) {
     }
 
     // v2.3: 统一退避器（3s 起、×1.5、封顶 60s、±15% 抖动，与 v2.2 参数一致）
+    // v5.0.3 (B-1): 加最大重试次数，用尽后停止自动重连等用户手动触发
     private val backoff = Backoff(
         baseMs = 3000L, factor = 1.5, maxMs = 60000L,
-        jitterLow = 0.85, jitterHigh = 1.15
+        jitterLow = 0.85, jitterHigh = 1.15,
+        maxRetries = MAX_RELAY_RETRIES
     )
     private var reconnectRunnable: Runnable? = null
+    private var retryExhausted: Boolean = false
     // v2.3: socket 代号——connect() 先 cancel 旧连接，过期回调直接丢弃
     private var socketGen = 0
     // v2.3: 网络层标记离线时暂停重连计时器
@@ -271,6 +302,34 @@ class RelayWebSocketClient(private val appContext: Context) {
 
     fun setSeqPersistence(prefs: SharedPreferences) {
         seqPrefs = prefs
+    }
+
+    /** v5.0.3 (C-1): 上次 seq 落盘时刻与此后累计条数（节流用，仅主线程访问） */
+    private var lastSeqFlushAt = 0L
+    private var seqSinceFlush = 0
+
+    /**
+     * v5.0.3 (C-1): seq 落盘节流——距上次落盘不足 [SEQ_FLUSH_INTERVAL_MS]
+     * 且累计不足 [SEQ_FLUSH_MAX_MESSAGES] 条时只更新内存。
+     * 流式输出时每条 chunk 都带 relay_seq，逐条 apply() 等于每个 chunk
+     * 重写一次 XML。
+     */
+    private fun flushSeqThrottled(force: Boolean) {
+        val now = System.currentTimeMillis()
+        seqSinceFlush++
+        if (!force && now - lastSeqFlushAt < SEQ_FLUSH_INTERVAL_MS &&
+            seqSinceFlush < SEQ_FLUSH_MAX_MESSAGES
+        ) return
+        lastSeqFlushAt = now
+        seqSinceFlush = 0
+        seqTracker.flush()
+    }
+
+    /** v5.0.3 (C-1): 强制落盘（App 退到后台 / 断开 / 鉴权成功后调用） */
+    fun flushSeqNow() {
+        lastSeqFlushAt = System.currentTimeMillis()
+        seqSinceFlush = 0
+        seqTracker.flush()
     }
 
     // v4.1: E2EE 管理器（ViewModel 注入；null 表示未启用）
@@ -317,6 +376,30 @@ class RelayWebSocketClient(private val appContext: Context) {
     companion object {
         private const val KEY_DEVICE_UUID = "device_uuid_v1"
 
+        /**
+         * v5.0.3 (B-1): Relay 自动重连上限。此前无限重连；配合 auth_ok 才归零的
+         * 退避，坏服务端下会变成永不停歇的 3~60 秒循环。10 次配合指数退避
+         * （3s→60s 封顶）约覆盖 5 分钟，之后交给用户手动重连。
+         */
+        const val MAX_RELAY_RETRIES = 10
+
+        /** 无控制类动作目标会话时使用的 sessionId（与 agent 侧 AAD 默认值一致） */
+        private const val DEFAULT_SESSION = "default"
+
+        /**
+         * v5.0.3 (A-1): agent 侧 `e2ee.py::CONTROL_ACTIONS` 的镜像。
+         * 这六类动作在协商 E2EE 后必须带合法信封，全部经 [sendControl] 发送；
+         * 单测 `ControlEnvelopeTest` 断言本列表与 Python 侧一致。
+         */
+        val CONTROL_ACTIONS = listOf(
+            "send_prompt", "cancel", "tool_approval_response",
+            "create_session", "file_list", "file_read",
+        )
+
+        // v5.0.3 (C-1): seq 落盘节流阈值
+        private const val SEQ_FLUSH_INTERVAL_MS = 500L
+        private const val SEQ_FLUSH_MAX_MESSAGES = 20
+
         // v3.0: 协议版本与能力协商
         const val PROTOCOL_VERSION = 4
         val CLIENT_CAPABILITIES = listOf(
@@ -336,16 +419,24 @@ class RelayWebSocketClient(private val appContext: Context) {
         webSocket = null
         socketGen++ // 旧回调全部作废
         networkPaused = false
-        this.currentUrl = relayUrl.trim().removeSuffix("/")
-        this.currentAccountId = accountId.trim()
+        val newUrl = relayUrl.trim().removeSuffix("/")
+        val newAccount = accountId.trim()
+        // v5.0.3 (B-2): 换了房间/账号就丢掉上一个房间的排队消息
+        if (newUrl != currentUrl || newAccount != currentAccountId) {
+            clearSendQueue("profile changed")
+        }
+        this.currentUrl = newUrl
+        this.currentAccountId = newAccount
         this.currentSecret = secret.trim()
         this.listener = listener
         this.isExplicitDisconnect = false
+        this.retryExhausted = false
         helloAckReceived = false
         serverCapabilities = emptyList()
         serverProtocolVersion = 0
         // v1.6: 恢复该房间的已确认序号
         seqTracker.reload()
+        lastSeenRelaySeq = seqTracker.lastSeq   // v5.0.3 (C-3): 预检水位与持久化序号对齐
 
         setState(RelayConnectionState.CONNECTING)
         initiateConnection()
@@ -368,11 +459,30 @@ class RelayWebSocketClient(private val appContext: Context) {
         // 离线期间断开的（或从未连上），直接重建，不等 ping 超时
         if (!isExplicitDisconnect && !isConnected() &&
             connectionState != RelayConnectionState.AUTH_FAILED) {
-            if (wasPaused || connectionState == RelayConnectionState.DISCONNECTED) {
+            // v5.0.3 (v5.1 计划项 3): 正在退避等待中也立即重连——
+            // 网络刚恢复时继续睡旧退避没有意义（Wi-Fi↔移动数据切换场景）
+            val wasReconnecting = connectionState == RelayConnectionState.RECONNECTING
+            if (wasPaused || wasReconnecting || connectionState == RelayConnectionState.DISCONNECTED) {
                 backoff.reset()
+                retryExhausted = false
                 initiateConnection()
             }
         }
+    }
+
+    /**
+     * v5.0.3 (v5.1 计划项 2): 手动重连入口——取消退避等待、计数归零、立即建连。
+     * 退避用尽（[onRetryExhausted]）或用户明确想重试时调用。
+     */
+    fun reconnect() {
+        AppLog.i("Relay", "manual reconnect requested")
+        cancelPendingReconnect()
+        backoff.reset()
+        retryExhausted = false
+        isExplicitDisconnect = false
+        networkPaused = false
+        if (currentUrl.isBlank()) return
+        initiateConnection()
     }
 
     private fun initiateConnection() {
@@ -394,8 +504,9 @@ class RelayWebSocketClient(private val appContext: Context) {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 mainHandler.post {
                     if (isStale()) return@post
-                    // v2.3: 连接成功，退避归零
-                    backoff.reset()
+                    // v5.0.3 (B-1): 不再在此退避归零。握手成功不等于连接可用——
+                    // 服务端接受连接后立刻关闭（限流、反代后端重启）时，每次都从
+                    // 3 秒重新开始，等价于固定 3 秒一次无限重连。归零改到 auth_ok。
                     setState(RelayConnectionState.CONNECTED)
                     listener?.onConnected()
 
@@ -433,6 +544,11 @@ class RelayWebSocketClient(private val appContext: Context) {
                             AppLog.w("Relay", "v4.1 E2EE: 解密后 JSON 解析失败: ${outcome.error}")
                         is RelayMessageParser.Outcome.DecryptFailed ->
                             AppLog.w("Relay", "v4.1 E2EE: 解密失败，丢弃该消息")
+                        // v5.0.3 (C-3): 已处理过的补发帧，不解密也不分发
+                        is RelayMessageParser.Outcome.Duplicate -> {
+                            AppLog.d("Relay", "relay_seq 已处理，跳过（解密前拦截）")
+                            return@execute
+                        }
                         is RelayMessageParser.Outcome.BadJson -> { }
                     }
                     mainHandler.post {
@@ -500,6 +616,14 @@ class RelayWebSocketClient(private val appContext: Context) {
         cancelPendingReconnect()
         // v2.3: 统一退避器（参数与 v2.2 一致：3s 起、×1.5、封顶 60s、±15% 抖动）
         val actualDelay = backoff.nextDelayMs()
+        if (actualDelay == null) {
+            // v5.0.3 (B-1): 重试次数用尽——停止自动重连，等用户手动触发
+            retryExhausted = true
+            setState(RelayConnectionState.DISCONNECTED)
+            AppLog.w("Relay", "重连重试已用尽（${backoff.retryCount} 次），等待手动重连")
+            listener?.onRetryExhausted()
+            return
+        }
 
         listener?.onReconnecting(actualDelay)
 
@@ -561,6 +685,8 @@ class RelayWebSocketClient(private val appContext: Context) {
                 }
                 if (seq > 0) {
                     seqTracker.track(seq)
+                    // v5.0.3 (C-3): 同步给解析线程的预检水位
+                    lastSeenRelaySeq = seq
                     newSeqSeen = true
                 }
             }
@@ -600,6 +726,7 @@ class RelayWebSocketClient(private val appContext: Context) {
                     // v2.3: 走 onResyncRequired
                     if (seqTracker.checkEpoch(json.optString("room_epoch", ""))) {
                         AppLog.i("Relay", "room_epoch changed, seq reset")
+                        lastSeenRelaySeq = 0L   // v5.0.3 (C-3): 纪元重置后预检水位一起归零
                         listener?.onResyncRequired(appContext.getString(R.string.relay_007))
                     }
                 }
@@ -612,11 +739,17 @@ class RelayWebSocketClient(private val appContext: Context) {
                 }
                 // P0-1: 认证反馈
                 "auth_ok" -> {
+                    // v5.0.3 (B-1): 退避与重试计数在真正鉴权通过时才归零
+                    backoff.reset()
+                    retryExhausted = false
+                    // v5.0.3 (C-1): 鉴权帧要带准确的 last_relay_seq，先强制落盘
+                    flushSeqNow()
                     setState(RelayConnectionState.AUTHENTICATED)
                     // v2.2.1-C: auth_ok 也可能携带 epoch，先做检查（seq_sync 还会再确认）
                     // v2.3: 走 onResyncRequired
                     if (seqTracker.checkEpoch(json.optString("room_epoch", ""))) {
                         AppLog.i("Relay", "room_epoch changed on auth_ok, seq reset")
+                        lastSeenRelaySeq = 0L   // v5.0.3 (C-3)
                         listener?.onResyncRequired(appContext.getString(R.string.relay_007))
                     }
                     listener?.onAuthenticated()
@@ -630,6 +763,16 @@ class RelayWebSocketClient(private val appContext: Context) {
                     disconnect()
                     // P0-4: disconnect 会置 DISCONNECTED，这里明确覆盖为 AUTH_FAILED
                     setState(RelayConnectionState.AUTH_FAILED)
+                }
+
+                // v5.0.3 (B-3): agent 拒绝审批（nonce 缺失/失效）时的明确回报。
+                // 此前 agent 只写一行 warning 就丢弃，手机端点了批准毫无感知，
+                // 任务永远卡在等审批。此帧是附加类型，旧版 App 的 else -> {} 会忽略。
+                "approval_rejected" -> {
+                    listener?.onApprovalRejected(
+                        json.optString("call_id", ""),
+                        json.optString("reason", "")
+                    )
                 }
 
                 // P1-7: 应用层心跳
@@ -696,7 +839,9 @@ class RelayWebSocketClient(private val appContext: Context) {
                     val list = mutableListOf<SessionItem>()
                     if (dataArray != null) {
                         for (i in 0 until dataArray.length()) {
-                            val itemObj = dataArray.getJSONObject(i)
+                            // v5.0.3 (B-5): 单条畸形数据只跳过这一条，
+                            // 不再让整条消息抛异常（此前 getJSONObject 会抛）
+                            val itemObj = dataArray.optJSONObject(i) ?: continue
                             val id = itemObj.optString("id", "")
                             val title = itemObj.optString("title", itemObj.optString("name", appContext.getString(R.string.relay_010, id)))
                             if (id.isNotEmpty()) {
@@ -715,7 +860,7 @@ class RelayWebSocketClient(private val appContext: Context) {
                     val arr = json.optJSONArray("entries")
                     if (arr != null) {
                         for (i in 0 until arr.length()) {
-                            val o = arr.getJSONObject(i)
+                            val o = arr.optJSONObject(i) ?: continue  // v5.0.3 (B-5)
                             entries.add(
                                 FileEntry(
                                     name = o.optString("name", ""),
@@ -765,7 +910,8 @@ class RelayWebSocketClient(private val appContext: Context) {
                     }
                     val models = mutableListOf<ModelInfo>()
                     val providersObj = json.optJSONObject("providers")
-                    // 兼容两种格式：{providers: [...]} 或 {providerId: {...}}
+                    // 只实现了一种格式：{"providers": {"providers": [...]}}——
+                    // 外层 providers 是对象，内层 providers 才是数组（见 agent get_providers 的下发形状）
                     val providersArr = providersObj?.optJSONArray("providers")
                     if (providersArr != null) {
                         for (i in 0 until providersArr.length()) {
@@ -860,7 +1006,7 @@ class RelayWebSocketClient(private val appContext: Context) {
                     val diffLines = mutableListOf<DiffLine>()
                     if (diffArray != null) {
                         for (i in 0 until diffArray.length()) {
-                            val dObj = diffArray.getJSONObject(i)
+                            val dObj = diffArray.optJSONObject(i) ?: continue  // v5.0.3 (B-5)
                             val typeStr = dObj.optString("type", "UNCHANGED")
                             val diffType = try {
                                 DiffLineType.valueOf(typeStr.uppercase())
@@ -919,18 +1065,17 @@ class RelayWebSocketClient(private val appContext: Context) {
                 else -> {}
             }
             // v2.3: 消息处理成功后才落盘 seq
-            if (newSeqSeen) seqTracker.flush()
+            // v5.0.3 (C-1): 节流落盘。此前每条带 relay_seq 的消息（含每个
+            // stream_chunk）都 apply() 一次；落盘滞后只会让崩溃后多重放几条，
+            // 由去重与序号校验兜住。
+            if (newSeqSeen) flushSeqThrottled(force = json.optString("type") == "stream_end")
         } catch (e: Exception) {
-            // v3.4: 未知异常兜底——记日志、状态机回 DISCONNECTED（触发重连），不向上传播崩溃。
-            // 每步独立 guard，避免兜底逻辑自身抛异常。
+            // v5.0.3 (B-5): 兜底只记日志 + 提示用户，**不再改连接状态**。
+            // 旧注释声称「回 DISCONNECTED 触发重连」，但实际既没关 socket 也没调度重连，
+            // 只是把状态写成 DISCONNECTED——随后一条 system_status 又把它拉回来，
+            // 界面来回闪；一条畸形数据就能让连接看起来是断的。
+            // 真要断开请走 cancel() + scheduleReconnect() 这条统一路径。
             try { AppLog.e("RelayWS", "消息分发异常兜底: ${e.message}") } catch (_: Exception) { }
-            try {
-                if (connectionState != RelayConnectionState.DISCONNECTED &&
-                    connectionState != RelayConnectionState.AUTH_FAILED
-                ) {
-                    setState(RelayConnectionState.DISCONNECTED)
-                }
-            } catch (_: Exception) { }
             try { listener?.onError(appContext.getString(R.string.relay_013, e.message)) } catch (_: Exception) { }
         }
     }
@@ -939,11 +1084,15 @@ class RelayWebSocketClient(private val appContext: Context) {
         webSocket?.send(RelayMessageFactory.listSessions().toString())
     }
 
-    fun sendCreateSession(title: String) {
+    fun sendCreateSession(title: String): SendResult {
         val clientMsgId = newClientMsgId()
-        sendEnvelope("create_session",
-            RelayMessageFactory.createSession(title, reqId = clientMsgId),
-            clientMsgId, queueOnFail = true)
+        return sendControl(
+            action = "create_session",
+            payload = JSONObject().apply { put("title", title) },
+            sessionId = DEFAULT_SESSION,
+            clientMsgId = clientMsgId,
+            queueOnFail = true
+        )
     }
 
     /**
@@ -977,13 +1126,23 @@ class RelayWebSocketClient(private val appContext: Context) {
      */
     fun sendFileList(path: String): String {
         val reqId = UUID.randomUUID().toString()
-        webSocket?.send(RelayMessageFactory.fileList(path, reqId).toString())
+        sendControl(
+            action = "file_list",
+            payload = JSONObject().apply { put("path", path) },
+            sessionId = DEFAULT_SESSION,
+            clientMsgId = reqId
+        )
         return reqId
     }
 
     fun sendFileRead(path: String): String {
         val reqId = UUID.randomUUID().toString()
-        webSocket?.send(RelayMessageFactory.fileRead(path, reqId).toString())
+        sendControl(
+            action = "file_read",
+            payload = JSONObject().apply { put("path", path) },
+            sessionId = DEFAULT_SESSION,
+            clientMsgId = reqId
+        )
         return reqId
     }
 
@@ -1020,11 +1179,19 @@ class RelayWebSocketClient(private val appContext: Context) {
     /**
      * v4.10.0: 出站消息队列——socket 不可用时用户操作类消息排队，
      * 鉴权成功后按序补发，避免断线丢消息。查询类消息不排队（会过期）。
+     *
+     * v5.0.3 (B-2): 每项带上入队时的 (relayUrl, accountId)。切换 profile 后
+     * 补发会把上一个房间的提示词发往新的电脑——补发前必须核对归属。
+     * 审批 / 取消不再排队（见 sendApprovalResponse / sendCancel）：
+     * 断线时点的取消，重连后可能取消掉后来才开始的新任务；审批的 nonce
+     * 也会在补发时失效。它们走 onWriteUnconfirmed 由用户手动重试。
      */
     private data class PendingSend(
         val action: String,
         val envelopeJson: String,
         val clientMsgId: String,
+        val relayUrl: String,
+        val accountId: String,
         val enqueuedAt: Long = System.currentTimeMillis()
     )
     private val sendQueue = ArrayDeque<PendingSend>()
@@ -1039,19 +1206,34 @@ class RelayWebSocketClient(private val appContext: Context) {
             val dropped = sendQueue.removeFirst()
             AppLog.w("Relay", "send queue full, drop oldest: action=${dropped.action}")
         }
-        sendQueue.addLast(PendingSend(action, envelope.toString(), clientMsgId))
+        sendQueue.addLast(
+            PendingSend(action, envelope.toString(), clientMsgId, currentUrl, currentAccountId)
+        )
         AppLog.i("Relay", "queued: action=$action (queue=${sendQueue.size})")
         listener?.onMessageQueued(action, clientMsgId, sendQueue.size)
     }
 
-    /** 鉴权成功后调用：按序补发队列里的消息 */
+    /** 切换账号/relay、断开或鉴权失败时清空，避免跨房间补发 */
+    private fun clearSendQueue(reason: String) {
+        if (sendQueue.isEmpty()) return
+        AppLog.w("Relay", "send queue cleared: $reason (dropped=${sendQueue.size})")
+        sendQueue.clear()
+    }
+
+    /** 鉴权成功后调用：按序补发队列里的消息（只补发仍属于当前房间的项） */
     private fun flushSendQueue() {
         if (sendQueue.isEmpty()) return
         val now = System.currentTimeMillis()
-        val toSend = sendQueue.filter { now - it.enqueuedAt <= queueTtlMs }
-        val expired = sendQueue.size - toSend.size
+        val stale = sendQueue.filter {
+            now - it.enqueuedAt > queueTtlMs ||
+                it.relayUrl != currentUrl ||
+                it.accountId != currentAccountId
+        }
+        val toSend = sendQueue.filterNot { it in stale }
         sendQueue.clear()
-        if (expired > 0) AppLog.w("Relay", "flush: drop $expired expired")
+        if (stale.isNotEmpty()) {
+            AppLog.w("Relay", "flush: drop ${stale.size} expired/foreign")
+        }
         var sent = 0
         for (p in toSend) {
             val ok = try {
@@ -1084,6 +1266,63 @@ class RelayWebSocketClient(private val appContext: Context) {
         return ok
     }
 
+    /**
+     * v5.0.3 (A-1): 控制类动作的**唯一**出口。
+     *
+     * agent 侧 CONTROL_ACTIONS（send_prompt / cancel / tool_approval_response /
+     * create_session / file_list / file_read）在协商 E2EE 后一律要求合法信封，
+     * 明文帧只写一行 warning 就 return，手机端收不到任何报错。此前全工程
+     * 只有 sendPrompt 走 encryptInnerForDesktop，其余五类仍发明文——
+     * 于是「开启 E2EE 后点批准无效、无法取消、文件浏览与新建会话不工作」。
+     *
+     * 线协议不变：外层保留明文路由字段（action/session_id/req_id/
+     * client_msg_id/target_device_id），内容放进内层 {"action","payload","seq"}
+     * 加密，与 send_prompt 完全同形。加密失败即拒发（fail-closed），绝不回退明文。
+     */
+    private fun sendControl(
+        action: String,
+        payload: JSONObject,
+        sessionId: String,
+        clientMsgId: String,
+        targetDeviceId: String? = null,
+        queueOnFail: Boolean = false,
+        reqId: String = clientMsgId
+    ): SendResult {
+        val effectiveTarget = targetDeviceId?.ifEmpty { null }
+            ?: cachedDesktops.firstOrNull { it.isPrimary }?.deviceId?.ifEmpty { null }
+            // v5.0.3 (A-1): 回退到最近协商过的对端。多桌面路由关闭时 relay 从不下发
+            // desktop_list，cachedDesktops 恒为空——没有这条回退，出站加密永远不会触发。
+            ?: e2eeManager?.lastNegotiatedPeerId()
+        val payloadResult: E2eeManager.PayloadResult? = if (!effectiveTarget.isNullOrEmpty()) {
+            e2eeManager?.encryptInnerForDesktop(
+                RelayMessageFactory.controlInner(action, payload),
+                effectiveTarget,
+                sessionId
+            )
+        } else null
+        if (payloadResult is E2eeManager.PayloadResult.Failed) {
+            AppLog.e("E2EE", "控制消息发送中止：action=$action ${payloadResult.failure}" +
+                (payloadResult.detail?.let { " / $it" } ?: ""))
+            listener?.onError(appContext.getString(R.string.relay_n01, e2eeFailureText(payloadResult)))
+            return SendResult.FAILED
+        }
+        val enc = payloadResult as? E2eeManager.PayloadResult.Encrypted
+        val envelope = RelayMessageFactory.controlEnvelope(
+            action = action,
+            sessionId = sessionId,
+            payload = payload,
+            clientMsgId = clientMsgId,
+            reqId = reqId,
+            targetDeviceId = targetDeviceId,
+            encryptedPayloadB64 = enc?.b64
+        )
+        if (enc != null) {
+            AppLog.i("Relay", "v5.0.3 E2EE: $action 已加密 -> $effectiveTarget")
+        }
+        val ok = sendEnvelope(action, envelope, clientMsgId, queueOnFail)
+        return if (ok) SendResult.SENT else if (queueOnFail) SendResult.QUEUED else SendResult.FAILED
+    }
+
     fun sendPrompt(
         prompt: String,
         sessionId: String,
@@ -1091,11 +1330,11 @@ class RelayWebSocketClient(private val appContext: Context) {
         agent: AgentInfo? = null,
         // v3.1: 定向路由目标 desktop（可选；为空则服务端走主 desktop）
         targetDeviceId: String? = null
-    ) {
+    ): SendResult {
         // v3.4: 空值防御——空 prompt/空 sessionId 直接丢弃，不组装发送
         if (prompt.isBlank() || sessionId.isBlank()) {
             AppLog.w("RelayWS", "sendPrompt 丢弃空消息 promptBlank=${prompt.isBlank()} sessionBlank=${sessionId.isBlank()}")
-            return
+            return SendResult.FAILED
         }
         val clientMsgId = newClientMsgId()
         val payload = JSONObject().apply {
@@ -1111,61 +1350,56 @@ class RelayWebSocketClient(private val appContext: Context) {
                 put("agent", agent.id)
             }
         }
-        // v4.3 M-1: E2EE fail-closed——加密失败拒绝发送，绝不回退明文
-        // v4.6.0: 内层格式 v2——加密 {"action","payload","seq"} JSON，AAD sender 用
-        // 本机 relay device_id（desktop 侧以同一 id 存对端公钥，两端一致）
-        val effectiveTarget = targetDeviceId?.ifEmpty { null }
-            ?: cachedDesktops.firstOrNull { it.isPrimary }?.deviceId?.ifEmpty { null }
-        val payloadResult: E2eeManager.PayloadResult? = if (!effectiveTarget.isNullOrEmpty()) {
-            val inner = JSONObject().apply {
-                put("action", "send_prompt")
-                put("payload", payload)
-            }
-            e2eeManager?.encryptInnerForDesktop(inner, effectiveTarget, sessionId)
-        } else null
-        if (payloadResult is E2eeManager.PayloadResult.Failed) {
-            AppLog.e("E2EE", "发送中止：${payloadResult.failure}" +
-                (payloadResult.detail?.let { " / $it" } ?: ""))
-            // v5.0.2: 失败原因是错误码，本地化在这里做（本类持有 Context）
-            listener?.onError(appContext.getString(R.string.relay_n01, e2eeFailureText(payloadResult)))
-            return
-        }
-        val envelope = JSONObject().apply {
-            put("action", "send_prompt")
-            put("session_id", sessionId)
-            put("req_id", UUID.randomUUID().toString())
-            put("client_msg_id", clientMsgId)
-            // v3.1: 顶层定向字段，与 action/session_id 同级（旧 relay/agent 忽略未知字段）
-            if (!targetDeviceId.isNullOrEmpty()) put("target_device_id", targetDeviceId)
-            val enc = payloadResult as? E2eeManager.PayloadResult.Encrypted
-            if (enc != null) {
-                put("e2ee", true)
-                put("encrypted_payload", enc.b64)
-            } else {
-                put("payload", payload)
-            }
-        }
-        if (payloadResult is E2eeManager.PayloadResult.Encrypted) {
-            AppLog.i("Relay", "v4.1 E2EE: send_prompt 已加密 -> $effectiveTarget")
-        }
-        sendEnvelope("send_prompt", envelope, clientMsgId, queueOnFail = true)
+        return sendControl(
+            action = "send_prompt",
+            payload = payload,
+            sessionId = sessionId,
+            clientMsgId = clientMsgId,
+            targetDeviceId = targetDeviceId,
+            queueOnFail = true,
+            reqId = UUID.randomUUID().toString()
+        )
     }
 
-    fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "", nonce: String? = null) {
+    /**
+     * v5.0.3 (B-2): 审批**不排队**。断线时补发，nonce 很可能已过期，
+     * agent 会直接丢弃（见 B-3），用户以为批准成功、任务却卡在等审批。
+     * 写失败走 onWriteUnconfirmed，由用户手动重试。
+     */
+    fun sendApprovalResponse(callId: String, isApproved: Boolean, reason: String = "", nonce: String? = null): SendResult {
         val clientMsgId = newClientMsgId()
-        sendEnvelope("approval_response",
-            RelayMessageFactory.approvalResponse(callId, isApproved, reason, nonce, reqId = clientMsgId),
-            clientMsgId, queueOnFail = true)
+        val payload = JSONObject().apply {
+            put("call_id", callId)
+            put("approved", isApproved)
+            put("reason", reason)
+            // B-5: nonce 原样回传，供 agent 防重放校验
+            if (!nonce.isNullOrEmpty()) put("nonce", nonce)
+        }
+        return sendControl(
+            action = "tool_approval_response",
+            payload = payload,
+            sessionId = DEFAULT_SESSION,
+            clientMsgId = clientMsgId
+        )
     }
 
-    fun sendCancel(sessionId: String) {
+    /** v5.0.3 (B-2): 取消**不排队**——补发可能取消掉后来才开始的新任务 */
+    fun sendCancel(sessionId: String): SendResult {
         val clientMsgId = newClientMsgId()
-        sendEnvelope("cancel", RelayMessageFactory.cancel(sessionId, clientMsgId), clientMsgId, queueOnFail = true)
+        return sendControl(
+            action = "cancel",
+            payload = JSONObject(),
+            sessionId = sessionId,
+            clientMsgId = clientMsgId
+        )
     }
 
     fun disconnect() {
         isExplicitDisconnect = true
         cancelPendingReconnect()
+        // v5.0.3 (B-2): 断开后不再补发（也可能紧接着切换账号）
+        clearSendQueue("disconnect")
+        flushSeqNow()   // v5.0.3 (C-1): 断开前把序号落盘，下次重连从这里续
         webSocket?.close(1000, "User initiated disconnect")
         webSocket = null
         // P0-4: 鉴权失败时保持 AUTH_FAILED

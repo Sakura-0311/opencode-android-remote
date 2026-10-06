@@ -631,4 +631,10 @@
     <string name="pair_n03">클라우드 키 표시 전환</string>
     <string name="relay_n01">E2EE 암호화에 실패하여 전송을 중단했습니다: %1$s</string>
     <string name="vm_n01">상대 공개 키 검증에 실패하여 거부했습니다 (릴레이 변조 의심)</string>
+    <string name="approval_005">鞚?鞀轨澑鞚€ 毵岆霅橃柎 鞀轨澑頃橁卑雮?瓯半秬頃?靾?鞐嗢姷雼堧嫟</string>
+    <string name="approval_006">%1$d齑?頉?毵岆</string>
+    <string name="vm_041">PC臧€ 鞚?鞀轨澑鞚?瓯半秬頄堨姷雼堧嫟(%1$s). 鞛戩梾鞚?瓿勳啀 鞀轨澑鞚?旮半嫟毽?靾?鞛堨姷雼堧嫟.</string>
+    <string name="vm_042">鞀轨澑 %1$s鞚?臧€) 毵岆霅橃柎 鞎勲瓴冸弰 鞝勳啞霅橃 鞎婌晿鞀惦媹雼?</string>
+    <string name="chat_055">雼れ嫓 鞐瓣舶</string>
+    <string name="chat_056">鞛愲彊 鞛棸瓴办澊 欷戩霅橃棃鞀惦媹雼? 雱ろ姼鞗岉伂毳?頇曥澑頃?頉?靾橂彊鞙茧 雼れ嫓 鞐瓣舶頃橃劯鞖?</string>
 </resources>

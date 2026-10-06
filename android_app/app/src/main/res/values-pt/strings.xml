@@ -630,4 +630,10 @@
     <string name="pair_n03">Mostrar/ocultar chave da nuvem</string>
     <string name="relay_n01">Falha na criptografia E2EE, envio cancelado: %1$s</string>
     <string name="vm_n01">Falha na verificação da chave pública do par; recusado (possível adulteração do relay)</string>
+    <string name="approval_005">Esta aprova莽茫o expirou e n茫o pode mais ser aprovada nem recusada</string>
+    <string name="approval_006">Expira em %1$d segundos</string>
+    <string name="vm_041">O computador rejeitou esta aprova莽茫o (%1$s); a tarefa pode continuar aguardando aprova莽茫o.</string>
+    <string name="vm_042">A aprova莽茫o %1$s expirou; nada foi enviado.</string>
+    <string name="chat_055">Reconectar</string>
+    <string name="chat_056">Reconex茫o autom谩tica interrompida. Verifique a rede e reconecte manualmente.</string>
 </resources>

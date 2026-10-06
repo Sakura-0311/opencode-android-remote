@@ -14,7 +14,7 @@ import androidx.activity.viewModels
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.res.stringResource
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +64,15 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * v5.0.3 (B-6 / C-1): 退到后台时把聊天记录与 relay 序号落盘。
+     * 不放在 onDestroy——进程可能直接被系统回收。
+     */
+    override fun onStop() {
+        super.onStop()
+        viewModel.onAppBackgrounded()
+    }
+
+    /**
      * v1.6 P0 任务通知：通知点击后直接进入对应会话，而不是只打开首页。
      */
     private fun handleNotificationDeepLink(intent: Intent?) {
@@ -95,7 +104,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             OpenCodeTheme {
-                val uiState by viewModel.uiState.collectAsState()
+                // v5.0.3 (C-5): collectAsState → collectAsStateWithLifecycle——
+                // 离开前台时停止收集，后台不再无谓地重组界面
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 // B-12: 更新检查对话框状态
                 var updateInfo by remember { mutableStateOf<UpdateChecker.UpdateInfo?>(null) }
                 var checkingUpdate by remember { mutableStateOf(false) }
@@ -199,6 +210,8 @@ class MainActivity : ComponentActivity() {
                         onTriggerTestApproval = {
                             viewModel.triggerMockToolApprovalForTest()
                         },
+                        // v5.0.3 (B-1): 退避用尽后的手动重连
+                        onReconnect = { viewModel.reconnectRelay() },
                         onSearchLog = { query ->
                             viewModel.setLogSearchQuery(query)
                         },

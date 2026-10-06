@@ -631,4 +631,10 @@
     <string name="pair_n03">显示/隐藏云端 Key</string>
     <string name="relay_n01">E2EE 加密失败，已拒绝发送：%1$s</string>
     <string name="vm_n01">对端公钥认证失败，已拒绝（疑似中继篡改）</string>
+    <string name="approval_005">该审批已过期，无法批准或拒绝</string>
+    <string name="approval_006">剩余 %1$d 秒后过期</string>
+    <string name="vm_041">电脑端拒绝了这次审批（%1$s），任务可能仍在等待审批。</string>
+    <string name="vm_042">审批 %1$s 已过期，本次操作未发送。</string>
+    <string name="chat_055">重新连接</string>
+    <string name="chat_056">自动重连已停止，请检查网络后手动重连</string>
 </resources>

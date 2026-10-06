@@ -630,4 +630,10 @@
     <string name="pair_n03">Mostrar u ocultar clave de nube</string>
     <string name="relay_n01">Falló el cifrado E2EE, envío cancelado: %1$s</string>
     <string name="vm_n01">Falló la verificación de la clave pública del par; rechazado (posible manipulación del relay)</string>
+    <string name="approval_005">Esta aprobaci贸n ha caducado y ya no se puede aprobar ni rechazar</string>
+    <string name="approval_006">Caduca en %1$d segundos</string>
+    <string name="vm_041">El escritorio rechaz贸 esta aprobaci贸n (%1$s); la tarea puede seguir esperando aprobaci贸n.</string>
+    <string name="vm_042">La aprobaci贸n %1$s ha caducado; no se envi贸 nada.</string>
+    <string name="chat_055">Reconectar</string>
+    <string name="chat_056">Reconexi贸n autom谩tica detenida. Comprueba la red y reconecta manualmente.</string>
 </resources>

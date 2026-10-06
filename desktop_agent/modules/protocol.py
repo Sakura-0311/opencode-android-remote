@@ -50,6 +50,26 @@ from modules.state import (
     # 且两份都静默降级明文；现在只有一份且 fail-closed）
     _e2ee,
 )
+async def _notify_approval_rejected(ws_relay, call_id: str, reason: str) -> None:
+    """v5.0.3 (B-3): 审批被本地守卫拒绝时明确回报手机端，不再静默丢弃。
+
+    此前 nonce 缺失/失效只写一行 warning 就 return，手机端点了「批准」
+    却看不到任何反馈，任务永远卡在等审批。
+
+    帧类型是**附加**的：v4 协议语义不变，旧版 App 的分发里
+    `else -> {}` 会直接忽略它。刻意不复用 error 帧——旧 App 收到任何
+    error 都会把整个任务标成失败。
+    """
+    try:
+        await send_d2m_secure(ws_relay, {
+            "type": "approval_rejected",
+            "call_id": call_id or "",
+            "reason": reason,
+        })
+    except Exception as e:
+        logger.warning(f"发送 approval_rejected 失败: {e}")
+
+
 async def handle_mobile_message(
     msg_data: dict,
     ws_relay: websockets.WebSocketClientProtocol,
@@ -293,14 +313,17 @@ async def handle_mobile_message(
         reason = payload.get("reason", "")
         logger.info(f"Handling approval decision for permission {call_id}: approved={is_approved}")
         if not call_id:
+            await _notify_approval_rejected(ws_relay, "", "missing_call_id")
             return
         # B-5: 空 nonce 直接拒绝，不再放行（防重放守卫）
         if not nonce:
             logger.warning(f"Rejected tool approval response for {call_id}: missing nonce (SEC-04 guard)")
+            await _notify_approval_rejected(ws_relay, call_id, "missing_nonce")
             return
         record = tool_guard.validate_approval(call_id, nonce)
         if not record:
             logger.warning(f"Rejected tool approval response for {call_id}: Nonce invalid or expired (SEC-04 guard)")
+            await _notify_approval_rejected(ws_relay, call_id, "nonce_invalid_or_expired")
             return
         # B-7: 用记录里的 session_id（而非信封里的），调用成功后再删记录以便重试
         ok = await respond_to_permission(

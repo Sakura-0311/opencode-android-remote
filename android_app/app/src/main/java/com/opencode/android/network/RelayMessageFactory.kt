@@ -18,13 +18,6 @@ object RelayMessageFactory {
             put("req_id", reqId)
         }
 
-    fun createSession(title: String, reqId: String = UUID.randomUUID().toString()): JSONObject =
-        JSONObject().apply {
-            put("action", "create_session")
-            put("req_id", reqId)
-            put("payload", JSONObject().apply { put("title", title) })
-        }
-
     fun listDevices(): JSONObject =
         JSONObject().apply { put("type", "list_devices") }
 
@@ -53,20 +46,6 @@ object RelayMessageFactory {
             put("new_name", newName)
         }
 
-    fun fileList(path: String, reqId: String = UUID.randomUUID().toString()): JSONObject =
-        JSONObject().apply {
-            put("action", "file_list")
-            put("req_id", reqId)
-            put("payload", JSONObject().apply { put("path", path) })
-        }
-
-    fun fileRead(path: String, reqId: String = UUID.randomUUID().toString()): JSONObject =
-        JSONObject().apply {
-            put("action", "file_read")
-            put("req_id", reqId)
-            put("payload", JSONObject().apply { put("path", path) })
-        }
-
     fun diagnose(reqId: String = UUID.randomUUID().toString()): JSONObject =
         JSONObject().apply {
             put("action", "diagnose")
@@ -85,29 +64,42 @@ object RelayMessageFactory {
             put("req_id", reqId)
         }
 
-    fun approvalResponse(callId: String, isApproved: Boolean, reason: String = "",
-                         nonce: String? = null,
-                         reqId: String = UUID.randomUUID().toString()): JSONObject {
-        val payload = JSONObject().apply {
-            put("call_id", callId)
-            put("approved", isApproved)
-            put("reason", reason)
-            // B-5: nonce 原样回传，供 agent 防重放校验
-            if (!nonce.isNullOrEmpty()) put("nonce", nonce)
+    /**
+     * v5.0.3 (A-1): 控制类消息的**内层**明文（加密对象）。
+     * 形状固定为 {"action","payload"}，`seq` 由 E2eeManager.encryptInnerForDesktop 补写。
+     */
+    fun controlInner(action: String, payload: JSONObject): JSONObject =
+        JSONObject().apply {
+            put("action", action)
+            put("payload", payload)
         }
-        return JSONObject().apply {
-            put("action", "tool_approval_response")
-            put("req_id", reqId)
+
+    /**
+     * v5.0.3 (A-1): 控制类消息的**外层**信封（纯函数，可 JVM 单测）。
+     *
+     * 外层只放明文路由字段（action/session_id/req_id/client_msg_id/target_device_id）；
+     * 给了 [encryptedPayloadB64] 就走 E2EE 信封且**不带**明文 payload，
+     * 否则放明文 payload。形状见 docs/E2EE_WIRE_v1.md。
+     */
+    fun controlEnvelope(
+        action: String,
+        sessionId: String,
+        payload: JSONObject,
+        clientMsgId: String,
+        reqId: String = clientMsgId,
+        targetDeviceId: String? = null,
+        encryptedPayloadB64: String? = null
+    ): JSONObject = JSONObject().apply {
+        put("action", action)
+        put("session_id", sessionId)
+        put("req_id", reqId)
+        put("client_msg_id", clientMsgId)
+        if (!targetDeviceId.isNullOrEmpty()) put("target_device_id", targetDeviceId)
+        if (encryptedPayloadB64 != null) {
+            put("e2ee", true)
+            put("encrypted_payload", encryptedPayloadB64)
+        } else {
             put("payload", payload)
         }
     }
-
-    fun cancel(sessionId: String, clientMsgId: String = UUID.randomUUID().toString(),
-               reqId: String = UUID.randomUUID().toString()): JSONObject =
-        JSONObject().apply {
-            put("action", "cancel")
-            put("session_id", sessionId)
-            put("req_id", reqId)
-            put("client_msg_id", clientMsgId)
-        }
 }

@@ -24,6 +24,8 @@ interface PairingE2ee {
     fun ownPublicKeyB64(): String?
     fun storePeerPubkey(deviceId: String, pubkeyB64: String, sig: String): Boolean
     fun hasPeerKey(deviceId: String): Boolean
+    // v5.0.3 (A-1): 最近一次协商成功的对端。默认实现让既有假实现无需改动。
+    fun lastNegotiatedPeerId(): String? = null
 }
 
 /**
@@ -311,7 +313,10 @@ class PairingCoordinator(
         // synchronized 可重入：在 claim 临界区内调用时是同一线程，不会死锁
         synchronized(pairingLock) {
             val s = dispatch.currentState
+            // v5.0.3 (A-1): desktop_list 为空时（多桌面路由关闭）回退到最近协商过的对端，
+            // 否则明明能加密，UI 却显示未就绪
             val target = DeviceListReducer.selectE2eeTarget(s.targetDesktopId, s.desktopList)
+                .ifEmpty { e2ee.lastNegotiatedPeerId() ?: "" }
             val ready = target.isNotEmpty() && e2ee.hasPeerKey(target)
             if (s.e2eePeerReady != ready) {
                 dispatch.updateState { it.copy(e2eePeerReady = ready) }

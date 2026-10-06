@@ -630,4 +630,10 @@
     <string name="pair_n03">Show or hide cloud key</string>
     <string name="relay_n01">E2EE encryption failed, sending refused: %1$s</string>
     <string name="vm_n01">Peer public key verification failed; rejected (possible relay tampering)</string>
+    <string name="approval_005">This approval has expired and can no longer be approved or rejected</string>
+    <string name="approval_006">Expires in %1$d seconds</string>
+    <string name="vm_041">The desktop rejected this approval (%1$s); the task may still be waiting for approval.</string>
+    <string name="vm_042">Approval %1$s has expired; nothing was sent.</string>
+    <string name="chat_055">Reconnect</string>
+    <string name="chat_056">Auto-reconnect stopped. Check your network and reconnect manually.</string>
 </resources>

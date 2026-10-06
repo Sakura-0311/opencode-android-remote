@@ -1,10 +1,12 @@
 # v3.3: R8 开启（minify=true；v4.2.0 起 shrinkResources=true，经 emulator-smoke 验证）。
 #
 # 以下依赖自带 consumer keep rules（已实测 AAR/JAR），无需手写：
-# - ACRA 5.11.3（proguard.txt：插件反射、枚举、ErrorReporter）
-# - ML Kit barcode-scanning 17.2.0（proguard.txt：proto 字段、native 方法）
+# v5.0.3 (C-5): 版本号此前停留在 v5.0.2 升级前的旧值（ACRA 5.11.3 /
+# ML Kit 17.2.0 / OkHttp 4.12.0），与实际依赖不符会误导排查，现已对齐。
+# - ACRA 5.13.1（proguard.txt：插件反射、枚举、ErrorReporter）
+# - ML Kit barcode-scanning 17.3.0（proguard.txt：proto 字段、native 方法）
 # - tink-android 1.23.0（META-INF/proguard/protobuf.pro：shaded protobuf 反射）
-# - OkHttp 4.12.0（META-INF/proguard/okhttp3.pro）
+# - OkHttp 5.4.0（META-INF/proguard/okhttp3.pro）
 #
 # 项目代码无反射、无 Gson 解析（org.json 手动解析），Compose 由 AGP 处理。
 # v5.0.2: security-crypto 依赖与迁移路径已删除，对应的 keep/dontwarn 一并移除。

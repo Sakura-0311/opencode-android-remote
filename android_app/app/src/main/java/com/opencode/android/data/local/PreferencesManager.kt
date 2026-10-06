@@ -106,16 +106,41 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         prefs.edit().putString("e2ee_own_relay_device_id", id).apply()
     }
 
+    // v5.0.3 (A-1): 最近一次协商成功的对端 deviceId（非敏感，明文存储）
+    override fun getE2eeLastPeerId(): String? =
+        prefs.getString(KEY_E2EE_LAST_PEER_ID, null)
+    override fun setE2eeLastPeerId(deviceId: String) {
+        prefs.edit().putString(KEY_E2EE_LAST_PEER_ID, deviceId).apply()
+    }
+
     // v4.6.0: E2EE 序号计数器（非敏感，明文存储；key 做清洗防注入）
+    // v5.0.3 (C-1): 移到独立的小 prefs 文件。序号在每条消息（含每个
+    // stream_chunk）解密后都会 +1，此前写主 prefs——那个 XML 还存着
+    // sessions/profiles 的 JSON，等于每个 chunk 都可能整文件重写。
+    private val e2eeSeqPrefs: SharedPreferences =
+        context.getSharedPreferences(E2EE_SEQ_PREFS_NAME, Context.MODE_PRIVATE)
+
     private fun seqKey(peerId: String, direction: String): String {
         val safe = peerId.filter { it.isLetterOrDigit() || it in "-_." }.take(64)
         val dir = if (direction == "d2m") "d2m" else "m2d"
         return "e2ee_seq_${safe}_$dir"
     }
-    override fun getE2eeSeq(peerId: String, direction: String): Long =
-        prefs.getLong(seqKey(peerId, direction), 0L)
+    override fun getE2eeSeq(peerId: String, direction: String): Long {
+        val key = seqKey(peerId, direction)
+        if (e2eeSeqPrefs.contains(key)) return e2eeSeqPrefs.getLong(key, 0L)
+        // 迁移：v5.0.2 及以前把序号写在主 prefs 里。换文件后若从 0 重新开始，
+        // desktop 侧会按「序号未严格递增」判定为重放并拒收所有帧——所以必须搬。
+        val legacy = prefs.getLong(key, -1L)
+        if (legacy >= 0L) {
+            e2eeSeqPrefs.edit().putLong(key, legacy).apply()
+            prefs.edit().remove(key).apply()
+            android.util.Log.i("PrefsManager", "已迁移 E2EE 序号 $key=$legacy")
+        }
+        return if (legacy >= 0L) legacy else 0L
+    }
+
     override fun setE2eeSeq(peerId: String, direction: String, seq: Long) {
-        prefs.edit().putLong(seqKey(peerId, direction), seq).apply()
+        e2eeSeqPrefs.edit().putLong(seqKey(peerId, direction), seq).apply()
     }
 
     // v4.0: 非敏感偏好统一走明文存储（敏感 key 只走 secure()，绝不进明文）。
@@ -147,6 +172,10 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         private const val PREFS_NAME = "opencode_remote_prefs"
         // v4.0: 非敏感偏好明文存储（敏感 key 只走 secure()/Tink）
         private const val PLAIN_PREFS_NAME = "opencode_remote_settings"
+        // v5.0.3 (C-1): E2EE 序号单独一个文件（每条消息都会写，不能与大数据同文件）
+        private const val E2EE_SEQ_PREFS_NAME = "opencode_e2ee_seq"
+        // v5.0.3 (A-1): 最近一次协商成功的 E2EE 对端 device_id
+        private const val KEY_E2EE_LAST_PEER_ID = "e2ee_last_peer_id"
         private const val KEY_APP_MODE = "app_mode"
         private const val KEY_ACCOUNT_ID = "account_id"
         private const val KEY_SECRET = "secret"

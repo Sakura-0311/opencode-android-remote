@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.opencode.android.OpenCodeApp
 import com.opencode.android.coordinator.DiagnosticsCoordinator
 import com.opencode.android.data.local.PreferencesManager
+import com.opencode.android.data.local.MessageStore
 import com.opencode.android.data.model.AppError
 import com.opencode.android.data.model.AppMode
 import com.opencode.android.data.model.ChatMessage
@@ -33,6 +34,7 @@ import com.opencode.android.network.ModelInfo
 import com.opencode.android.network.ProjectInfo
 import com.opencode.android.network.CloudTransport
 import com.opencode.android.network.RelayListener
+import com.opencode.android.network.SendResult
 import com.opencode.android.network.RelayTransport
 import com.opencode.android.network.Transport
 import com.opencode.android.network.TransportFactory
@@ -66,6 +68,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.UUID
 
 class OpenCodeViewModel(application: Application) : AndroidViewModel(application), RelayListener, CloudStreamListener {
@@ -77,6 +83,11 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     // v4.1: E2EE（与注入 client 的为同一实例语义；此处用于配对公钥交换）
     private val e2eeManager = com.opencode.android.security.E2eeManager(prefsManager)
     private val cloudClient: CloudApiClient = app.cloudClient
+
+    // v5.0.3 (B-6): 聊天记录本地缓存（进程被杀 / 切换会话后仍可回看）
+    private val messageStore: MessageStore by lazy {
+        MessageStore(File(getApplication<Application>().filesDir, "chat_cache"))
+    }
 
     // v3.0: 传输抽象（ViewModel 仍是 RelayListener/CloudStreamListener，业务回调不变）
     private val transportListener = object : TransportListener {
@@ -203,18 +214,40 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         // v1.6 P0 后台保活：ViewModel 重建时重新挂载到应用级连接（不断连）
         // CloudApiClient 每次调用时传入 listener，无需重新挂载
         relayClient.setListener(this)
+        // v5.0.3 (C-4): 云端也改成 setListener 重挂——此前 listener 绑在
+        // ViewModel 实例上，Activity 退出后流继续往已销毁的 VM 写回调，
+        // 新 VM 看不到进行中的流（Relay 侧本来就有重挂）。
+        cloudClient.setListener(this)
+        // v5.0.3 (B-6): 恢复上次会话的聊天记录（IO 线程读，不阻塞启动）
+        viewModelScope.launch(Dispatchers.IO) {
+            val restored = messageStore.load(_uiState.value.currentSessionId)
+            if (restored.isNotEmpty()) {
+                _uiState.update { it.copy(messages = restored) }
+            }
+        }
     }
 
     val uiState: StateFlow<OpenCodeUiState> = _uiState.asStateFlow()
+
+    /**
+     * v5.0.3 (C-2): 会话列表落盘。
+     *
+     * 此前 saveSessions 在 StateFlow.update{} 的 lambda 里调用，而 lambda 在
+     * CAS 冲突时会重跑——副作用会重复执行，且序列化 + 写盘都在主线程。
+     * 现在 update{} 只算新状态，落盘放到单线程 IO 上按序执行。
+     */
+    private val sessionIo = Dispatchers.IO.limitedParallelism(1)
+
+    private fun persistSessions(sessions: List<SessionItem>) {
+        viewModelScope.launch(sessionIo) { prefsManager.saveSessions(sessions) }
+    }
 
     private var activeAssistantMessageId: String? = null
     // v1.6 P0 任务通知：任务计时与文件统计
     private var taskStartTimeMs: Long = 0L
     private var taskName: String = ""
     private val taskModifiedFiles = mutableSetOf<String>()
-    // P1-5: 流式 chunk 批处理缓冲（50ms 聚合一次刷新 UI）
-    private val streamBuffer = StringBuilder()
-    // 头尾窗口（ENABLE_STREAM_WINDOW 开启时替代 streamBuffer）
+    // P1-5: 流式输出头尾窗口（v5.0.3 起是唯一路径）
     private val streamWindow = StreamWindow()
     private var streamFlushJob: Job? = null
     private var streamFlushSessionId: String? = null
@@ -222,7 +255,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     companion object {
         private const val MAX_MESSAGES_COUNT = 500
-        private const val MAX_STREAM_LINES = 2000
         // P1-5: chunk 批处理间隔（文档建议 30–80ms）
         private const val STREAM_FLUSH_MS = 50L
     }
@@ -242,42 +274,73 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun togglePinSession(sessionId: String) {
-        _uiState.update { state ->
+        val next = _uiState.updateAndGet { state ->
             val updated = SessionReducer.togglePin(state.availableSessions, sessionId, System.currentTimeMillis())
-            prefsManager.saveSessions(updated)
             state.copy(availableSessions = SessionReducer.sortSessions(updated))
         }
+        persistSessions(next.availableSessions)
     }
 
     fun archiveSession(sessionId: String) {
-        _uiState.update { state ->
+        val next = _uiState.updateAndGet { state ->
             val updated = SessionReducer.archive(state.availableSessions, sessionId, System.currentTimeMillis())
-            prefsManager.saveSessions(updated)
             state.copy(availableSessions = SessionReducer.sortSessions(updated))
         }
+        persistSessions(next.availableSessions)
     }
 
     fun batchArchiveOldSessions() {
-        _uiState.update { state ->
+        val next = _uiState.updateAndGet { state ->
             val updated = SessionReducer.batchArchive(state.availableSessions, state.currentSessionId)
-            prefsManager.saveSessions(updated)
             state.copy(availableSessions = SessionReducer.sortSessions(updated))
         }
+        persistSessions(next.availableSessions)
     }
 
     fun setSessionTag(sessionId: String, newTag: String) {
-        _uiState.update { state ->
+        val next = _uiState.updateAndGet { state ->
             val updated = SessionReducer.setTag(state.availableSessions, sessionId, newTag, System.currentTimeMillis())
-            val tags = (state.availableTags + newTag).distinct()
-            prefsManager.saveSessions(updated)
-            state.copy(availableSessions = SessionReducer.sortSessions(updated), availableTags = tags)
+            state.copy(
+                availableSessions = SessionReducer.sortSessions(updated),
+                availableTags = (state.availableTags + newTag).distinct()
+            )
         }
+        persistSessions(next.availableSessions)
     }
 
     fun switchSession(sessionId: String) {
         // v3.4: 空值防御——空 sessionId 忽略，不清空当前会话
         if (sessionId.isBlank()) return
+        // v5.0.3 (A-2): 切到当前会话时什么都不做。任务完成/审批通知携带的
+        // 会话 id 通常就是正在看的那个，此前无条件 messages = emptyList()
+        // 会把屏幕上的对话清掉——用户点通知想看结果，反而什么都没了。
+        if (sessionId == _uiState.value.currentSessionId) return
+        val leaving = _uiState.value.currentSessionId
         _uiState.update { it.copy(currentSessionId = sessionId, messages = emptyList()) }
+        // v5.0.3 (B-6): 离开前把当前会话落盘；切回来时从缓存恢复
+        if (leaving.isNotBlank()) persistMessages(leaving)
+        val restored = messageStore.load(sessionId)
+        if (restored.isNotEmpty()) {
+            _uiState.update { it.copy(messages = restored) }
+        }
+    }
+
+    /** v5.0.3 (B-6): 把某会话当前消息写到本地缓存（IO 线程，不阻塞主线程） */
+    private fun persistMessages(sessionId: String) {
+        val snapshot = _uiState.value.messages
+        if (sessionId.isBlank() || snapshot.isEmpty()) return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { messageStore.save(sessionId, snapshot) }
+        }
+    }
+
+    /**
+     * v5.0.3 (B-6): App 退到后台时调用——把消息与 relay 序号一起落盘。
+     * MainActivity.onStop 转发进来。
+     */
+    fun onAppBackgrounded() {
+        persistMessages(_uiState.value.currentSessionId)
+        relayClient.flushSeqNow()
     }
 
     // =========================================================================
@@ -311,6 +374,11 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     fun approveTool(callId: String) {
         val state = _uiState.value
         val nonce = state.pendingApproval?.nonce
+        // v5.0.3 (B-3): 已过期就别费劲发了——agent 会按 nonce 失效丢弃
+        if (isApprovalExpired()) {
+            rejectExpiredApproval(callId)
+            return
+        }
         _uiState.update { it.copy(pendingApproval = ApprovalReducer.reduce(it.pendingApproval, ApprovalReducer.Event.Approved)) }
         OpLog.record(getApplication(), OpLog.OpType.APPROVE, "callId=$callId")
         // P0-3 修复：直接回传真实权限审批决定，绝不再把 "/approve" 作为普通 prompt 发给大模型！
@@ -325,9 +393,31 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** v5.0.3 (B-3): 审批已过期——不发任何帧，只收起卡片并告知用户 */
+    private fun rejectExpiredApproval(callId: String) {
+        _uiState.update {
+            it.copy(
+                pendingApproval = ApprovalReducer.reduce(it.pendingApproval, ApprovalReducer.Event.Rejected)
+            )
+        }
+        val notice = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            role = MessageRole.SYSTEM,
+            content = getApplication<Application>().getString(R.string.vm_042, callId),
+            isError = true
+        )
+        _uiState.update { state ->
+            state.copy(messages = (state.messages + notice).takeLast(MAX_MESSAGES_COUNT))
+        }
+    }
+
     fun rejectTool(callId: String) {
         val state = _uiState.value
         val nonce = state.pendingApproval?.nonce
+        if (isApprovalExpired()) {
+            rejectExpiredApproval(callId)
+            return
+        }
         _uiState.update { it.copy(pendingApproval = ApprovalReducer.reduce(it.pendingApproval, ApprovalReducer.Event.Rejected)) }
         OpLog.record(getApplication(), OpLog.OpType.REJECT, "callId=$callId")
         // P0-3 修复：回传真实拒绝决定；B-9: 云端模式同上
@@ -418,18 +508,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { SendMessageReducer.appendUserMessage(it, userMsg, MAX_MESSAGES_COUNT) }
         // 阶段 1: userMsg.content 即 trim 后的原文（buildUserMessage 内部已 trim）
         val trimmed = userMsg.content
-        // v1.6 P0: 任务开始，状态持久化
-        setTaskStatus(TaskStatus.RUNNING, getApplication<Application>().getString(R.string.vm_020, trimmed.take(30)))
-        // v1.6 P0 任务通知：记录任务信息用于完成通知
-        taskStartTimeMs = System.currentTimeMillis()
-        taskName = trimmed.take(40)
-        taskModifiedFiles.clear()
-
-        OpenCodeKeepAliveService.startTaskProgress(
-            getApplication(),
-            getApplication<Application>().getString(R.string.vm_020, trimmed.take(30)),
-            _uiState.value.currentSessionId
-        )
 
         if (_uiState.value.appMode == AppMode.DESKTOP_RELAY) {
             // v1.6 P1: 透传用户选择的 Model/Agent
@@ -443,14 +521,28 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             if (targetId != null && sid.isNotEmpty()) {
                 prefsManager.saveSessionDesktopBinding(sid, targetId)
             }
-            relayClient.sendPrompt(
+            // v5.0.3 (B-4): 只有真的写出去才进入 RUNNING 并启动前台计时。
+            // 此前先置 RUNNING 再发送，而 sendPrompt 在 E2EE 加密失败时
+            // fail-closed 拒发、断线时进队列——两种情况状态都已经是「运行中」，
+            // 通知栏每秒刷新计时，用户看到的是一个永远跑不完的任务。
+            val result = relayClient.sendPrompt(
                 trimmed,
                 sid,
                 model = _uiState.value.selectedModel,
                 agent = _uiState.value.selectedAgent,
                 targetDeviceId = targetId
             )
+            when (result) {
+                SendResult.SENT -> startTaskUi(trimmed)
+                // 排队中：onMessageQueued 已给出明确提示，等重连补发。
+                // 不进 RUNNING、不启动计时——补发成功后会收到 stream_start。
+                SendResult.QUEUED -> Unit
+                // 失败：onWriteUnconfirmed / onError 已提示用户，这里只确保
+                // 不残留 generating 状态。
+                SendResult.FAILED -> _uiState.update { it.copy(isGenerating = false) }
+            }
         } else {
+            startTaskUi(trimmed)
             _uiState.update { it.copy(cloudConnectionState = CloudConnectionState.CONNECTING) }
             cloudClient.sendPromptStream(
                 baseUrl = _uiState.value.cloudServerUrl,
@@ -460,6 +552,20 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 listener = this
             )
         }
+    }
+
+    /** v1.6 P0: 任务开始——状态置 RUNNING、记录任务信息、启动前台计时通知 */
+    private fun startTaskUi(trimmed: String) {
+        val app = getApplication<Application>()
+        setTaskStatus(TaskStatus.RUNNING, app.getString(R.string.vm_020, trimmed.take(30)))
+        taskStartTimeMs = System.currentTimeMillis()
+        taskName = trimmed.take(40)
+        taskModifiedFiles.clear()
+        OpenCodeKeepAliveService.startTaskProgress(
+            app,
+            app.getString(R.string.vm_020, trimmed.take(30)),
+            _uiState.value.currentSessionId
+        )
     }
 
     fun cancelExecution() {
@@ -479,7 +585,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun clearChat() {
+        val sid = _uiState.value.currentSessionId
         _uiState.update { it.copy(messages = emptyList()) }
+        // v5.0.3 (B-6): 同步删掉本地缓存，否则重启后又冒出来
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { messageStore.clear(sid) }
+        }
     }
 
     // v2.5: SSE 重连状态暴露到顶部状态条
@@ -592,7 +703,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 isAuthenticated = true,
                 appError = null,
-                statusBanner = null
+                statusBanner = null,
+                // v5.0.3 (B-1): 连上了就撤掉「重试用尽」的提示
+                isReconnecting = false,
+                relayRetryExhausted = false
             )
         }
         // P1-1: 认证成功后主动向电脑端查询真实会话列表
@@ -604,7 +718,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onSessionsListReceived(sessions: List<SessionItem>) {
-        _uiState.update { state ->
+        val next = _uiState.updateAndGet { state ->
             val merged = if (sessions.isEmpty()) {
                 state.availableSessions
             } else {
@@ -617,7 +731,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             }
-            prefsManager.saveSessions(merged)
             val currentId = if (merged.any { it.id == state.currentSessionId }) {
                 state.currentSessionId
             } else {
@@ -628,6 +741,7 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 currentSessionId = currentId
             )
         }
+        persistSessions(next.availableSessions)
     }
 
     // ============ P2-12: 文件浏览器 ============
@@ -762,12 +876,14 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onStreamStart(sessionId: String) {
-        _uiState.update { it.copy(cloudConnectionState = CloudConnectionState.STREAMING) }
+        // v5.0.3 (P3): 本方法同时被 RelayListener 与 CloudStreamListener 回调，
+        // 云端状态只在 Cloud 模式下写——此前 relay 模式也写，两个状态字段串味。
+        if (_uiState.value.appMode == AppMode.CLOUD_HOSTED) {
+            _uiState.update { it.copy(cloudConnectionState = CloudConnectionState.STREAMING) }
+        }
         val newMsgId = UUID.randomUUID().toString()
         activeAssistantMessageId = newMsgId
         // P1-5: 新一轮流式输出，清空上一轮缓冲
-        streamBuffer.clear()
-        // 窗口同步清空
         streamWindow.clear()
         streamFlushJob?.cancel()
         streamFlushSessionId = sessionId
@@ -793,13 +909,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             onStreamStart(sessionId)
         }
 
-        // P1-5: chunk 先进缓冲，50ms 批量刷新一次，避免每个 chunk 重建消息列表
-        // 新路径走 StreamWindow（增量切分），旧路径走 StringBuilder
-        if (FeatureFlags.ENABLE_STREAM_WINDOW) {
-            streamWindow.append(chunk)
-        } else {
-            streamBuffer.append(chunk)
-        }
+        // P1-5: chunk 先进窗口，50ms 批量刷新一次，避免每个 chunk 重建消息列表
+        streamWindow.append(chunk)
         streamFlushSessionId = sessionId
         // 通知栏进度也节流（最多 1 秒一次）
         val now = System.currentTimeMillis()
@@ -816,31 +927,21 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * P1-5: 将缓冲的 chunk 一次性追加到流式消息，保证顺序、不丢失、不重复。
-     * 新路径用 StreamWindow 渲染替换（无增量拼接、无全文重折叠）。
+     * P1-5: 将窗口里的 chunk 一次性渲染进流式消息，保证顺序、不丢失、不重复。
+     * v5.0.3 (C-6): 删掉旧的 StringBuilder 增量拼接路径——开关
+     * ENABLE_STREAM_WINDOW 早已恒为 true，那条分支不可达。
      */
     private fun flushStreamBuffer() {
         val msgId = activeAssistantMessageId ?: return
+        if (streamWindow.isEmpty) return
         val app = getApplication<Application>()
-        if (FeatureFlags.ENABLE_STREAM_WINDOW) {
-            if (streamWindow.isEmpty) return
-            val content = streamWindow.render { header, hidden, tail ->
-                app.getString(R.string.vm_028, header, hidden, tail)
-            }
-            _uiState.update { state ->
-                state.copy(
-                    messages = StreamReducer.replaceMessageContent(state.messages, msgId, content)
-                )
-            }
-            return
+        val content = streamWindow.render { header, hidden, tail ->
+            app.getString(R.string.vm_028, header, hidden, tail)
         }
-        val text = streamBuffer.toString()
-        if (text.isEmpty()) return
-        streamBuffer.clear()
         _uiState.update { state ->
-            state.copy(messages = StreamReducer.appendToMessage(
-                state.messages, msgId, text, MAX_STREAM_LINES
-            ) { header, hidden, tail -> app.getString(R.string.vm_028, header, hidden, tail) })
+            state.copy(
+                messages = StreamReducer.replaceMessageContent(state.messages, msgId, content)
+            )
         }
     }
 
@@ -863,6 +964,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             sessionId
         )
         activeAssistantMessageId = null
+        // v5.0.3 (B-6): 一轮流结束即落盘（不在每个 chunk 后写）
+        persistMessages(_uiState.value.currentSessionId)
     }
 
     override fun onAppError(code: String, message: String) {
@@ -952,6 +1055,55 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 messages = (state.messages + notice).takeLast(MAX_MESSAGES_COUNT),
             )
         }
+    }
+
+    /**
+     * v5.0.3 (B-3): 当前审批是否已过期。
+     *
+     * expires_at 是 agent 下发的绝对时间戳（毫秒），此前全工程没有任何 UI
+     * 读它：过期后按钮仍可点，用户点了批准，agent 却按「nonce 失效」丢弃，
+     * 任务永远卡在等审批。
+     */
+    fun isApprovalExpired(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val expiresAt = _uiState.value.pendingApproval?.expiresAt ?: return false
+        return expiresAt in 1..nowMs
+    }
+
+    /** v5.0.3 (B-3): agent 拒绝了审批决定（nonce 缺失/失效/重复提交） */
+    override fun onApprovalRejected(callId: String, reason: String) {
+        val pending = _uiState.value.pendingApproval
+        if (pending != null && (callId.isBlank() || pending.callId == callId)) {
+            _uiState.update {
+                it.copy(
+                    pendingApproval = ApprovalReducer.reduce(
+                        it.pendingApproval, ApprovalReducer.Event.Rejected
+                    )
+                )
+            }
+        }
+        val notice = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            role = MessageRole.SYSTEM,
+            content = getApplication<Application>().getString(R.string.vm_041, reason),
+            isError = true
+        )
+        _uiState.update { state ->
+            state.copy(
+                messages = (state.messages + notice).takeLast(MAX_MESSAGES_COUNT),
+                isGenerating = false
+            )
+        }
+    }
+
+    /** v5.0.3 (B-1): 退避重试用尽，已停止自动重连 */
+    override fun onRetryExhausted() {
+        _uiState.update { it.copy(isReconnecting = false, relayRetryExhausted = true) }
+    }
+
+    /** v5.0.3 (v5.1 计划项 2): 手动重连 */
+    fun reconnectRelay() {
+        _uiState.update { it.copy(isReconnecting = false, relayRetryExhausted = false) }
+        relayClient.reconnect()
     }
 
     /**
@@ -1174,6 +1326,11 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         // v1.6 P0 后台保活：ViewModel 销毁（Activity 退出）不再断开连接。
         // 连接由 Application 持有，前台服务保活进程，任务在后台继续。
         // 用户主动断开请调用 disconnectAll()。
+        // v5.0.3 (B-6): 同步落盘聊天记录（viewModelScope 此时已取消，
+        // 因此直接同步写，不走协程）
+        runCatching {
+            messageStore.save(_uiState.value.currentSessionId, _uiState.value.messages)
+        }
     }
 
     /**

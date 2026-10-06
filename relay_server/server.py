@@ -93,11 +93,28 @@ def get_client_ip(ws: WebSocket) -> str:
                     return ip
     return direct
 
+def jail_key(ip: str, account_id: str = "") -> str:
+    """v5.0.3 (B-7): 认证失败封禁键 —— 账号已知时用 (ip, account)，否则退回 ip。
+
+    B-7 复现的根因：未配置 TRUSTED_PROXIES 时 get_client_ip 只能取到反代地址，
+    于是「同一 IP 连续 5 次认证失败封 15 分钟」变成「任何人输错 5 次，
+    整个 relay 对所有用户封 15 分钟」。账号在鉴权帧里已知，把封禁键细化到
+    (ip, account) 后，攻击者只能封自己那个账号。
+
+    账号还未知时的失败（握手超时、首帧畸形、hello 后不发 auth）无法归属，
+    仍按 IP 计——这类失败本来就是「同一来源的连接行为异常」。
+    """
+    account_id = (account_id or "").strip()
+    return f"{ip}|{account_id}" if account_id else ip
+
+
 class RateLimiter:
     """
     轻量级内存防爆破与连接频次限流器：
-    - 单 IP 每分钟连接数限制
+    - 单 IP 每分钟连接数限制（连接频次仍按 IP，不变）
     - 连续认证失败封禁策略（防配对码/Secret暴力枚举）
+      v5.0.3 (B-7)：封禁与失败计数按 jail_key(ip, account_id) 记账，
+      账号已知时不再牵连同 IP 的其他用户
     """
     def __init__(self, max_connections_per_min: int = 30, max_auth_fails: int = 5, jail_seconds: int = 900):
         self.max_connections_per_min = max_connections_per_min
@@ -106,19 +123,25 @@ class RateLimiter:
         
         # ip -> [timestamp, timestamp, ...]
         self.ip_connection_timestamps: Dict[str, list] = {}
-        # ip -> fail_count
+        # jail_key -> fail_count
         self.ip_auth_fails: Dict[str, int] = {}
-        # ip -> jail_until_timestamp
+        # jail_key -> jail_until_timestamp
         self.ip_jailed_until: Dict[str, float] = {}
 
-    def is_jailed(self, ip: str) -> bool:
+    def is_jailed(self, ip: str, account_id: str = "") -> bool:
+        """账号已知时同时检查 (ip,account) 与 ip 两个键。
+
+        ip 键承载「无法归属到账号」的失败（握手超时等），必须一并检查，
+        否则那类封禁会被绕过。
+        """
         now = time.time()
-        jailed_until = self.ip_jailed_until.get(ip, 0)
-        if now < jailed_until:
-            return True
-        elif ip in self.ip_jailed_until:
-            del self.ip_jailed_until[ip]
-            self.ip_auth_fails[ip] = 0
+        for key in {jail_key(ip, account_id), jail_key(ip)}:
+            jailed_until = self.ip_jailed_until.get(key, 0)
+            if now < jailed_until:
+                return True
+            elif key in self.ip_jailed_until:
+                del self.ip_jailed_until[key]
+                self.ip_auth_fails[key] = 0
         return False
 
     def cleanup(self) -> None:
@@ -152,17 +175,19 @@ class RateLimiter:
         timestamps.append(now)
         return True
 
-    def record_auth_failure(self, ip: str):
-        current_fails = self.ip_auth_fails.get(ip, 0) + 1
-        self.ip_auth_fails[ip] = current_fails
-        logger.warning(f"Auth failure from IP {ip} ({current_fails}/{self.max_auth_fails})")
+    def record_auth_failure(self, ip: str, account_id: str = ""):
+        key = jail_key(ip, account_id)
+        current_fails = self.ip_auth_fails.get(key, 0) + 1
+        self.ip_auth_fails[key] = current_fails
+        scope = f"IP {ip} account {account_id}" if account_id else f"IP {ip}"
+        logger.warning(f"Auth failure from {scope} ({current_fails}/{self.max_auth_fails})")
         if current_fails >= self.max_auth_fails:
-            self.ip_jailed_until[ip] = time.time() + self.jail_seconds
-            logger.error(f"IP {ip} has been jailed for {self.jail_seconds}s due to repeated auth failures.")
+            self.ip_jailed_until[key] = time.time() + self.jail_seconds
+            logger.error(f"{scope} has been jailed for {self.jail_seconds}s due to repeated auth failures.")
 
-    def record_auth_success(self, ip: str):
-        if ip in self.ip_auth_fails:
-            del self.ip_auth_fails[ip]
+    def record_auth_success(self, ip: str, account_id: str = ""):
+        for key in {jail_key(ip, account_id), jail_key(ip)}:
+            self.ip_auth_fails.pop(key, None)
 
 
 # v5.0.2: 这些类型不进入 route_message，因此原本完全不受限速（限速只在
@@ -889,11 +914,13 @@ def _check_proxy_hint() -> None:
         if now - manager.seen_ips[ip] >= 600:
             del manager.seen_ips[ip]
     if len(ips) == 1 and _is_private_ip(ips[0]):
-        default_proxies = {"127.0.0.1", "::1"}
-        if TRUSTED_PROXIES == default_proxies:
+        # v5.0.3 (B-7): 判据从「等于旧默认 {127.0.0.1,::1}」改为「未配置」。
+        # v5.0.1 起 TRUSTED_PROXIES 默认为空集，旧判据永远为假，
+        # 恰好在最需要提示的反代部署下不再触发。
+        if not TRUSTED_PROXIES:
             logger.warning(
                 f"v2.4: 过去 10 分钟所有连接都来自同一私网地址 {ips[0]}，"
-                "relay 可能在 Docker/反代后面。限流按 IP 生效，一个人输错 5 次会封所有人 15 分钟，"
+                "relay 可能在 Docker/反代后面。限流按 IP 生效，"
                 "建议在环境变量 TRUSTED_PROXIES 中配置反代出口 IP（见 docs/SECURITY.md）。"
             )
 
@@ -937,8 +964,16 @@ def index():
     }
 
 # v4.0: 运行统计。本机/内网运维用，不含敏感信息。
+# v5.0.3 (P3): /api/stats 此前完全无鉴权。设 RELAY_STATS_TOKEN 后需带
+# X-Stats-Token 头；未设则保持原有开放行为（内网部署零改动）。
+RELAY_STATS_TOKEN = os.getenv("RELAY_STATS_TOKEN", "") or ""
+
 @app.get("/api/stats")
-def api_stats():
+def api_stats(request: Request):
+    if RELAY_STATS_TOKEN:
+        supplied = request.headers.get("x-stats-token", "")
+        if not hmac.compare_digest(supplied.encode("utf-8"), RELAY_STATS_TOKEN.encode("utf-8")):
+            return JSONResponse({"status": "error", "message": "unauthorized"}, status_code=401)
     rooms = manager.rooms
     return {
         "status": "ok",
@@ -1051,7 +1086,7 @@ async def websocket_endpoint(
                 except Exception:
                     pass
         else:
-            rate_limiter.record_auth_failure(client_ip)
+            rate_limiter.record_auth_failure(client_ip, account_id or "")
             await websocket.send_text(json.dumps({
                 "type": "pair_error",
                 "message": result.get("error", "配对失败")
@@ -1101,18 +1136,25 @@ async def websocket_endpoint(
         _v = auth_data.get(_f)
         if _v is not None and not isinstance(_v, str):
             logger.warning(f"R7: 非法字段类型 {_f}={type(_v).__name__} from {client_ip}")
-            rate_limiter.record_auth_failure(client_ip)
+            rate_limiter.record_auth_failure(client_ip, account_id or "")
             await websocket.close(code=4400, reason=f"field {_f} must be string")
             return
 
     if msg_type != "auth" or not account_id or client_type not in ["desktop", "mobile"] or not secret:
         logger.warning(f"Auth rejected from {client_ip}: missing required auth fields.")
-        rate_limiter.record_auth_failure(client_ip)
+        rate_limiter.record_auth_failure(client_ip, account_id or "")
         await websocket.send_text(json.dumps({
             "type": "auth_error",
             "message": "First message must be valid auth with account_id, secret, and client_type."
         }))
         await websocket.close(code=4401, reason="Unauthorized")
+        return
+
+    # v5.0.3 (B-7): 账号级封禁检查。(ip, account) 被封时只拒绝这个账号，
+    # 不影响同 IP（反代出口）的其他用户。
+    if rate_limiter.is_jailed(client_ip, account_id):
+        logger.warning(f"Rejected {client_ip} account={account_id}: account temporarily jailed.")
+        await websocket.close(code=4429, reason="Account temporarily jailed.")
         return
 
     session = ClientSession(websocket, client_type, account_id, client_ip)
@@ -1121,7 +1163,7 @@ async def websocket_endpoint(
         session.device_id = str(auth_data.get("device_id", ""))[:64]
         if not session.device_id:
             logger.warning(f"v4.0: 拒绝无 device_id 的 desktop from {client_ip}")
-            rate_limiter.record_auth_failure(client_ip)
+            rate_limiter.record_auth_failure(client_ip, account_id)
             await websocket.send_text(json.dumps({
                 "type": "auth_error",
                 "message": "Protocol v4 requires device_id for desktop clients."
@@ -1131,7 +1173,7 @@ async def websocket_endpoint(
     # B-8: 透传 admin_token 供建房校验
     success, reason = manager.register_authenticated(session, secret, auth_data.get("admin_token", ""))
     if not success:
-        rate_limiter.record_auth_failure(client_ip)
+        rate_limiter.record_auth_failure(client_ip, account_id)
         try:
             await websocket.send_text(json.dumps({
                 "type": "auth_error",
@@ -1143,7 +1185,7 @@ async def websocket_endpoint(
         return
 
     # 认证成功，清除失败计数
-    rate_limiter.record_auth_success(client_ip)
+    rate_limiter.record_auth_success(client_ip, account_id)
     await websocket.send_text(json.dumps({
         "type": "auth_ok",
         "account_id": account_id,

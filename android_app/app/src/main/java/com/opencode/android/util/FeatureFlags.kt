@@ -3,6 +3,10 @@ package com.opencode.android.util
 /**
  * v4.0: 功能开关。USE_NETWORK_MONITOR（v2.3 引入）已长期稳定，本版移除回退路径，
  * NetworkMonitor 常开。ENABLE_DESKTOP_ROUTING 仍为新功能 opt-in 开关。
+ *
+ * v5.0.3 (C-6): 删除 ENABLE_STREAM_WINDOW——它恒为 true，旧的
+ * StringBuilder 增量拼接分支早已不可达，「回滚开关保留一个版本」的承诺
+ * 也已过去多个版本。
  */
 object FeatureFlags {
     /** v3.1: 多 desktop 定向路由。false 时保持 v3.0 的主 desktop 路由行为 */
@@ -11,8 +15,4 @@ object FeatureFlags {
     /** v4.1: E2EE 端到端加密（mobile ↔ desktop，relay 盲转发）。
      * v4.2 起改为运行时开关（PreferencesManager.isE2eeEnabled），此处保留常量仅作默认值语义。 */
     const val ENABLE_E2EE_DEFAULT = false
-
-    /** 流式输出头尾窗口（替代增量拼接+全文重折叠）。
-     * true=新路径（默认）；false=回退到 StreamReducer 旧路径。回滚开关保留一个版本。 */
-    const val ENABLE_STREAM_WINDOW = true
 }

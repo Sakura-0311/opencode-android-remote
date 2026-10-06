@@ -103,6 +103,26 @@ E2EE 默认关闭且 v1 实际不可用，故无迁移成本；v4.6.0 起只实�
   `file_read_result`、`file_list_result`。仍明文的：`sessions_list`（会话标题）、
   `projects_data`、错误信息、路由元数据（见元数据声明）。
 
+### v5.0.3 修订
+
+- **客户端补齐加密（此前是缺陷，不是协议变更）**：上面那六类控制消息，
+  Android 侧此前只有 `send_prompt` 走了加密，其余五类发明文——协商 E2EE 后
+  会被 desktop 静默丢弃（点批准无效、无法取消、文件浏览与新建会话不工作）。
+  现在六类统一经 `RelayWebSocketClient.sendControl` 发送，外层信封形状与
+  `send_prompt` 完全一致。线协议未变，旧版 desktop 仍能处理明文。
+- **加密目标解析**：客户端按「显式 `target_device_id` → 主 desktop →
+  最近一次协商成功的对端」三级回退确定加密对象。多桌面路由关闭时 relay
+  不下发 `desktop_list`，没有最后一级回退就永远解析不出加密目标。
+- **附加帧 `approval_rejected`（d2m）**：审批决定被本地守卫拒绝（缺 `nonce`、
+  nonce 失效或重复提交）时，desktop 回一帧明文通知：
+  ```json
+  {"type":"approval_rejected","call_id":"c1","reason":"nonce_invalid_or_expired"}
+  ```
+  这是**附加**类型，不改变 v4 既有语义：旧版 App 的分发里 `else -> {}` 会直接
+  忽略它。刻意不复用 `error` 帧——旧 App 收到任何 `error` 都会把整个任务
+  标成失败。`reason` 取值：`missing_call_id` / `missing_nonce` /
+  `nonce_invalid_or_expired`。
+
 ### 互操作向量
 
 `tests/e2ee/interop_vectors.json`（由 `tests/e2ee/gen_interop_vectors.py` 生成，
