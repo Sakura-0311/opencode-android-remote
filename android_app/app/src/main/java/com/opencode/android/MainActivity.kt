@@ -371,18 +371,6 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                // v3.2: 安全存储迁移回退 → 一次性用户提示
-                if (uiState.showSecureMigrationNotice) {
-                    AlertDialog(
-                        onDismissRequest = { viewModel.dismissSecureMigrationNotice() },
-                        title = { Text(stringResource(R.string.main_011)) },
-                        text = { Text(stringResource(R.string.main_012)) },
-                        confirmButton = {
-                            Button(onClick = { viewModel.dismissSecureMigrationNotice() }) { Text(stringResource(R.string.main_010)) }
-                        }
-                    )
-                }
-
                 // v4.0: v3 旧服务端升级提示（功能可用，不阻断）
                 if (uiState.showOldRelayWarning) {
                     AlertDialog(

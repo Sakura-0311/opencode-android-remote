@@ -17,7 +17,11 @@ _e2ee_tried = False
 
 
 def _e2ee():
-    """E2EE 模块懒加载：仅 E2EE_ENABLED=1 时 import（cryptography 缺失则降级明文）。"""
+    """E2EE 模块懒加载：仅 E2EE_ENABLED=1 时 import。
+
+    v5.0.1 fail-closed：若用户显式开了 E2EE 但 cryptography 不可用，
+    绝不静默降级为明文（那会让用户以为自己在加密），直接拒绝启动。
+    """
     global _e2ee_mod, _e2ee_tried
     if os.getenv("E2EE_ENABLED", "0") != "1":
         return None
@@ -26,9 +30,57 @@ def _e2ee():
         try:
             from modules import e2ee as _mod
             _e2ee_mod = _mod
-        except ImportError:
-            _e2ee_mod = None
+        except ImportError as e:
+            raise SystemExit(
+                "E2EE_ENABLED=1 但 cryptography 不可用，拒绝以明文运行（fail-closed）。\n"
+                "  修复：pip install cryptography\n"
+                "  或显式关闭：E2EE_ENABLED=0\n"
+                f"  原始错误：{e}"
+            ) from e
     return _e2ee_mod
+
+
+async def send_d2m_secure(ws_relay, msg: dict) -> bool:
+    """d2m 内容型消息的统一发送出口（v5.0.1 起 fail-closed，v5.0.2 支持多对端）。
+
+    - E2EE 未开启 / 未协商任何对端 / 非内容型消息：单条广播（旧行为）。
+    - 已协商 N 个对端且是内容型消息：**为每个对端各加密一份**，并用
+      `target_device_id` 定向发给对应手机（relay 侧据此只投递给那一台，
+      缓冲补发也按目标过滤）。其他手机永远收不到自己解不开的密文。
+    - 任何一份加密失败：整体拒发并回报 E2EE_UNAVAILABLE，绝不降级明文。
+
+    返回是否真的发出。
+    """
+    _em = _e2ee()
+    if _em is None:
+        await ws_relay.send(json.dumps(msg))
+        return True
+
+    peers = _em.list_peer_ids()
+    if not peers or msg.get("type") not in _em.ENCRYPTABLE_D2M:
+        # E2EE 未真正生效，或本条按设计不加密（error/pong/stream_start…）
+        await ws_relay.send(json.dumps(msg))
+        return True
+
+    for peer in peers:
+        try:
+            sealed = _em.encrypt_outgoing(msg, peer_device_id=peer, strict=True)
+        except Exception as e:
+            logger.error(f"E2EE fail-closed: 已阻止明文外发 {msg.get('type')}: {e}")
+            try:
+                await ws_relay.send(json.dumps({
+                    "type": "error",
+                    "code": "E2EE_UNAVAILABLE",
+                    "session_id": msg.get("session_id", "default"),
+                    "message": f"端到端加密不可用，已阻止本条消息明文外发：{e}",
+                }))
+            except Exception:
+                pass
+            return False
+        # 路由元数据（不进入密文内层）：只让这一台手机收到
+        sealed["target_device_id"] = peer
+        await ws_relay.send(json.dumps(sealed))
+    return True
 
 from opencode_api import (
     DEFAULT_OPENCODE_BASE_URL,
@@ -185,6 +237,13 @@ def _extract_event_session(event: Dict[str, Any]) -> Optional[str]:
             return sid
     return None
 
+# v5.0.1: SSE 事件名契约——集中定义便于单测锁定。
+# 上游真实名（message.part.updated / permission.updated）在前，旧名保留兼容。
+DELTA_EVENT_TYPES = ("message.part.updated", "message.part.delta", "delta", "stream_chunk")
+PERMISSION_EVENT_TYPES = ("permission.updated", "permission.asked",
+                          "permission.request", "permission")
+
+
 def _extract_event_delta(event: Dict[str, Any]) -> str:
     """B-2: 优先从 properties 取增量文本，顶层字段仅作兼容分支"""
     props = event.get("properties") or {}
@@ -198,6 +257,88 @@ def _extract_event_delta(event: Dict[str, Any]) -> str:
         if val:
             return val
     return ""
+
+
+def _diff_lines_from(raw: str) -> list:
+    """把统一 diff 文本转成手机端 CompactDiffView 需要的行结构。
+
+    v5.0.1: "--- a/…" / "+++ b/…" 是文件头，不是增删行——此前被渲染成
+    一行红一行绿，看起来像被改了两行，现在归到 HEADER。
+    """
+    lines = []
+    for line in (raw or "").split("\n"):
+        if line.startswith(("--- ", "+++ ")) or line.startswith("@@"):
+            lines.append({"type": "HEADER", "content": line})
+        elif line.startswith("+"):
+            lines.append({"type": "ADDED", "content": line[1:]})
+        elif line.startswith("-"):
+            lines.append({"type": "REMOVED", "content": line[1:]})
+        else:
+            lines.append({"type": "UNCHANGED", "content": line})
+    return lines
+
+
+def parse_permission_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """解析工具审批事件（纯函数，便于单测）。
+
+    v5.0.1 对齐上游真实事件 `permission.updated`：properties 就是扁平的
+    Permission 对象 {id,type,pattern?,sessionID,messageID,callID?,title,
+    metadata,time{created}}。此前只认 permission.asked/permission.request
+    并去读不存在的 tool.name / diff / file_path，导致手机端不弹审批框、
+    或弹出「无内容的审批框」让用户盲签。
+
+    metadata 是官方扩展字段袋：bash 的真实命令在 metadata.command，
+    edit 的差异在 metadata.diff。缺失时不臆造，保持 None/空串。
+    """
+    props = event.get("properties") or {}
+    if not isinstance(props, dict):
+        props = {}
+
+    def _pkey(*keys):
+        for k in keys:
+            v = props.get(k)
+            if v:
+                return v
+        for k in keys:
+            v = event.get(k)
+            if v:
+                return v
+        return None
+
+    meta = props.get("metadata") or event.get("metadata") or {}
+    if not isinstance(meta, dict):
+        meta = {}
+    tool_info = props.get("tool") or event.get("tool") or {}
+    if not isinstance(tool_info, dict):
+        tool_info = {}
+
+    permission_id = _pkey("id", "permission_id", "permissionID") or secrets.token_hex(8)
+    # 注意：不能从事件顶层取 "type"——那是事件名（permission.updated），
+    # 官方权限种类只在 properties.type 里；取错会让每张审批卡都显示
+    # "permission.updated" 而不是 bash/edit。
+    tool_name = (props.get("type") or props.get("tool_name") or event.get("tool_name")
+                 or tool_info.get("name") or "sensitive_tool")
+    file_path = (_pkey("file_path", "filePath") or tool_info.get("path")
+                 or meta.get("filePath") or meta.get("file_path"))
+    command = meta.get("command") or meta.get("cmd")
+    patterns = _pkey("pattern") or meta.get("patterns") or meta.get("pattern")
+    title = _pkey("title", "summary")
+    summary = (title or tool_info.get("description")
+               or (f"请求执行命令：{command}" if command else None)
+               or "申请执行本地文件修改或终端命令")
+    # 优先真实 diff；无 diff 时把待执行命令放进详情区，避免空审批框
+    raw_diff = (_pkey("diff", "raw_content") or meta.get("diff")
+                or (command if command else ""))
+    return {
+        "permission_id": str(permission_id),
+        "tool_name": str(tool_name),
+        "file_path": file_path,
+        "summary": summary,
+        "command": command,
+        "patterns": patterns,
+        "raw_content": raw_diff,
+        "diff_lines": _diff_lines_from(raw_diff),
+    }
 
 
 # ==============================================================================
@@ -307,8 +448,11 @@ async def listen_opencode_events_stream(
                     last_cleanup = now_ts
                     known_session_ids.cleanup()
 
-                # 1. 增量 Token 输出 (message.part.delta)
-                if event_type in ("message.part.delta", "delta", "stream_chunk"):
+                # 1. 增量 Token 输出
+                # v5.0.1: 补上游真实事件名 message.part.updated（带 properties.delta）。
+                # 旧名 message.part.delta 保留兼容；两者都只取 delta，
+                # 不取 part.text（否则每次全量重发会把同一段文本刷多遍）。
+                if event_type in DELTA_EVENT_TYPES:
                     delta_text = _extract_event_delta(event)
                     if delta_text:
                         _out = {
@@ -316,53 +460,23 @@ async def listen_opencode_events_stream(
                             "session_id": session_id,
                             "chunk": delta_text
                         }
-                        # E2EE 发消息钩子：已启用且已协商时加密 chunk，
-                        # 明文字段（type/session_id/relay_seq/source_device_id）保留供 relay 路由
-                        _em = _e2ee()
-                        if _em is not None:
-                            try:
-                                _out = _em.encrypt_outgoing(_out)
-                            except Exception as e:
-                                logger.warning(f"E2EE 加密 stream_chunk 失败，走明文: {e}")
-                        await ws_relay.send(json.dumps(_out))
+                        # v5.0.1: 统一 fail-closed 出口——加密不可用时报错，不再降级明文
+                        await send_d2m_secure(ws_relay, _out)
 
-                # 2. 工具权限请求 (permission.asked / tool_approval)
-                elif event_type in ("permission.asked", "permission.request", "permission"):
-                    # 与 _extract_event_delta 一致：优先 properties，顶层字段兜底
-                    # （真实事件结构待抓包确认，双兼容保证两种结构都能解析）
-                    _props = event.get("properties") or {}
-                    if not isinstance(_props, dict):
-                        _props = {}
-                    def _pkey(*keys):
-                        for k in keys:
-                            v = _props.get(k)
-                            if v:
-                                return v
-                        for k in keys:
-                            v = event.get(k)
-                            if v:
-                                return v
-                        return None
-                    permission_id = _pkey("id", "permission_id") or secrets.token_hex(8)
-                    tool_info = _props.get("tool") or event.get("tool") or {}
-                    if not isinstance(tool_info, dict):
-                        tool_info = {}
-                    tool_name = tool_info.get("name") or _pkey("tool_name") or "sensitive_tool"
-                    file_path = _pkey("file_path") or tool_info.get("path")
-                    summary = _pkey("summary") or tool_info.get("description") or "申请执行本地文件修改或终端命令"
-                    raw_diff = _pkey("diff", "raw_content") or ""
-
-                    diff_lines = []
-                    if raw_diff:
-                        for line in raw_diff.split("\n"):
-                            if line.startswith("+"):
-                                diff_lines.append({"type": "ADDED", "content": line[1:]})
-                            elif line.startswith("-"):
-                                diff_lines.append({"type": "REMOVED", "content": line[1:]})
-                            elif line.startswith("@"):
-                                diff_lines.append({"type": "HEADER", "content": line})
-                            else:
-                                diff_lines.append({"type": "UNCHANGED", "content": line})
+                # 2. 工具权限请求
+                # v5.0.1: 上游真实事件是 permission.updated，properties 为扁平
+                # Permission {id,type,pattern?,sessionID,messageID,callID?,title,metadata,time}。
+                # 旧名（permission.asked / permission.request / permission）保留兼容。
+                elif event_type in PERMISSION_EVENT_TYPES:
+                    _parsed = parse_permission_event(event)
+                    permission_id = _parsed["permission_id"]
+                    tool_name = _parsed["tool_name"]
+                    file_path = _parsed["file_path"]
+                    summary = _parsed["summary"]
+                    raw_diff = _parsed["raw_content"]
+                    command = _parsed["command"]
+                    patterns = _parsed["patterns"]
+                    diff_lines = _parsed["diff_lines"]
 
                     rec = tool_guard.create_approval(session_id, permission_id, tool_name, event)
                     logger.info(f"Forwarding tool approval request with Nonce to mobile: {tool_name} (call_id={permission_id})")
@@ -375,14 +489,14 @@ async def listen_opencode_events_stream(
                         "summary": summary,
                         "diff_lines": diff_lines,
                         "raw_content": raw_diff,
+                        # v5.0.1: 官方 Permission 的额外信息（旧 App 忽略未知字段）
+                        "command": command,
+                        "patterns": patterns,
                         "nonce": rec["nonce"],
                         "expires_at": rec["expires_at"]
                     }
-                    # v4.6.0: E2EE 开启时审批请求（含 diff/nonce）整体加密
-                    _em_appr = _e2ee()
-                    if _em_appr is not None:
-                        _appr_msg = _em_appr.encrypt_outgoing(_appr_msg)
-                    await ws_relay.send(json.dumps(_appr_msg))
+                    # v5.0.1: 统一 fail-closed 出口（审批含 nonce，绝不明文外发）
+                    await send_d2m_secure(ws_relay, _appr_msg)
 
                 # 3. 会话空闲或执行完成 (session.idle / message.complete)
                 elif event_type in ("session.idle", "message.complete", "stream.end"):

@@ -1,6 +1,13 @@
 {$DOMAIN_NAME:localhost} {
     encode gzip zstd
 
+    # v5.0.1 备注：本文件**不含任何认证**，口令校验完全依赖 opencode 自身的
+    # OPENCODE_SERVER_PASSWORD（且无失败限流）。需要边缘多一层认证时，取消下面注释
+    # 并生成口令哈希：caddy hash-password --plaintext '你的口令'
+    # basicauth {
+    #     admin $2a$14$替换成上面命令生成的哈希
+    # }
+
     reverse_proxy opencode-server:4096 {
         flush_interval -1
         transport http {

@@ -1,3 +1,125 @@
+# OpenCode Android Remote - Release v5.0.2（安全修复 + 工程质量）
+
+## 说明
+
+v5.0.2 是在 v5.0.0 冻结承诺（协议 v4 / API / 配置格式不变）下的一轮修复：
+不改协议、不改线格式，只修缺陷、补测试、补文档。
+
+## 内容
+
+### 工具审批链路（此前很可能整体不工作）
+- 上游真实事件是 `permission.updated`，properties 为扁平
+  `Permission{id,type,pattern?,title,metadata}`；原实现只认
+  `permission.asked/request/permission`，且去读根本不存在的
+  `tool.name/diff/file_path` → 手机端不弹审批框，或弹出无内容的框让用户盲签。
+- 现在解析抽成纯函数 `parse_permission_event()`，兼容新旧结构，
+  从 `title` / `metadata.command` / `pattern` 取真实内容；审批卡新增
+  `command`/`patterns` 字段（旧 App 忽略）。
+- 增量输出补上游真实事件名 `message.part.updated`（原实现只认 `message.part.delta`）。
+
+### E2EE：不再有任何静默降级明文
+- 新增 `E2EEUnavailable` 与统一出口 `send_d2m_secure()`：加密不可用时**拒发**并
+  回报 `E2EE_UNAVAILABLE`，绝不降级明文。此前多对端会 `return msg` 直接发明文，
+  流式 chunk 加密失败也只 warning 后照发。
+- `E2EE_ENABLED=1` 但缺少 `cryptography` 时改为**拒绝启动**（此前只打 warning 就继续跑明文）。
+- **多手机 E2EE 真正可用**：relay 支持 d2m `target_device_id` 定向投递
+  （无 target 仍广播，旧客户端不受影响），desktop 为每个对端各加密一份、
+  各自独立 seq；relay 的断线补发按目标过滤，不会把别人的密文还给这台手机。
+
+### relay 加固
+- `TRUSTED_PROXIES` 默认改为**空**（不信任任何代理）：此前默认信任回环地址，
+  配合「只绑回环」的默认部署，本机任意进程可自带 `X-Forwarded-For` 伪造来源 IP，
+  既绕过限流，也能反向把正常用户封禁 15 分钟。
+- 新增 `RELAY_ALLOWED_ORIGINS`：原生 App 不发 `Origin` 不受影响；带 `Origin` 的
+  浏览器连接必须在白名单内（防任意网页直连本机 relay）。
+- 控制类消息（`create_pairing`/`list_devices`/…）此前完全不受限速，现补上。
+- 修复 `--trusted-proxies` 参数完全失效（只改 `__main__` 的 globals，
+  而 uvicorn 会再 import 一份 server 模块对外服务）。
+
+### SSE
+- 按「帧」解析而非按行：多行 `data:` 会被拼成一个事件，此前逐行 `json.loads`
+  导致整帧被静默吞掉且无日志；解析失败改为 warning。
+
+### Android
+- 关闭 release 后门：测试用假审批入口（`triggerMockToolApprovalForTest()`）
+  此前在 release 菜单里也能点到，现加 `BuildConfig.DEBUG` 门控 + 方法内守卫。
+- 修复多 profile 凭据串号：`getProfileSecret` 无条件回退全局密钥，
+  导致切到未配对的新 profile 时把上一个房间 secret 发往新 relayUrl；
+  现在只在「该 profile 就是旧的单配置本身」时回退。
+- 诊断信息导出、E2EE 失败提示改为走资源，10 语种补齐（key 数 605 → 630，
+  语种间 key 集合一致）。
+- E2EE 失败原因从「中文字符串常量」改为**错误码枚举**（`E2eeManager.Failure`），
+  由持有 Context 的 `RelayWebSocketClient` 映射到资源——安全类不再携带用户文案。
+- 清掉界面残留的 16 处硬编码文案：7 个 ChatScreen contentDescription、
+  ModelAgentDialog 的标题与两个 Tab、PairingScreen 与 SessionsManagementModal
+  的 contentDescription（无障碍朗读此前固定英文）。
+- 三处静默吞异常补日志：切换 profile 的断连失败、CloudApiClient 的 SSE 帧解析失败、
+  撤销设备时清理公钥失败。
+- 配对流程里最后一处用户可见硬编码文案（`PairingCoordinator` 的「对端公钥认证失败，
+  已拒绝（疑似中继篡改）」）改走资源 `vm_n01`——该文件本来就用
+  `dispatch.getString(...)`，这处属于漏用；Reducer 的「文案由调用方传入」红线未动。
+
+### 构建与工程
+- **依赖整体升级（停留在 2024 → 当前工具链能吃下的最新）**。
+  版本不是「取最新」，而是逐个读候选版本 AAR 里的 `aar-metadata.properties`
+  （`minCompileSdk` / `minAndroidGradlePluginVersion`）定出来的，因为再上一档就要求
+  compileSdk 37 + AGP 9.1：
+
+  | 依赖 | 原 → 现 | 上限原因 |
+  | --- | --- | --- |
+  | Kotlin | 2.0.21 → **2.4.20** | — |
+  | AGP | 8.5.2 → **8.13.2** | 新 AndroidX 库要求 AGP ≥ 8.9.1 |
+  | Gradle | 8.7 → **8.14.3** | AGP 8.13 要求 ≥ 8.13 |
+  | Compose BOM | 2024.10.01 → **2026.05.01**（Compose 1.11.2） | 1.12.x 要求 minCompileSdk 37 + AGP 9.1 |
+  | core-ktx | 1.12.0 → **1.18.0** | 1.19.x 要求 37 / AGP 9.1 |
+  | lifecycle | 2.7.0 → **2.10.0** | 2.11.x 要求 37 / AGP 9.1 |
+  | OkHttp | 4.12.0 → **5.4.0** | 5.5.x 要求 compileSdk 37 |
+  | Coroutines | 1.7.3 → **1.11.0** | 已是最新稳定版 |
+  | CameraX | 1.3.1 → **1.6.2** / ML Kit 17.2.0 → **17.3.0** / ACRA 5.11.3 → **5.13.1** | ACRA 5.14.x 要求 37 |
+  | Tink | 1.23.0（不变） | 已是最大稳定版 |
+
+  配套变更：`compileSdk`/`targetSdk` 35 → **36**；JVM target 1.8 → **17**
+  （Kotlin 2.4 移除了 `kotlinOptions.jvmTarget` 字符串 DSL，改用 `compilerOptions`）；
+  CI 与 Wrapper 的 Gradle 同步到 8.14.3；`verification-metadata.xml` 重新生成
+  （382 KB → 545 KB）。
+  注：debug APK 体积 40.3 → 47.0 MB（新库更大；release 走 R8 不受此影响）。
+  想继续升到 Compose 1.12 / core 1.19 / okhttp 5.5，前提是把 **AGP 提到 9.1+、
+  Gradle 提到 9.x、compileSdk 提到 37**，那是整链迁移，单独一轮做。
+- **删除全部遗留迁移层**（项目尚无线上用户，无存量数据需要迁移）：
+  - 移除 `androidx.security:security-crypto` 依赖与整套 `EncryptedSharedPreferences` 后端；
+  - 删除 `SecureMigration`（含 6 项单测，单测总数 224 → 218）、`SecureBackend.LEGACY`
+    回退分支、legacy 使用计数、旧加密文件清理、迁移回退用户提示；
+  - 删除「旧单配置 → 首个 profile」的 profile 迁移、旧中文会话标签迁移映射表、
+    桌面端旧位置 secret 迁移；
+  - 安全存储只剩一种实现：Tink AEAD + Android Keystore，不可用时 fail-closed 拒绝写入；
+  - 随之删除 7 个不再使用的字符串资源（10 语种同步，key 数 618 → 611）。
+- 补上 **Gradle Wrapper**（此前无 wrapper，构建依赖机器上装的 gradle，不可复现）。
+- 新增 **`.gitattributes`**：脚本/配置强制 LF（此前 Windows 检出会让 shell 脚本变 CRLF）。
+- 修复 `verification-metadata.xml` 只覆盖 Linux 导致 **Windows 构建必然失败**
+  （缺 `aapt2-…-windows.jar` 校验和）；已合并 Windows 条目，linux 条目保留。
+- CI 补跑此前遗漏的测试：`test_e2ee.py`、`test_crash_report.py`、
+  `test_hardening.py`、`test_sse_parser.py`、`test_targeted_fanout.py`、`test_security.py`。
+- `e2e.yml` 补 `RELAY_ADMIN_TOKEN`（relay 自 v4.7.0 起缺它必然 `SystemExit(2)`，
+  该 workflow 一直红）；`emulator-e2ee.yml` 去掉起不来的 relay 步骤。
+- 修掉 `tests/e2ee/e2ee_protocol_test.py`（自己复制了一份加密实现、从不 import
+  真实模块的自欺测试）与 `scripts/test_contract_v4.py` 的间歇性假失败。
+
+## 兼容性
+
+- 非破坏性；协议 v4 / 线格式 / 配置格式均未变。
+- 行为变更（有意）：
+  - 多手机房间的 E2EE 内容型消息改为**定向投递**，其他手机不再收到自己解不开的密文；
+  - `TRUSTED_PROXIES` 默认值语义变更（反代部署需显式配置）；
+  - 带 `Origin` 的浏览器连接默认被拒。
+
+## 验证
+
+- Python：12/12 测试通过（含 relay 集成契约 25/25）、`ruff F821/F811` 通过。
+- Android：`gradle :app:assembleDebug :app:testDebugUnitTest` BUILD SUCCESSFUL
+  （依赖校验开启），单测 224 项 0 失败。
+
+---
+
 # OpenCode Android Remote - Release v5.0.0（长期维护版本）
 
 ## 说明

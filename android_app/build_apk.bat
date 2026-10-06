@@ -11,6 +11,13 @@ if %errorlevel% neq 0 (
 if exist gradlew.bat (
     call gradlew.bat assembleDebug
 ) else (
+    where gradle >nul 2>nul
+    if errorlevel 1 (
+        echo 错误: 既没有 gradlew.bat 也没有系统 gradle，无法构建。
+        pause
+        exit /b 1
+    )
+    echo 提示: 未找到 gradlew.bat（Wrapper 缺失），退回到系统 gradle。
     call gradle assembleDebug
 )
 

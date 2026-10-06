@@ -39,36 +39,16 @@ logger = logging.getLogger("DesktopAgent")
 from modules import config
 
 from modules.keystore import get_or_create_secret, print_pairing_banner, was_secret_just_generated
-
-_e2ee_mod = None
-_e2ee_tried = False
-
-
-def _e2ee():
-    """E2EE 模块懒加载：仅 E2EE_ENABLED=1 时 import。
-
-    cryptography 未安装时返回 None 并打 warning，旧明文流程不受影响。
-    """
-    global _e2ee_mod, _e2ee_tried
-    if os.getenv("E2EE_ENABLED", "0") != "1":
-        return None
-    if not _e2ee_tried:
-        _e2ee_tried = True
-        try:
-            from modules import e2ee as _mod
-            _e2ee_mod = _mod
-            logger.info("E2EE 已启用（X25519 + ChaCha20-Poly1305）")
-        except ImportError:
-            logger.warning("E2EE_ENABLED=1 但未安装 cryptography，已降级为明文流程")
-            _e2ee_mod = None
-    return _e2ee_mod
 from modules.fileops import (
     _resolve_sandboxed_path, _list_dir_entries, _read_text_file, PathNotAllowedError,
     _get_file_roots, _is_duplicate_client_msg,
 )
 from modules.state import (
     tool_guard, known_session_ids, listen_opencode_events_stream,
-    _extract_event_session, _extract_event_delta, task_manager,
+    _extract_event_session, _extract_event_delta, task_manager, send_d2m_secure,
+    # v5.0.1: 统一使用 state 侧的 _e2ee()（此前本文件有一份几乎一样的复制粘贴，
+    # 且两份都静默降级明文；现在只有一份且 fail-closed）
+    _e2ee,
 )
 async def handle_mobile_message(
     msg_data: dict,
@@ -349,11 +329,8 @@ async def handle_mobile_message(
                 "entries": entries,
                 "roots": _get_file_roots(),
             }
-            # v4.6.0: E2EE 开启时目录列表整体加密（不再明文过 relay）
-            _em2 = _e2ee()
-            if _em2 is not None:
-                _msg = _em2.encrypt_outgoing(_msg)
-            await ws_relay.send(json.dumps(_msg))
+            # v5.0.1: 统一 fail-closed 出口（目录列表不再明文过 relay）
+            await send_d2m_secure(ws_relay, _msg)
         except PathNotAllowedError as e:
             logger.warning(f"file_list blocked (sandbox): {req_path}")
             await ws_relay.send(json.dumps({
@@ -383,11 +360,8 @@ async def handle_mobile_message(
                 "content": content,
                 "truncated": truncated
             }
-            # v4.6.0: E2EE 开启时文件内容整体加密（不再明文过 relay）
-            _em2 = _e2ee()
-            if _em2 is not None:
-                _msg = _em2.encrypt_outgoing(_msg)
-            await ws_relay.send(json.dumps(_msg))
+            # v5.0.1: 统一 fail-closed 出口（文件内容不再明文过 relay）
+            await send_d2m_secure(ws_relay, _msg)
         except PathNotAllowedError as e:
             logger.warning(f"file_read blocked (sandbox): {req_path}")
             await ws_relay.send(json.dumps({

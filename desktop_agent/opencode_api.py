@@ -234,6 +234,45 @@ async def _resolve_event_url(
     raise RuntimeError("无法找到 SSE 事件端点（已尝试 /event 与 /global/event）")
 
 
+class SSEFrameParser:
+    """SSE 帧解析状态机（v5.0.2 抽出，便于单测）。
+
+    规范要点：一个事件由若干行组成，以**空行**结束；多条 `data:` 行属于同一事件，
+    用 `\n` 连接后再交给上层。原实现逐行 json.loads，遇到多行 data 时每一行都不是
+    合法 JSON，于是被静默吞掉——整个事件丢失且没有任何日志。
+
+    用法：对每一行调用 feed()（不含换行符），返回完整事件对象或 None；
+    流结束时调用 flush() 处理服务端没发结尾空行的情况。
+    """
+
+    def __init__(self) -> None:
+        self._data: list = []
+
+    def feed(self, line: str):
+        if line.startswith("data:"):
+            self._data.append(line[5:].lstrip())
+            return None
+        # 注释(":")、事件名(event:)、重连间隔(retry:)、id: 都不影响数据内容
+        if line.startswith((":", "event:", "retry:", "id:")):
+            return None
+        if line == "":
+            return self._emit()
+        return None
+
+    def flush(self):
+        return self._emit()
+
+    def _emit(self):
+        if not self._data:
+            return None
+        data_str = "\n".join(self._data)
+        self._data = []
+        stripped = data_str.strip()
+        if not stripped or stripped == "[DONE]":
+            return None
+        return json.loads(data_str)
+
+
 async def subscribe_events_stream(
     session: aiohttp.ClientSession,
     base_url: str = DEFAULT_OPENCODE_BASE_URL,
@@ -263,27 +302,33 @@ async def subscribe_events_stream(
             _resolved_event_path = None
             raise RuntimeError(f"Failed to subscribe to {event_path} stream (HTTP {resp.status}): {err_text}")
 
+        _parser = SSEFrameParser()
         async for line_bytes in resp.content:
-            line = line_bytes.decode("utf-8", errors="replace").strip()
-            if not line:
-                continue
+            line = line_bytes.decode("utf-8", errors="replace").rstrip("\r\n")
 
-            # B-10: 记录 SSE 事件游标
+            # B-10: 记录 SSE 事件游标（id: 行不参与数据拼接）
             if line.startswith("id:"):
                 eid = line[3:].strip()
                 if eid and event_id_sink is not None:
                     event_id_sink["last_event_id"] = eid
                 continue
 
-            if line.startswith("data:"):
-                data_str = line[5:].strip()
-                if not data_str or data_str == "[DONE]":
-                    continue
-                try:
-                    event_data = json.loads(data_str)
-                    yield event_data
-                except Exception:
-                    pass
+            try:
+                event_data = _parser.feed(line)
+            except Exception as e:
+                logger.warning(f"SSE 帧 JSON 解析失败（已丢弃）: {e}")
+                continue
+            if event_data is not None:
+                yield event_data
+
+        # 流结束时若还有未闭合的 data（服务端没发结尾空行），补一次解析
+        try:
+            tail = _parser.flush()
+        except Exception as e:
+            logger.warning(f"SSE 尾帧 JSON 解析失败（已丢弃）: {e}")
+            tail = None
+        if tail is not None:
+            yield tail
 
 
 # ============================================================================

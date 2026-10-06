@@ -1,6 +1,7 @@
 package com.opencode.android.viewmodel
 
 import com.opencode.android.R
+import com.opencode.android.BuildConfig
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -190,11 +191,10 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
                 taskStatusDetail = effectiveDetail,
                 // v3.1: 恢复已选目标电脑（按 profile 隔离）
                 targetDesktopId = prefsManager.getTargetDesktopId(),
-                // v3.2: 安全存储状态（诊断页展示；迁移回退时用户可见）
+                // v5.0.2: 安全存储状态（诊断页展示）。迁移链已删除，
+                // 只剩「Tink 可用 / 不可用」一种判断（不可用时 fail-closed 拒绝保存）。
                 secureStorageInfo = prefsManager.secureStorageInfo,
-                secureStorageOk = !prefsManager.secureMigrationRolledBack && prefsManager.isSecureStorageAvailable,
-                showSecureMigrationNotice = prefsManager.secureMigrationRolledBack &&
-                    !prefsManager.wasSecureMigrationNoticeDismissed()
+                secureStorageOk = prefsManager.isSecureStorageAvailable
             )
         )
 
@@ -285,6 +285,9 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     // =========================================================================
 
     fun triggerMockToolApprovalForTest() {
+        // v5.0.2: 纵深防御——即使有别的调用点（或未来 UI 改动）漏了 debug 门控，
+        // release 构建也不会被骗出一个假审批框。
+        if (!BuildConfig.DEBUG) return
         val sampleDiff = listOf(
             DiffLine(DiffLineType.HEADER, "@@ -12,6 +12,8 @@ class AuthService"),
             DiffLine(DiffLineType.UNCHANGED, "    fun validateToken(token: String): Boolean {"),
@@ -495,8 +498,17 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     fun switchProfile(profileId: String) {
         val profile = prefsManager.getProfiles().firstOrNull { it.id == profileId } ?: return
         viewModelScope.launch {
-            try { relayClient.disconnect() } catch (_: Exception) { }
-            try { cloudClient.cancelCurrentStream() } catch (_: Exception) { }
+            try {
+                relayClient.disconnect()
+            } catch (e: Exception) {
+                // v5.0.2: 此前静默吞掉——切换 profile 时断开失败会掩盖状态不同步
+                AppLog.e("SwitchProfile", "断开 relay 失败: ${e.message}")
+            }
+            try {
+                cloudClient.cancelCurrentStream()
+            } catch (e: Exception) {
+                AppLog.e("SwitchProfile", "取消云端流失败: ${e.message}")
+            }
             prefsManager.setActiveProfileId(profileId)
             _uiState.update {
                 it.copy(
@@ -1002,12 +1014,6 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     /** 打开目标电脑选择列表（Dialog 打开时会自动刷新） */
     fun openDesktopList() {
         _uiState.update { it.copy(showDesktopList = true) }
-    }
-
-    /** v3.2: 关闭安全存储迁移回退提示（只提示一次） */
-    fun dismissSecureMigrationNotice() {
-        prefsManager.dismissSecureMigrationNotice()
-        _uiState.update { it.copy(showSecureMigrationNotice = false) }
     }
 
     // v4.0: 检测到 v3 旧服务端（hello_ack v<4）→ 一次性升级提示（功能可用，不阻断）

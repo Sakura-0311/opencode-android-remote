@@ -7,10 +7,7 @@
 # - OkHttp 4.12.0（META-INF/proguard/okhttp3.pro）
 #
 # 项目代码无反射、无 Gson 解析（org.json 手动解析），Compose 由 AGP 处理。
-
-# security-crypto 1.1.0-alpha06（legacy 加密路径，无 consumer rules；保留至少 1 个版本）
--keep class androidx.security.crypto.** { *; }
--dontwarn androidx.security.crypto.**
+# v5.0.2: security-crypto 依赖与迁移路径已删除，对应的 keep/dontwarn 一并移除。
 
 # Tink Android Keystore 集成（双保险）
 -keep class com.google.crypto.tink.integration.android.** { *; }

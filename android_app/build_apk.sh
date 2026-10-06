@@ -16,9 +16,15 @@ fi
 
 if [ -f "./gradlew" ]; then
     chmod +x ./gradlew
+    # v5.0.1: 仓库终于带上了 Gradle Wrapper（gradle/wrapper/gradle-wrapper.properties
+    # 固定 8.7，与 CI 的 gradle-version 一致），本地构建不再依赖机器上装的 gradle 版本。
     ./gradlew assembleDebug
-else
+elif command -v gradle &> /dev/null; then
+    echo "提示: 未找到 ./gradlew（Wrapper 缺失），退回到系统 gradle：$(gradle --version | grep Gradle)"
     gradle assembleDebug
+else
+    echo "错误: 既没有 ./gradlew 也没有系统 gradle，无法构建。"
+    exit 1
 fi
 
 echo ""

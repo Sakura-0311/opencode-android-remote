@@ -1,0 +1,30 @@
+# v5.0.1: 统一换行符。此前仓库没有任何 .gitattributes，Windows 开发者
+# (core.autocrlf=true) 检出时会把 build_apk.sh / Dockerfile / *.yml 变成 CRLF，
+# 导致 shell 脚本在 Linux/CI/容器里报 "$'\r': command not found"。
+# 规则：脚本与配置一律 LF；Windows 批处理保持 CRLF；二进制不参与转换。
+
+* text=auto eol=lf
+
+*.sh            text eol=lf
+*.py            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.md            text eol=lf
+*.json          text eol=lf
+*.kts           text eol=lf
+*.kt            text eol=lf
+*.properties    text eol=lf
+Dockerfile      text eol=lf
+Caddyfile       text eol=lf
+gradlew         text eol=lf
+*.env.example   text eol=lf
+
+*.bat           text eol=crlf
+gradlew.bat     text eol=crlf
+
+*.jar           binary
+*.apk           binary
+*.aab           binary
+*.png           binary
+*.jks           binary
+*.keystore      binary

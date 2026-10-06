@@ -1,9 +1,14 @@
 name: E2EE Integration (protocol-level)
 
-# v4.3.1: E2EE 协议级联调 — 纯 Python，不依赖 Android 模拟器。
-# mock_desktop（Python）+ mock_mobile（Python，镜像 Kotlin E2eeManager 逻辑）
-# 验证：配对+HMAC验签、X25519密钥交换、HKDF密钥派生、ChaCha20-Poly1305加解密。
-# Kotlin 侧加解密由单测覆盖（E2eeFailClosedTest、HMAC跨语言一致性测试）。
+# v5.0.1: 本 workflow 改为跑「自包含」的 E2EE 协议测试。
+# 原来的版本有两个问题：
+#   1. 直接 `python3 server.py` 但没设 RELAY_ADMIN_TOKEN —— relay 自 v4.7.0 起
+#      强制要求该变量（否则 SystemExit(2)），所以 relay 必然起不来、本 workflow 一直红。
+#   2. 当时被测的 tests/e2ee/e2ee_protocol_test.py 自己复制了一份加密实现
+#      （info/salt/AAD 都与真实实现不同），从不 import 真实模块 —— 真实 E2EE
+#      全坏也会 PASS，属自欺型测试。
+# 现在被测文件已重写为调用真实模块，且不再依赖 relay / websocket-client，
+# relay 自身的启动与镜像另有 ci.yml 的 relay-image-smoke 覆盖。
 # 每周日 10:00 CST 定时跑 + 手动触发。
 
 on:
@@ -24,24 +29,15 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install websocket-client cryptography fastapi "uvicorn[standard]"
+        run: pip install cryptography
 
-      - name: Start relay
-        run: |
-          cd relay_server
-          python3 server.py --port 8765 > /tmp/relay.log 2>&1 &
-          echo $! > /tmp/relay.pid
-          sleep 3
-          curl -sf http://127.0.0.1:8765/api/stats > /dev/null && echo "relay up"
-          # 调试：检查 WS 路由是否存在
-          curl -s -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: test" http://127.0.0.1:8765/ws/test/desktop | head -5
+      - name: E2EE wire-format conformance (doc <-> Python <-> Kotlin)
+        run: python3 tests/e2ee/e2ee_protocol_test.py
 
-      - name: Run E2EE protocol test
+      - name: E2EE real-code chain + interop vectors
         run: |
-          timeout 120 python3 tests/e2ee/e2ee_protocol_test.py
-        # 成功输出 E2EE_PASS；失败输出 E2EE_FAIL 并以非零退出
+          python3 desktop_agent/modules/test_e2ee.py
+          python3 desktop_agent/modules/test_e2ee_v2.py
 
-      - name: Collect logs on failure
-        if: failure()
-        run: |
-          echo "=== relay ==="; tail -30 /tmp/relay.log
+      - name: v5.0.1 hardening regressions
+        run: python3 desktop_agent/modules/test_hardening.py

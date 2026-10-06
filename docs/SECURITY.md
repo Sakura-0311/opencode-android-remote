@@ -19,7 +19,8 @@
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `RELAY_ADMIN_TOKEN` | 空 | **生产必设**。设置后 desktop 首次建房必须携带相符的 `admin_token`，防止 relay 重启后房间被抢注。未设置时启动打印警告 |
-| `TRUSTED_PROXIES` | `127.0.0.1,::1` | 受信任的反向代理 IP（逗号分隔）。只有来自这些地址的连接才信任 `X-Forwarded-For`。relay 放在 Docker/反代后面时必须配置，否则所有用户共用一个 IP，一个人输错 5 次会导致所有人被封 15 分钟 |
+| `TRUSTED_PROXIES` | 空（不信任任何代理） | 受信任的反向代理 IP（逗号分隔）。**只有来自这些地址的连接才采信 `X-Forwarded-For`**。v5.0.1 起默认留空＝完全忽略 XFF（直连部署的正确行为）。此前默认 `127.0.0.1,::1`，而默认部署恰好只绑回环，导致本机任意进程可自带 XFF 伪造来源 IP——既绕过限流，也能反向用受害者 IP 连发失败把正常用户封禁 15 分钟（未认证 DoS）。relay 在 Docker/反代后面时必须显式配置，否则所有用户共用一个 IP |
+| `RELAY_ALLOWED_ORIGINS` | 空（拒绝一切带 Origin 的连接） | v5.0.1 新增：WebSocket `Origin` 白名单（逗号分隔）。原生 App 不发送 `Origin`，留空不影响 App；带 `Origin` 的浏览器连接必须在白名单内，防「任意网页直连本机 relay 发指令」 |
 | `RELAY_STATE_FILE` | `~/.config/opencode-remote/relay_state.json` | 设备密钥持久化文件（0600） |
 | `RELAY_ENABLE_CRASH_REPORT` | `0` | `1` 才开启 `/api/crash-report` 崩溃上报接收 |
 | `RELAY_ROOM_BUFFER_MAX_COUNT` / `RELAY_ROOM_BUFFER_MAX_AGE_SEC` / `RELAY_ROOM_BUFFER_MAX_BYTES` | `1000` / `300` / `4MB` | 房间消息缓冲三重上限 |

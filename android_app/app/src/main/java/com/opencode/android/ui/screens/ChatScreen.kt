@@ -1,6 +1,7 @@
 package com.opencode.android.ui.screens
 
 import com.opencode.android.R
+import com.opencode.android.BuildConfig
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
@@ -169,7 +170,7 @@ fun ChatScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Icon(
                                     imageVector = Icons.Default.ExpandMore,
-                                    contentDescription = "Switch Session",
+                                    contentDescription = stringResource(R.string.chat_n03),
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -227,10 +228,10 @@ fun ChatScreen(
                     },
                     actions = {
                         IconButton(onClick = { isSearchActive = !isSearchActive }) {
-                            Icon(Icons.Default.Search, contentDescription = "Search Log")
+                            Icon(Icons.Default.Search, contentDescription = stringResource(R.string.chat_n04))
                         }
                         IconButton(onClick = { showMoreMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More Options")
+                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.chat_n05))
                         }
 
                         DropdownMenu(
@@ -264,14 +265,21 @@ fun ChatScreen(
                                 },
                                 leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) }
                             )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.chat_005)) },
-                                onClick = {
-                                    showMoreMenu = false
-                                    onTriggerTestApproval()
-                                },
-                                leadingIcon = { Icon(Icons.Default.Gavel, contentDescription = null) }
-                            )
+                            // v5.0.2: 测试用假审批入口只在 debug 构建出现。
+                            // 此前 release 包菜单里也能点到，会弹出假审批框并触发通知，
+                            // 污染真实审批状态——等于一个 release 后门。
+                            if (BuildConfig.DEBUG) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.chat_005)) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        onTriggerTestApproval()
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Gavel, contentDescription = null)
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.chat_006)) },
                                 onClick = {
@@ -335,7 +343,7 @@ fun ChatScreen(
                             )
                             // v1.6 P1 Model/Agent
                             DropdownMenuItem(
-                                text = { Text("Model / Agent") },
+                                text = { Text(stringResource(R.string.model_n03)) },
                                 onClick = {
                                     showMoreMenu = false
                                     onShowModelAgent()
@@ -469,7 +477,7 @@ fun ChatScreen(
                             )
                             if (uiState.logSearchQuery.isNotEmpty()) {
                                 IconButton(onClick = { onSearchLog("") }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.chat_n06), modifier = Modifier.size(16.dp))
                                 }
                             }
                         }
@@ -506,7 +514,7 @@ fun ChatScreen(
                                 )
                             }
                             IconButton(onClick = onDismissError, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.chat_n07), tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -580,7 +588,7 @@ fun ChatScreen(
                             contentColor = Color.White,
                             modifier = Modifier.size(48.dp)
                         ) {
-                            Icon(Icons.Default.Stop, contentDescription = "Stop")
+                            Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.chat_n08))
                         }
                     } else {
                         FloatingActionButton(
@@ -595,7 +603,7 @@ fun ChatScreen(
                             contentColor = Color.White,
                             modifier = Modifier.size(48.dp).testTag("chat_send")
                         ) {
-                            Icon(Icons.Default.Send, contentDescription = "Send")
+                            Icon(Icons.Default.Send, contentDescription = stringResource(R.string.chat_n09))
                         }
                     }
                 }

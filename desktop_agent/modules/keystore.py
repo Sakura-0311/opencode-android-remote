@@ -42,25 +42,9 @@ def _ensure_secret_dir():
     except Exception:
         pass
 
-def _migrate_legacy_secret() -> None:
-    """旧位置（启动目录 .opencode_secret）有有效 secret 且新位置没有时，迁移过去。"""
-    if config.SECRET_FILE_PATH != config._DEFAULT_SECRET_PATH:
-        return  # 用户自定义了位置，不碰
-    if os.path.exists(config._DEFAULT_SECRET_PATH):
-        return
-    if not os.path.exists(config._LEGACY_SECRET_PATH):
-        return
-    try:
-        with open(config._LEGACY_SECRET_PATH, "r", encoding="utf-8") as f:
-            old_key = f.read().strip()
-        if old_key and len(old_key) >= 16:
-            _ensure_secret_dir()
-            fd = os.open(config._DEFAULT_SECRET_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IRUSR | stat.S_IWUSR)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(old_key)
-            logger.info("[v2.2.1-A] 主 Secret 已从旧位置迁移到 %s", config._DEFAULT_SECRET_PATH)
-    except Exception as e:
-        logger.warning(f"[v2.2.1-A] 迁移旧 Secret 失败: {e}")
+# v5.0.2: 删除「旧位置（启动目录 .opencode_secret）→ 新位置」的迁移函数。
+# 项目尚无线上用户，不存在把 secret 留在启动目录的存量部署。
+
 
 # ==============================================================================
 # v4.2.0/V2: 系统级密钥存储（Windows Credential Manager / macOS Keychain）
@@ -118,7 +102,6 @@ def get_or_create_secret() -> str:
         return stored
     if config.SECRET_FILE_PATH == config._DEFAULT_SECRET_PATH:
         _ensure_secret_dir()
-        _migrate_legacy_secret()
     if os.path.exists(config.SECRET_FILE_PATH):
         try:
             with open(config.SECRET_FILE_PATH, "r", encoding="utf-8") as f:

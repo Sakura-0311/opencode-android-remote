@@ -41,6 +41,10 @@ jobs:
           ls app/build/outputs/apk/debug/*.apk
 
       - name: Start relay + fake desktop (host)
+        # v5.0.1: relay 自 v4.7.0 起强制要求 RELAY_ADMIN_TOKEN，缺了会 SystemExit(2)。
+        # 此前本步骤没设该变量，relay 必起不来 → 该 workflow 一直红。
+        env:
+          RELAY_ADMIN_TOKEN: e2e-admin-token-0123456789abcdef
         run: |
           pip install "uvicorn[standard]" websockets
           cd relay_server

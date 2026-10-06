@@ -22,23 +22,14 @@ val TAG_KEY_TO_RES: Map<String, Int> = mapOf(
     TAG_SCRIPT to R.string.tag_script
 )
 
-/** 存量中文标签 → key（一次性迁移）。 */
-private val LEGACY_TAG_TO_KEY: Map<String, String> = mapOf(
-    "全部" to TAG_ALL,
-    "默认" to TAG_DEFAULT,
-    "代码调试" to TAG_DEBUG,
-    "自动化任务" to TAG_AUTO,
-    "脚本生成" to TAG_SCRIPT
-)
-
-/** 内置标签 key 集合（用于区分用户自建标签）。 */
-val BUILTIN_TAG_KEYS: Set<String> = TAG_KEY_TO_RES.keys
-
 /**
- * 存量数据迁移：旧中文标签转 key；已经是 key 或用户自建标签则原样返回。
- * 空/null → default。
+ * 规范化标签：空/null → default；key 或用户自建标签原样返回。
+ *
+ * v5.0.2: 删除「存量中文标签 → key」的迁移映射表。项目尚无线上用户，
+ * 不存在带旧中文标签的存量数据；保留那张表只会让代码里无谓地留一串
+ * 硬编码中文（且看起来像 i18n 遗漏）。
  */
 fun migrateTag(tag: String?): String {
     if (tag.isNullOrEmpty()) return TAG_DEFAULT
-    return LEGACY_TAG_TO_KEY[tag] ?: tag
+    return tag
 }

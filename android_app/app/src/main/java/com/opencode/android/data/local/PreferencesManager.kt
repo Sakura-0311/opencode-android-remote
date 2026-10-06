@@ -17,143 +17,46 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     PairingPrefs, TaskStatusPrefs, DeviceRoutingPrefs {
 
     // P0-3: 加密存储失败时禁止静默降级（fail-closed）。
-    // securePrefs 为 null 表示加密不可用：敏感凭据（Secret / API Key / AccountId）
+    // secure() 为 null 表示加密不可用：敏感凭据（Secret / API Key / AccountId）
     // 拒绝读写；非敏感偏好仍可用普通存储。
     //
-    // v3.2: 保留旧 EncryptedSharedPreferences 实现至少 1 个版本（迁移源 + 回退）。
-    // v4.8.0/M4 评估结论：继续保留——仍是 Tink 迁移源与回退后端，
-    // B3 删除条件（legacyBackendUseCount 完整发版周期为 0）尚未验证，不可删。
-    // 新实现为 Tink AEAD（tink-android）。后端选择见 initSecureBackend()。
-    private val securePrefs: SharedPreferences? = try {
-        val masterKey = androidx.security.crypto.MasterKey.Builder(context)
-            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        androidx.security.crypto.EncryptedSharedPreferences.create(
-            context,
-            PREFS_NAME,
-            masterKey,
-            androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (e: Exception) {
-        android.util.Log.e("PrefsManager", "P0-3: EncryptedSharedPreferences 初始化失败，敏感凭据将被拒绝保存", e)
-        null
-    }
+    // v5.0.2: 删除旧的 EncryptedSharedPreferences(security-crypto) 后端与整条迁移链。
+    // 项目尚无线上用户，不存在需要迁移的存量数据，因此：
+    //   - 不再依赖 androidx.security:security-crypto（官方已弃用、1.1.0-alpha06 多年未更新）；
+    //   - 删除 SecureMigration、LEGACY 回退后端、legacy 使用计数与旧文件清理；
+    //   - 安全存储只剩一种实现：Tink AEAD + Android Keystore 主密钥。
+    // Tink 不可用时 secure() 返回 null，调用方 fail-closed 拒绝写入，绝不落明文。
 
-    /** v3.2: 安全存储后端 */
-    enum class SecureBackend {
-        /**
-         * B3: 已废弃。仅 Tink 不可用或迁移失败时回退使用。
-         * 删除条件：legacyBackendUseCount 在一个完整发版周期内保持为 0，
-         * 且 TESTING_CHECKLIST §9（R-4 真机迁移项）通过。
-         */
-        @Deprecated("B3: LEGACY 后端已废弃，待计数器归零后删除")
-        LEGACY,
-        TINK
-    }
+    /** 安全存储后端（v5.0.2 起只有 Tink 一种；枚举保留以兼容既有调用方与诊断文案） */
+    enum class SecureBackend { TINK }
 
     private val appContext: Context = context.applicationContext ?: context
 
-    /** v3.2: Tink 后端（初始化失败则为 null，走旧实现） */
+    /** Tink 后端；初始化失败为 null → 敏感凭据一律拒绝读写（fail-closed） */
     private val tinkStore: SecureKvStore? = try {
         val aead = TinkKeyManager.getOrCreateAead(appContext)
         val backing = appContext.getSharedPreferences(TINK_BACKING_PREFS, Context.MODE_PRIVATE)
         TinkAeadStore(aead, backing)
     } catch (e: Exception) {
-        android.util.Log.e("PrefsManager", "v3.2: Tink 初始化失败，回退旧加密存储", e)
+        android.util.Log.e("PrefsManager", "Tink 初始化失败，敏感凭据将被拒绝保存（fail-closed）", e)
+        try {
+            com.opencode.android.util.CrashReporting.reportNonFatal(appContext, e)
+        } catch (_: Exception) { }
         null
     }
 
-    /** v3.2: 本次启动是否发生迁移回退（用户可见提示用） */
-    var secureMigrationRolledBack: Boolean = false
-        private set
+    /** 当前生效的安全存储后端 */
+    val secureBackend: SecureBackend = SecureBackend.TINK
 
-    /** v3.2: 当前生效的安全存储后端 */
-    val secureBackend: SecureBackend
-
-    /** v3.2: 诊断页展示的安全存储状态文案 */
-    val secureStorageInfo: String
-
-    init {
-        val (backend, info, rolledBack) = initSecureBackend()
-        secureBackend = backend
-        secureMigrationRolledBack = rolledBack
-        // B3: LEGACY 选中时在诊断信息里带上累计计数，方便判断是否可删
-        secureStorageInfo = if (backend == SecureBackend.LEGACY) {
-            "$info (B3: LEGACY 已废弃，累计使用 ${readLegacyUseCount()} 次)"
-        } else info
+    /** 诊断页展示的安全存储状态文案 */
+    val secureStorageInfo: String = if (tinkStore != null) {
+        appContext.getString(R.string.prefs_006, TinkKeyManager.TINK_VERSION)
+    } else {
+        appContext.getString(R.string.prefs_002)
     }
 
-    /**
-     * B3: LEGACY 后端累计使用次数（每次进程启动选中 LEGACY 即+1，明文偏好，非敏感）。
-     * 删除 LEGACY 后端的前置条件：此计数在一个完整发版周期内保持为 0。
-     */
-    val legacyBackendUseCount: Int get() = readLegacyUseCount()
-
-    private fun readLegacyUseCount(): Int = try {
-        // init 块早于 prefs 初始化，直接用 appContext 读同一文件
-        appContext.getSharedPreferences(PLAIN_PREFS_NAME, Context.MODE_PRIVATE)
-            .getInt(KEY_LEGACY_USE_COUNT, 0)
-    } catch (_: Exception) { 0 }
-
-    /** B3: LEGACY 计数器+1，并打废弃警告日志 */
-    private fun recordLegacyUse(reason: String) {
-        try {
-            val sp = appContext.getSharedPreferences(PLAIN_PREFS_NAME, Context.MODE_PRIVATE)
-            sp.edit().putInt(KEY_LEGACY_USE_COUNT, sp.getInt(KEY_LEGACY_USE_COUNT, 0) + 1).apply()
-        } catch (_: Exception) { }
-        android.util.Log.w("PrefsManager", "B3: LEGACY 安全存储后端已废弃，仍被使用（$reason），计数+1")
-    }
-
-    /**
-     * v3.2: 后端选择 + 迁移。
-     * - Tink 可用：把旧存储数据迁过去（幂等，可补缺失），成功走 TINK；
-     *   迁移失败 → 回退 LEGACY，上报 ACRA，置 rolledBack（旧数据原样保留）。
-     * - Tink 不可用：走 LEGACY。
-     * - 两者都不可用：secure() 返回 null，调用方 fail-closed。
-     */
-    private fun initSecureBackend(): Triple<SecureBackend, String, Boolean> {
-        val legacy = securePrefs?.let { LegacySecureStore(it) }
-        val tink = tinkStore
-        if (tink == null) {
-            recordLegacyUse("Tink 不可用")
-            return Triple(
-                SecureBackend.LEGACY,
-                if (legacy != null) appContext.getString(R.string.prefs_001) else appContext.getString(R.string.prefs_002),
-                false
-            )
-        }
-        if (legacy != null) {
-            when (val r = SecureMigration.migrate(legacy, tink)) {
-                is SecureMigration.Result.Success -> {
-                    appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit().putBoolean(KEY_TINK_MIGRATED, true).apply()
-                    val n = r.migratedKeys.size
-                    val extra = if (n > 0) appContext.getString(R.string.prefs_003, n) else appContext.getString(R.string.prefs_004)
-                    return Triple(SecureBackend.TINK, "Tink ${TinkKeyManager.TINK_VERSION}$extra", false)
-                }
-                is SecureMigration.Result.Failure -> {
-                    android.util.Log.e("PrefsManager", "v3.2: 存储迁移失败 key=${r.failedKey}，回退旧实现", r.cause)
-                    try {
-                        com.opencode.android.util.CrashReporting.reportNonFatal(
-                            appContext,
-                            RuntimeException("SecureMigration 失败已回退: ${r.failedKey}", r.cause)
-                        )
-                    } catch (_: Exception) { }
-                    recordLegacyUse("迁移失败回退 key=${r.failedKey}")
-                    return Triple(SecureBackend.LEGACY, appContext.getString(R.string.prefs_005), true)
-                }
-            }
-        }
-        // 无旧数据：直接走 Tink
-        return Triple(SecureBackend.TINK, appContext.getString(R.string.prefs_006, TinkKeyManager.TINK_VERSION), false)
-    }
-
-    /** v3.2: 当前生效的安全存储；null 表示加密不可用（fail-closed） */
-    private fun secure(): SecureKvStore? = when (secureBackend) {
-        SecureBackend.TINK -> tinkStore
-        SecureBackend.LEGACY -> securePrefs?.let { LegacySecureStore(it) }
-    }
+    /** 当前生效的安全存储；null 表示加密不可用（fail-closed） */
+    private fun secure(): SecureKvStore? = tinkStore
 
     /** 加密存储是否可用；为 false 时禁止保存任何敏感凭据 */
     override val isSecureStorageAvailable: Boolean get() = secure() != null
@@ -216,68 +119,8 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
     }
 
     // v4.0: 非敏感偏好统一走明文存储（敏感 key 只走 secure()，绝不进明文）。
-    // 旧版本数据由 migratePrefsToPlainIfNeeded() 一次性搬运。
     private val prefs: SharedPreferences =
         context.getSharedPreferences(PLAIN_PREFS_NAME, Context.MODE_PRIVATE)
-
-    /**
-     * v4.0: 旧加密存储文件清理（一次性）。
-     * v3.2 迁移后旧 EncryptedSharedPreferences 文件仍保留；本版在 Tink 生效后删除它：
-     * - 非敏感 key 先从旧加密文件搬到明文 prefs（敏感 key 跳过，绝不进明文）；
-     * - Tink 生效时旧文件已无活数据，删除；LEGACY 回退时保留（仍是 live 安全存储）。
-     * 从 v3.1 直接升级的用户：v3.2 的 SecureMigration 先跑（initSecureBackend），
-     * 本清理在其之后执行，顺序安全。
-     */
-    private fun migratePrefsToPlainIfNeeded() {
-        if (prefs.getBoolean(KEY_V4_PREFS_CLEANED, false)) return
-        val old = securePrefs
-        if (old != null) {
-            try {
-                val sensitive = setOf(KEY_ACCOUNT_ID, KEY_SECRET, KEY_CLOUD_API_KEY)
-                val sensitivePrefixes = listOf(KEY_PROFILE_SECRET_PREFIX, KEY_PROFILE_CLOUD_KEY_PREFIX)
-                val editor = prefs.edit()
-                var copied = 0
-                for ((k, v) in old.all) {
-                    if (k in sensitive || sensitivePrefixes.any { k.startsWith(it) }) continue
-                    if (prefs.contains(k)) continue
-                    when (v) {
-                        is String -> editor.putString(k, v)
-                        is Int -> editor.putInt(k, v)
-                        is Long -> editor.putLong(k, v)
-                        is Float -> editor.putFloat(k, v)
-                        is Boolean -> editor.putBoolean(k, v)
-                        is Set<*> -> {
-                            @Suppress("UNCHECKED_CAST")
-                            editor.putStringSet(k, v as Set<String>)
-                        }
-                    }
-                    copied++
-                }
-                editor.apply()
-                android.util.Log.i("PrefsManager", "v4.0: 非敏感偏好迁移 $copied 项到明文存储")
-            } catch (e: Exception) {
-                android.util.Log.w("PrefsManager", "v4.0: 偏好迁移失败，保留旧文件", e)
-                return
-            }
-        }
-        if (secureBackend == SecureBackend.TINK) {
-            try {
-                val deleted = appContext.deleteSharedPreferences(PREFS_NAME)
-                android.util.Log.i("PrefsManager", "v4.0: 旧加密存储文件删除结果=$deleted")
-            } catch (e: Exception) {
-                android.util.Log.w("PrefsManager", "v4.0: 删除旧加密存储文件失败", e)
-            }
-        } else {
-            android.util.Log.i("PrefsManager", "v4.0: LEGACY 回退中，保留旧加密存储文件")
-        }
-        prefs.edit().putBoolean(KEY_V4_PREFS_CLEANED, true).apply()
-    }
-
-    // v2.3: 存储 schema 版本。只增不改 key；变更带幂等迁移。
-    init {
-        migratePrefsToPlainIfNeeded()
-        migrateIfNeeded()
-    }
 
     companion object {
         @Volatile
@@ -304,9 +147,6 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         private const val PREFS_NAME = "opencode_remote_prefs"
         // v4.0: 非敏感偏好明文存储（敏感 key 只走 secure()/Tink）
         private const val PLAIN_PREFS_NAME = "opencode_remote_settings"
-        private const val KEY_V4_PREFS_CLEANED = "v4_prefs_cleaned"
-        private const val KEY_SCHEMA_VERSION = "schema_version"
-        private const val CURRENT_SCHEMA_VERSION = 1
         private const val KEY_APP_MODE = "app_mode"
         private const val KEY_ACCOUNT_ID = "account_id"
         private const val KEY_SECRET = "secret"
@@ -320,8 +160,6 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         private const val KEY_PROFILE_SECRET_PREFIX = "secret_profile_"
         private const val KEY_PROFILE_CLOUD_KEY_PREFIX = "cloud_api_key_profile_"
         private const val KEY_SAVED_SESSIONS = "saved_sessions_json"
-        // B3: LEGACY 后端累计使用计数（明文，非敏感；删 LEGACY 前需归零）
-        private const val KEY_LEGACY_USE_COUNT = "legacy_backend_use_count"
         private const val KEY_SAVED_TAGS = "saved_tags_json"
         // v1.6 P0 后台保活：任务状态持久化
         private const val KEY_TASK_STATUS = "task_status"
@@ -331,10 +169,8 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         private const val DEFAULT_RELAY_URL = ""
         private const val DEFAULT_CLOUD_URL = ""
         private const val DEFAULT_CLOUD_WORKSPACE = "/workspace"
-        // v3.2: Tink 存储
+        // Tink 存储
         private const val TINK_BACKING_PREFS = "opencode_tink_values"
-        private const val KEY_TINK_MIGRATED = "secure_tink_migrated"
-        private const val KEY_MIGRATION_NOTICE_DISMISSED = "secure_migration_notice_dismissed"
         private const val KEY_OLD_RELAY_WARN_PREFIX = "old_relay_warn_dismissed_"
     }
 
@@ -549,73 +385,21 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         return prefs.getStringSet("favorite_projects", emptySet())?.toList() ?: emptyList()
     }
 
-    /**
-     * v2.3: schema 迁移（幂等）。v0→v1：现有 key 保持不变，仅打版本号戳。
-     * 后续版本在此按 version < N 逐级迁移。
-     */
-    private fun migrateIfNeeded() {
-        val current = try {
-            prefs.getInt(KEY_SCHEMA_VERSION, 0)
-        } catch (e: Exception) {
-            0
-        }
-        if (current >= CURRENT_SCHEMA_VERSION) return
-        try {
-            var v = current
-            // v0 -> v1: 无 key 变更，仅记录版本
-            if (v < 1) {
-                v = 1
-            }
-            prefs.edit().putInt(KEY_SCHEMA_VERSION, v).apply()
-        } catch (e: Exception) {
-            android.util.Log.w("PrefsManager", "schema migrate failed", e)
-        }
-    }
-
-    fun getSchemaVersion(): Int {
-        return try {
-            prefs.getInt(KEY_SCHEMA_VERSION, 0)
-        } catch (e: Exception) {
-            0
-        }
-    }
-
     // ============ v2.5: 多连接 profiles ============
 
     /**
-     * 获取全部 profiles。首次调用时把旧单配置迁移为第一个 profile（名为appContext.getString(R.string.prefs_008)），
-     * 并把旧密钥复制到该 profile 的密钥槽；旧 key 保留一个版本作为读取保底。
-     * 迁移失败时返回空列表，调用方应继续使用旧单配置读写（失败保底）。
+     * 获取全部 profiles。
+     *
+     * v5.0.2: 删除「旧单配置 → 首个 profile」的迁移分支。项目尚无线上用户，
+     * 新装即为空列表，由配对页创建第一个 profile；旧 key（KEY_SECRET 等）
+     * 仍作为「当前凭据」被配对页读写，但不再自动生成 legacy_default。
      */
     fun getProfiles(): List<ConnectionProfile> {
         val raw = prefs.getString(KEY_PROFILES, null)
         if (!raw.isNullOrBlank()) {
-            val list = ConnectionProfile.listFromJson(raw)
-            if (list.isNotEmpty()) return list
+            return ConnectionProfile.listFromJson(raw)
         }
-        return try {
-            val legacy = ConnectionProfile(
-                id = "legacy_default",
-                name = appContext.getString(R.string.prefs_008),
-                mode = getAppMode(),
-                relayUrl = getRelayUrl(),
-                accountId = getAccountId(),
-                cloudUrl = getCloudServerUrl(),
-                cloudWorkspace = getCloudWorkspacePath()
-            )
-            secure()?.let { sp ->
-                val oldSecret = getSecret()
-                val oldCloudKey = getCloudApiKey()
-                if (oldSecret.isNotEmpty()) sp.put(KEY_PROFILE_SECRET_PREFIX + legacy.id, oldSecret)
-                if (oldCloudKey.isNotEmpty()) sp.put(KEY_PROFILE_CLOUD_KEY_PREFIX + legacy.id, oldCloudKey)
-            }
-            saveProfiles(listOf(legacy))
-            setActiveProfileId(legacy.id)
-            listOf(legacy)
-        } catch (e: Exception) {
-            android.util.Log.e("PrefsManager", "v2.5: profile 迁移失败，保留旧单配置", e)
-            emptyList()
-        }
+        return emptyList()
     }
 
     fun saveProfiles(list: List<ConnectionProfile>) {
@@ -654,10 +438,16 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         return true
     }
 
-    /** profile 密钥：优先读 profile 槽，空则回退旧单配置 key（迁移保底） */
+    /**
+     * profile 密钥：只读该 profile 自己的槽。
+     *
+     * v5.0.2: 删除对全局 `KEY_SECRET` 的回退。项目尚无线上用户，不存在需要保底的
+     * 存量数据；而保留回退正是「切到一个从未配对过的新 profile 时，把上一个
+     * （全局）房间 secret 发往新 profile 的 relayUrl」这一串号风险的来源。
+     */
     fun getProfileSecret(profileId: String): String {
-        val sp = secure() ?: return ""
-        return sp.get(KEY_PROFILE_SECRET_PREFIX + profileId) ?: getSecret()
+        if (profileId.isEmpty()) return getSecret()
+        return secure()?.get(KEY_PROFILE_SECRET_PREFIX + profileId) ?: ""
     }
 
     fun saveProfileSecret(profileId: String, s: String): Boolean {
@@ -666,9 +456,10 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         return true
     }
 
+    /** profile 云端 Key：只读自己的槽，理由同 [getProfileSecret]。 */
     fun getProfileCloudApiKey(profileId: String): String {
-        val sp = secure() ?: return ""
-        return sp.get(KEY_PROFILE_CLOUD_KEY_PREFIX + profileId) ?: getCloudApiKey()
+        if (profileId.isEmpty()) return getCloudApiKey()
+        return secure()?.get(KEY_PROFILE_CLOUD_KEY_PREFIX + profileId) ?: ""
     }
 
     fun saveProfileCloudApiKey(profileId: String, k: String): Boolean {
@@ -707,13 +498,8 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
 
     /**
      * v3.2: 安全存储迁移回退的一次性用户提示（只弹一次）。
+     * v5.0.2: 迁移链已删除（项目无线上用户），这两个方法随之移除。
      */
-    fun wasSecureMigrationNoticeDismissed(): Boolean =
-        prefs.getString(KEY_MIGRATION_NOTICE_DISMISSED, null) != null
-
-    fun dismissSecureMigrationNotice() {
-        prefs.edit().putString(KEY_MIGRATION_NOTICE_DISMISSED, "1").apply()
-    }
 
     /** v4.0: v3 旧服务端升级提示（每个 relayUrl 只提示一次） */
     fun wasOldRelayWarnDismissed(relayUrl: String): Boolean =

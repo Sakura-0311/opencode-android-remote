@@ -78,6 +78,14 @@ def main(argv=None):
         print(secret)
         return
 
+    # v5.0.1: E2EE 开启时在启动阶段就校验加密库可用（fail-fast）。
+    # 此前缺失 cryptography 只打一条 warning 就继续跑明文，
+    # 用户会以为自己在加密。现在直接拒绝启动。
+    from modules.state import _e2ee as _load_e2ee
+    _mod = _load_e2ee()
+    if _mod is not None:
+        print("[E2EE] 已启用：X25519 + ChaCha20-Poly1305（relay 仅盲转发）")
+
     try:
         if args.command == "pair":
             asyncio.run(run_pairing_flow(account_id, secret, relay_url))

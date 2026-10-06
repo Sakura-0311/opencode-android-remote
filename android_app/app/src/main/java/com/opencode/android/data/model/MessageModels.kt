@@ -133,10 +133,9 @@ data class OpenCodeUiState(
     val targetOfflineHint: String? = null,
     val pendingTargetSwitch: String? = null,
 
-    // v3.2: 安全存储状态（诊断页展示；迁移回退时用户可见）
+    // v5.0.2: 安全存储状态（诊断页展示）。迁移链已删除，只剩可用/不可用
     val secureStorageInfo: String = "",
     val secureStorageOk: Boolean = true,
-    val showSecureMigrationNotice: Boolean = false,
     // v4.0: v3 旧服务端升级提示（hello_ack v<4 时一次性，不阻断）
     val showOldRelayWarning: Boolean = false,
     // v4.3 M-5: E2EE 状态可见——当前目标 desktop 是否已有协商公钥；配对成功一次提示

@@ -121,8 +121,11 @@ class PairingCoordinator(
                         result.desktopDeviceId, result.e2eePeerPubkey, result.e2eePubkeySig)
                     if (!ok) {
                         dispatch.updateState {
+                            // v5.0.2: 文案走资源。本文件本来就用 dispatch.getString(...)，
+                            // 这一处是漏用（Reducer 的红线是「不把 getString 挪进去」，
+                            // 文案由调用方取好传入——这里照做即可）。
                             PairingStateReducer.applyE2eePubkeyResult(
-                                it, false, "对端公钥认证失败，已拒绝（疑似中继篡改）"
+                                it, false, dispatch.getString(R.string.vm_n01)
                             )
                         }
                     } else {

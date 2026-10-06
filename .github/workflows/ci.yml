@@ -37,11 +37,31 @@ jobs:
         run: |
           pip install cryptography
           python desktop_agent/modules/test_e2ee_v2.py
+      - name: Run E2EE conformance + v5.0.1 hardening tests
+        # v5.0.1 新增覆盖（此前完全无测试）：
+        #   test_e2ee.py          钩子/持久化基础用例（此前不在 CI；已改为跨平台）
+        #   e2ee_protocol_test.py 文档↔Python↔Kotlin 线格式一致性 + 真实整链
+        #                         （该文件曾是「不 import 真实实现」的自欺测试）
+        #   test_hardening.py     审批事件契约（permission.updated）+ 多对端 fail-closed
+        #   test_sse_parser.py    SSE 多行 data 不再整帧丢失
+        run: |
+          python desktop_agent/modules/test_e2ee.py
+          python tests/e2ee/e2ee_protocol_test.py
+          python desktop_agent/modules/test_hardening.py
+          python desktop_agent/modules/test_sse_parser.py
       - name: Run relay handler tests
         # v4.8.0/E3: route_message 路由 handler 测试（未认证/限速/定向/扇出）
         run: |
           pip install -r relay_server/requirements.txt
           RELAY_ADMIN_TOKEN=test-admin-token-0123456789abcdef python relay_server/test_handlers.py
+      - name: Run relay crash-report & origin/XFF security tests
+        # v5.0.1: crash_report 单测此前不在 CI；test_security.py 覆盖
+        # XFF 伪造与浏览器 Origin 校验的回归
+        # v5.0.2: test_targeted_fanout.py 覆盖 d2m 定向投递与补发过滤
+        run: |
+          RELAY_ADMIN_TOKEN=test-admin-token-0123456789abcdef python relay_server/test_crash_report.py
+          RELAY_ADMIN_TOKEN=test-admin-token-0123456789abcdef python relay_server/test_security.py
+          RELAY_ADMIN_TOKEN=test-admin-token-0123456789abcdef python relay_server/test_targeted_fanout.py
       - name: Lint undefined names (ruff F821/F811)
         # 未定义名 / 重复定义检查：拦住缺 import 类问题（如 protocol.py 的 NameError）
         run: |
@@ -80,7 +100,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.14.3'
       - name: assembleRelease without keystore must fail
         working-directory: android_app
         run: |
@@ -103,6 +123,16 @@ jobs:
   gen-verification-metadata:
     # v2.6: 手动触发，生成 gradle/verification-metadata.xml（依赖校验和锁定）。
     # 生成后下载提交到仓库，此后所有 Gradle 构建自动校验依赖完整性。
+    #
+    # ⚠️ v5.0.2 注意：本 job 在 ubuntu-latest 上生成，表里只有 **linux** 分类器的
+    # 校验和。Windows 构建取的是 aapt2-…-windows.jar，不在表里 → 构建直接失败：
+    #   "Dependency verification failed ... aapt2-8.5.2-11315950-windows.jar"
+    # 现已把 Windows 条目合并进 verification-metadata.xml（linux 条目保留）。
+    # 以后重新生成时请二选一：
+    #   1) 在 Windows 上再跑一次
+    #      gradle --write-verification-metadata sha256 :app:assembleDebug :app:testDebugUnitTest
+    #      （Gradle 会与现有表合并，linux 条目不会丢），然后把结果提交；
+    #   2) 把本 job 的 runs-on 扩成矩阵，同时跑 ubuntu-latest 与 windows-latest。
     name: Generate dependency verification metadata
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -115,7 +145,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.14.3'
       - name: Write verification metadata
         working-directory: android_app
         run: gradle --write-verification-metadata sha256 :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintVitalAnalyzeRelease :app:cyclonedxBom --no-daemon --console=plain --stacktrace
@@ -140,7 +170,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.14.3'
       # 本地单测（Backoff / AppLog 脱敏 / Transport / Tink 等）
       - name: Run unit tests
         working-directory: android_app
@@ -164,7 +194,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.14.3'
       - name: Build Debug APK
         working-directory: android_app
         run: gradle assembleDebug --no-daemon --console=plain --stacktrace

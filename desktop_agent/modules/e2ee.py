@@ -13,15 +13,24 @@
   可用 E2EE_CONFIG_DIR 环境变量覆盖配置目录（测试用）。
 - 对端公钥：同目录 e2ee_peer_<device_id>.pub（base64，32 字节）
 
-开关：默认关闭；E2EE_ENABLED=1 才启用。未启用 / 未协商 / 字段缺失时，
-所有钩子静默返回原消息，旧明文流程不受影响。
+开关：默认关闭；E2EE_ENABLED=1 才启用。未启用 / 未协商任何对端时，
+钩子返回原消息，旧明文流程不受影响。
+
+但**已启用且已协商对端之后」，内容型消息必须加密**：无法确定唯一对端
+（多台手机）或派生密钥缺失时，`encrypt_outgoing(strict=True)` 抛
+`E2EEUnavailable`，调用方必须 fail-closed 拒绝发送。
+（v5.0.1 修复：此前多对端场景会静默降级为明文，与
+docs/E2EE_WIRE_v1.md「协商后不再明文」的声明不符。）
 
 仅依赖 `cryptography` 库。
 """
 import base64
 import binascii
+import logging
 import os
 import stat
+
+logger = logging.getLogger(__name__)
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
@@ -382,7 +391,24 @@ def decrypt_incoming(msg: dict) -> dict:
     return msg
 
 
-def encrypt_outgoing(msg: dict, peer_device_id: str = None, sender_device_id: str = None) -> dict:
+class E2EEUnavailable(RuntimeError):
+    """E2EE 已启用且已协商对端，但本条内容型消息无法安全加密。
+
+    触发条件：对端不止一台（无法确定加密给谁）或派生密钥缺失。
+    调用方必须 fail-closed（拒发并告知用户），禁止降级为明文。
+    """
+
+
+def resolve_outgoing_peer(peer_device_id: str = None) -> str:
+    """确定本条 d2m 消息的加密对端；无法唯一确定时返回 ""。"""
+    if peer_device_id:
+        return peer_device_id
+    peers = list_peer_ids()
+    return peers[0] if len(peers) == 1 else ""
+
+
+def encrypt_outgoing(msg: dict, peer_device_id: str = None, sender_device_id: str = None,
+                     strict: bool = False) -> dict:
     """发消息钩子（desktop -> mobile）。v4.6.0 内层格式 v2。
 
     已启用、peer 明确（或仅有一个已协商对端）、msg 为内容型消息时：
@@ -392,18 +418,33 @@ def encrypt_outgoing(msg: dict, peer_device_id: str = None, sender_device_id: st
     否则原样返回。
     当前处理的内容型消息：stream_chunk、tool_approval_request、
     file_read_result、file_list_result。
+
+    strict=True 时（v5.0.1）：只要 E2EE 已启用且已协商对端，
+    内容型消息无法加密就抛 E2EEUnavailable，绝不静默返回明文。
     """
     if not is_enabled() or not isinstance(msg, dict):
         return msg
-    peer = peer_device_id
-    if peer is None:
-        peers = list_peer_ids()
-        if len(peers) != 1:
-            return msg  # 对端不明（0 个或多个），不加密
-        peer = peers[0]
+    msg_type = msg.get("type")
+    if msg_type not in ENCRYPTABLE_D2M:
+        return msg  # 非内容型（error/pong/stream_start 等）：按设计不加密
+    peers = list_peer_ids()
+    if not peers:
+        return msg  # E2EE 已开但尚未协商任何对端：沿用明文流程
+    peer = resolve_outgoing_peer(peer_device_id)
+    if not peer:
+        reason = (f"已协商 {len(peers)} 个对端，无法确定加密目标"
+                  if len(peers) > 1 else "未指定对端")
+        if strict:
+            raise E2EEUnavailable(f"{reason}（type={msg_type}）")
+        logger.warning(f"E2EE 不加密 {msg_type}：{reason}，本条将明文发送")
+        return msg
     try:
         _, k_d2m = derive_msg_keys_for_peer(peer)
-    except (KeyError, ValueError):
+    except (KeyError, ValueError) as e:
+        if strict:
+            raise E2EEUnavailable(
+                f"对端 {peer[:8]}… 密钥派生失败（type={msg_type}）: {e}") from e
+        logger.warning(f"E2EE 不加密 {msg_type}：对端 {peer[:8]}… 密钥派生失败，本条将明文发送")
         return msg
     if sender_device_id is None:
         try:
@@ -412,9 +453,6 @@ def encrypt_outgoing(msg: dict, peer_device_id: str = None, sender_device_id: st
         except Exception:
             sender_device_id = "desktop"
     session_id = str(msg.get("session_id", "default"))
-    msg_type = msg.get("type")
-    if msg_type not in ENCRYPTABLE_D2M:
-        return msg
 
     inner = {"type": msg_type, "seq": _next_outgoing_seq(peer)}
     for k, v in msg.items():

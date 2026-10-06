@@ -433,7 +433,10 @@ class CloudApiClient(private val appContext: Context) {
                                 list.add(com.opencode.android.data.model.SessionItem(id = id, title = title, tag = com.opencode.android.util.TAG_DEFAULT))
                             }
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        // v5.0.2: 此前静默吞掉，SSE 帧解析失败会导致消息凭空消失且无迹可查
+                        AppLog.e("CloudSSE", "事件解析失败: ${e.message}")
+                    }
                 }
                 response.close()
                 mainHandler.post { callback(list) }

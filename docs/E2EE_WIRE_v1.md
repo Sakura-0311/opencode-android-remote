@@ -8,8 +8,10 @@
 - 共享密钥：`shared = X25519(priv_self, pub_peer)`。
 - salt：显式 32 零字节（`bytes(32)`），两端严格一致，避免库对空 salt 的边缘处理差异。
 - 消息密钥（方向隔离）：
-  - mobile→desktop：`k_m2d = HKDF-SHA256(shared, salt=b"", info=b"opencode-remote-e2ee-v1-m2d", 32)`
-  - desktop→mobile：`k_d2m = HKDF-SHA256(shared, salt=b"", info=b"opencode-remote-e2ee-v1-d2m", 32)`
+  - mobile→desktop：`k_m2d = HKDF-SHA256(shared, salt=bytes(32), info=b"opencode-remote-e2ee-v1-m2d", 32)`
+  - desktop→mobile：`k_d2m = HKDF-SHA256(shared, salt=bytes(32), info=b"opencode-remote-e2ee-v1-d2m", 32)`
+  > v5.0.1 勘误：此处原写作 `salt=b""`，与上一行的「32 零字节」自相矛盾
+  > （HKDF 空 salt 等价于全零 salt，实现一直是 `bytes(32)` / Kotlin `ByteArray(32)`）。
 
 ## 消息加密
 

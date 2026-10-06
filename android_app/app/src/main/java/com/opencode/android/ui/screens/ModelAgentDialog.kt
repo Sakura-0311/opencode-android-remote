@@ -51,7 +51,7 @@ fun ModelAgentDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Model / Agent", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.model_n03), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Row {
                         IconButton(onClick = onRefresh) {
                             Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.model_001))
@@ -84,8 +84,8 @@ fun ModelAgentDialog(
                 }
 
                 TabRow(selectedTabIndex = tab) {
-                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Agent (${agents.size})") })
-                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Model (${models.size})") })
+                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource(R.string.model_n04, agents.size)) })
+                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.model_n05, models.size)) })
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))

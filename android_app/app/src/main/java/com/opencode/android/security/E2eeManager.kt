@@ -116,15 +116,26 @@ class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
         isAvailable() && !prefs.getE2eePeerPubkey(deviceId).isNullOrEmpty()
 
     /**
-     * v4.3 M-1: 载荷加密结果三态——调用方不可能把「加密失败」误判成「未开启」。
-     * - Plaintext: E2EE 未开启（用户知情），可走明文
-     * - Encrypted: 加密成功
-     * - Failed: E2EE 已开启但加密失败 —— 调用方必须拒绝发送，绝不回退明文
+     * v5.0.2: 失败原因用**错误码**表达，由持有 Context 的 UI 层映射到字符串资源。
+     * 此前这里是中文字符串常量，导致「10 语言」下这几条提示永远是中文；
+     * 但 E2eeManager 是安全类、不持有 Context，所以把文案上移到 UI 才是正解。
      */
+    enum class Failure {
+        /** 本机 E2EE 私钥缺失 */
+        NO_PRIVATE_KEY,
+        /** 尚未与该 desktop 协商公钥；detail = desktopDeviceId */
+        NO_PEER_KEY,
+        /** 本机 relay device_id 缺失，需重新配对 */
+        NO_RELAY_DEVICE_ID,
+        /** 加解密抛异常；detail = 异常信息 */
+        CRYPTO_ERROR
+    }
+
     sealed interface PayloadResult {
         object Plaintext : PayloadResult
         data class Encrypted(val b64: String) : PayloadResult
-        data class Failed(val reason: String) : PayloadResult
+        /** E2EE 已开启但加密失败 —— 调用方必须拒绝发送，绝不回退明文 */
+        data class Failed(val failure: Failure, val detail: String? = null) : PayloadResult
     }
 
     /** 加密发往 desktop 的载荷明文（通常是 payload JSON）。v4.3 起返回三态，不再返回可被误读的 null。 */
@@ -137,14 +148,16 @@ class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
         if (!isAvailable()) return PayloadResult.Plaintext
         return try {
             val priv = prefs.getE2eePrivateKey()
-                ?: return PayloadResult.Failed("本机 E2EE 私钥缺失")
+                ?: return PayloadResult.Failed(Failure.NO_PRIVATE_KEY)
             val peerPub = prefs.getE2eePeerPubkey(desktopDeviceId)
-            if (peerPub.isNullOrBlank()) return PayloadResult.Failed("尚未与 $desktopDeviceId 协商 E2EE 公钥")
+            if (peerPub.isNullOrBlank()) {
+                return PayloadResult.Failed(Failure.NO_PEER_KEY, desktopDeviceId)
+            }
             val keys = E2eeCrypto.deriveMessageKeys(priv, peerPub)
             PayloadResult.Encrypted(E2eeCrypto.encrypt(plaintext, keys.m2d, ownDeviceId, sessionId))
         } catch (e: Exception) {
             AppLog.e("E2EE", "加密失败（fail-closed，不回退明文）: ${e.message}")
-            PayloadResult.Failed(e.message ?: "未知加密错误")
+            PayloadResult.Failed(Failure.CRYPTO_ERROR, e.message)
         }
     }
 
@@ -191,11 +204,13 @@ class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
         if (!isAvailable()) return PayloadResult.Plaintext
         return try {
             val priv = prefs.getE2eePrivateKey()
-                ?: return PayloadResult.Failed("本机 E2EE 私钥缺失")
+                ?: return PayloadResult.Failed(Failure.NO_PRIVATE_KEY)
             val peerPub = prefs.getE2eePeerPubkey(desktopDeviceId)
-            if (peerPub.isNullOrBlank()) return PayloadResult.Failed("尚未与 $desktopDeviceId 协商 E2EE 公钥")
+            if (peerPub.isNullOrBlank()) {
+                return PayloadResult.Failed(Failure.NO_PEER_KEY, desktopDeviceId)
+            }
             val ownId = prefs.getE2eeOwnRelayDeviceId()?.takeIf { it.isNotBlank() }
-                ?: return PayloadResult.Failed("本机 relay device_id 缺失，请重新配对")
+                ?: return PayloadResult.Failed(Failure.NO_RELAY_DEVICE_ID)
             val seq = prefs.getE2eeSeq(desktopDeviceId, "m2d") + 1
             inner.put("seq", seq)
             val keys = E2eeCrypto.deriveMessageKeys(priv, peerPub)
@@ -204,12 +219,17 @@ class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
             PayloadResult.Encrypted(enc)
         } catch (e: Exception) {
             AppLog.e("E2EE", "加密失败（fail-closed，不回退明文）: ${e.message}")
-            PayloadResult.Failed(e.message ?: "未知加密错误")
+            PayloadResult.Failed(Failure.CRYPTO_ERROR, e.message)
         }
     }
 
     /** 撤销设备时清理其公钥。 */
     fun removePeer(deviceId: String) {
-        try { prefs.removeE2eePeerPubkey(deviceId) } catch (_: Exception) { }
+        try {
+            prefs.removeE2eePeerPubkey(deviceId)
+        } catch (e: Exception) {
+            // v5.0.2: 不再静默吞掉——撤销失败意味着旧公钥仍在，值得留痕
+            AppLog.e("E2EE", "清理对端公钥失败 deviceId=$deviceId: ${e.message}")
+        }
     }
 }

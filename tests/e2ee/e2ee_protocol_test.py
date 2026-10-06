@@ -1,185 +1,149 @@
 #!/usr/bin/env python3
-"""
-E2EE 协议级联调（同步版）— 用 websocket-client，不依赖 websockets 异步库。
-流程：relay + mock desktop + mock mobile 全在 Python 里跑，
-验证配对/HMAC/密钥交换/加解密全链路。
+# -*- coding: utf-8 -*-
+"""E2EE 线格式一致性 + 真实代码整链测试（v5.0.1 重写）。
+
+历史问题：本文件曾自己复制一份加密实现（info 用 `opencode-e2ee-d2m`、
+salt=sha256(pub_d||pub_m)、AAD 用 `|`），却从不 import 真实模块，
+于是「真实 E2EE 全坏也会 E2EE_PASS」——是自欺型测试。
+现在改为：
+
+  1. **文档 ↔ Python ↔ Kotlin 三方一致性**（纯文本比对，无需编译 Android）：
+     HKDF info 字符串、salt、AAD 拼接格式必须完全一致。
+     这条能拦住「Python 改了 AAD 分隔符但 Kotlin 没改」这类真实故障。
+  2. **真实代码整链**：只调用 desktop_agent 的真实模块（e2ee.py），
+     手机侧严格按 docs/E2EE_WIRE_v1.md 用真实函数派生/加密，
+     再喂给真实 decrypt_incoming / control_allowed 校验。
+
+无需 relay、无需 websocket-client、无需 Android SDK。
 """
 import base64
-import hashlib
-import hmac
 import json
+import os
+import re
 import sys
-import time
-import urllib.request
+import tempfile
 
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(_ROOT, "desktop_agent", "modules"))
 
-RELAY_WS = "ws://127.0.0.1:8765"
-COORD = "http://127.0.0.1:8080"
-ACCOUNT = "test"
+_tmp = tempfile.mkdtemp(prefix="e2ee_proto_test_")
+os.environ["E2EE_CONFIG_DIR"] = _tmp
+os.environ["E2EE_ENABLED"] = "1"
 
-def b64e(b: bytes) -> str: return base64.b64encode(b).decode()
-def b64d(s: str) -> bytes: return base64.b64decode(s)
+import e2ee  # noqa: E402
 
-def sign_pubkey(master_secret: str, device_id: str, pubkey_b64: str) -> str:
-    # 与 desktop_agent/modules/e2ee.py::sign_pubkey 和 Kotlin E2eeCrypto.hmacPubkeySig 一致
-    msg = f"e2ee-pubkey|{device_id}|{pubkey_b64}".encode()
-    return hmac.new(master_secret.encode(), msg, hashlib.sha256).hexdigest()
-
-def derive_keys(shared: bytes, salt: bytes):
-    d2m = HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"opencode-e2ee-d2m").derive(shared)
-    m2d = HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"opencode-e2ee-m2d").derive(shared)
-    return d2m, m2d
-
-def encrypt(key: bytes, plaintext: str, sender_id: str, session_id: str) -> str:
-    import os
-    aead = ChaCha20Poly1305(key)
-    nonce = os.urandom(12)
-    aad = f"{sender_id}|{session_id}".encode()
-    ct = aead.encrypt(nonce, plaintext.encode(), aad)
-    return b64e(nonce + ct)
-
-def decrypt(key: bytes, enc_b64: str, sender_id: str, session_id: str) -> str:
-    aead = ChaCha20Poly1305(key)
-    raw = b64d(enc_b64)
-    nonce, ct = raw[:12], raw[12:]
-    aad = f"{sender_id}|{session_id}".encode()
-    return aead.decrypt(nonce, ct, aad).decode()
-
-def http_get(path: str) -> str:
-    with urllib.request.urlopen(COORD + path, timeout=10) as r:
-        return r.read().decode()
-
-def main():
-    import websocket
-    websocket.enableTrace(False)
-
-    master_secret = "testsecret"  # 与 relay 测试配置一致
-
-    # --- Desktop 侧 ---
-    desk_priv = X25519PrivateKey.generate()
-    desk_pub_b64 = b64e(desk_priv.public_key().public_bytes_raw())
-    desk_sig = sign_pubkey(master_secret, "mock-desktop-1", desk_pub_b64)
-
-    ws_url_d = f"{RELAY_WS}/ws"
-    print(f"[test] connecting desktop to {ws_url_d}", flush=True)
-    ws_d = None
-    for i in range(5):
-        try:
-            ws_d = websocket.create_connection(ws_url_d, timeout=10)
-            break
-        except Exception as e:
-            print(f"[test] desktop connect attempt {i+1} failed: {e}", flush=True)
-            time.sleep(3)
-    if not ws_d:
-        print("E2EE_FAIL: desktop WS connect failed"); sys.exit(1)
-    ws_d.send(json.dumps({"type": "hello", "v": 4, "capabilities": ["e2ee"], "device_id": "mock-desktop-1"}))
-    assert json.loads(ws_d.recv())["type"] == "hello_ack", "desktop hello failed"
-    ws_d.send(json.dumps({"type": "auth", "account_id": ACCOUNT, "secret": "testsecret",
-                          "client_type": "desktop", "device_id": "mock-desktop-1"}))
-    r = json.loads(ws_d.recv())
-    assert r.get("type") != "auth_error", f"desktop auth failed: {r}"
-    ws_d.send(json.dumps({"type": "create_pairing", "desktop_name": "MockDesktop",
-                          "e2ee_pubkey": desk_pub_b64, "e2ee_pubkey_sig": desk_sig}))
-    r = json.loads(ws_d.recv())
-    assert r.get("type") == "pairing_created", f"pairing failed: {r}"
-    token = r["pairing_token"]
-    print(f"[test] desktop pairing created", flush=True)
-
-    # --- Mobile 侧 ---
-    mob_priv = X25519PrivateKey.generate()
-    mob_pub_b64 = b64e(mob_priv.public_key().public_bytes_raw())
-
-    ws_m = websocket.create_connection(f"{RELAY_WS}/ws", timeout=10)
-    ws_m.send(json.dumps({"type": "pair_claim", "pairing_token": token, "account_id": ACCOUNT,
-                          "device_name": "MockMobile", "e2ee_pubkey": mob_pub_b64}))
-    r = json.loads(ws_m.recv())
-    assert r.get("type") == "pair_success", f"pair_claim failed: {r}"
-    device_secret = r["device_secret"]
-    # HMAC 验签（手动配对模式）
-    exp_sig = sign_pubkey(master_secret, "mock-desktop-1", r["e2ee_pubkey"])
-    assert hmac.compare_digest(exp_sig, r.get("e2ee_pubkey_sig", "")), "HMAC sig mismatch"
-    print(f"[test] mobile paired, HMAC verified", flush=True)
-
-    # Desktop 收到 device_paired（含 mobile 公钥，跳过 ping）
-    ws_d.settimeout(30)
-    r = None
-    for _ in range(10):
-        r = json.loads(ws_d.recv())
-        if r.get("type") == "ping":
-            ws_d.send(json.dumps({"type": "pong"}))
-            continue
-        break
-    assert r.get("type") == "device_paired", f"expected device_paired: {r}"
-    mob_pub_recv = r["e2ee_pubkey"]
-    assert mob_pub_recv == mob_pub_b64, "mobile pubkey mismatch"
-
-    # 双方派生密钥（应一致）
-    salt = hashlib.sha256(b64d(desk_pub_b64) + b64d(mob_pub_b64)).digest()
-    d2m_d, m2d_d = derive_keys(desk_priv.exchange(X25519PublicKey.from_public_bytes(b64d(mob_pub_b64))), salt)
-    d2m_m, m2d_m = derive_keys(mob_priv.exchange(X25519PublicKey.from_public_bytes(b64d(desk_pub_b64))), salt)
-    assert d2m_d == d2m_m and m2d_d == m2d_m, "key derivation mismatch"
-    print(f"[test] keys derived consistently", flush=True)
-
-    # Mobile auth：relay 已在 pair_claim 后关闭连接，需重连；v4.0 先 hello 再 auth
-    try: ws_m.close()
-    except: pass
-    ws_m = websocket.create_connection(f"{RELAY_WS}/ws", timeout=10)
-    ws_m.send(json.dumps({"type": "hello", "v": 4, "capabilities": ["e2ee"], "device_id": "mock-mobile-1"}))
-    r = json.loads(ws_m.recv())
-    assert r.get("type") == "hello_ack", f"mobile hello failed: {r}"
-    ws_m.send(json.dumps({"type": "auth", "account_id": ACCOUNT, "secret": device_secret,
-                          "client_type": "mobile", "device_id": "mock-mobile-1"}))
-    # auth 后 relay 会发 auth_ok + seq_sync（可能还有 resync_required），全部读掉
-    ws_m.settimeout(10)
-    print(f"[test] mobile auth sent, waiting response...", flush=True)
-    for i in range(5):
-        try:
-            raw = ws_m.recv()
-            print(f"[test] mobile auth recv {i}: {raw[:100]}", flush=True)
-            r = json.loads(raw)
-        except Exception as e:
-            print(f"[test] mobile auth recv {i} failed: {e}", flush=True)
-            continue
-        if r.get("type") == "auth_error":
-            print(f"E2EE_FAIL: mobile auth failed: {r}"); sys.exit(1)
-        if r.get("type") == "seq_sync":
-            break
-    print(f"[test] mobile authenticated", flush=True)
-
-    session_id = "test-session-1"
-    plaintext = "hello e2ee integration test"
-    enc = encrypt(m2d_m, plaintext, "mock-mobile-1", session_id)
-    ws_m.send(json.dumps({"action": "send_prompt",
-                          "session_id": session_id, "e2ee": True,
-                          "encrypted_payload": enc, "sender_id": "mock-mobile-1"}))
-    print(f"[test] mobile sent E2EE prompt", flush=True)
-    # 检查 mobile 是否收到错误回包（如 DESKTOP_OFFLINE）
-    ws_m.settimeout(5)
-    try:
-        err = json.loads(ws_m.recv())
-        print(f"[test] mobile got response: {err}", flush=True)
-    except Exception as e:
-        print(f"[test] mobile no immediate response (ok): {e}", flush=True)
-
-    # Desktop 收到并解密（跳过 relay 的 ping）
-    ws_d.settimeout(30)
-    r = None
-    for _ in range(10):
-        r = json.loads(ws_d.recv())
-        if r.get("type") == "ping":
-            ws_d.send(json.dumps({"type": "pong"}))
-            continue
-        break
-    assert r.get("action") == "send_prompt" or r.get("type") == "send_prompt", f"unexpected: {r}"
-    dec = decrypt(m2d_d, r["encrypted_payload"], "mock-mobile-1", session_id)
-    assert "hello e2ee" in dec, f"decrypt mismatch: {dec}"
-    print("E2EE_PASS: full protocol round-trip OK", flush=True)
+PASS = []
 
 
+def check(name, cond):
+    PASS.append(bool(cond))
+    print(f"[{'PASS' if cond else 'FAIL'}] {name}")
+    if not cond:
+        raise AssertionError(name)
 
-if __name__ == "__main__":
-    main()
+
+def read(rel):
+    with open(os.path.join(_ROOT, rel), encoding="utf-8") as f:
+        return f.read()
+
+
+# ==============================================================================
+# 1. 文档 ↔ Python ↔ Kotlin 一致性
+# ==============================================================================
+doc = read("docs/E2EE_WIRE_v1.md")
+kt = read("android_app/app/src/main/java/com/opencode/android/security/E2eeCrypto.kt")
+
+check("Python info 与文档一致",
+      e2ee._INFO_M2D.decode() in doc and e2ee._INFO_D2M.decode() in doc)
+kt_info_m2d = re.search(r'INFO_M2D\s*=\s*"([^"]+)"', kt)
+kt_info_d2m = re.search(r'INFO_D2M\s*=\s*"([^"]+)"', kt)
+check("Kotlin 侧 info 常量存在", bool(kt_info_m2d and kt_info_d2m))
+check("Python 与 Kotlin 的 info 完全一致",
+      kt_info_m2d.group(1) == e2ee._INFO_M2D.decode()
+      and kt_info_d2m.group(1) == e2ee._INFO_D2M.decode())
+
+check("Python AAD 为 sender:session",
+      e2ee._aad("dev1", "sess1") == b"dev1:sess1")
+check("Kotlin AAD 拼接与 Python 相同",
+      '"$senderDeviceId:$sessionId"' in kt)
+# 文档里 AAD 模板必须也是冒号
+check("文档 AAD 模板与实现一致",
+      '"{sender_device_id}:{session_id}"' in doc)
+
+check("两端 salt 均为 32 零字节",
+      "bytes(32)" in doc and "ByteArray(32)" in kt)
+
+# ==============================================================================
+# 2. 真实代码整链：换密钥协商 -> 加密 -> 解密 -> 防重放 -> 控制消息放行
+# ==============================================================================
+desk_priv, desk_pub_b64 = e2ee.get_or_create_keypair()
+mob_priv, mob_pub_raw = e2ee.generate_keypair()
+MOBILE_ID = "mock-mobile-1"
+e2ee.save_peer_pubkey(MOBILE_ID, base64.b64encode(mob_pub_raw).decode("ascii"))
+
+shared_m = e2ee.derive_shared_key(mob_priv, base64.b64decode(desk_pub_b64))
+shared_d = e2ee.derive_shared_key(desk_priv, mob_pub_raw)
+check("两端 ECDH 共享密钥一致", shared_m == shared_d)
+
+k_m2d_m, k_d2m_m = e2ee.derive_msg_keys(shared_m)
+k_m2d_d, k_d2m_d = e2ee.derive_msg_keys_for_peer(MOBILE_ID)
+check("两端方向隔离密钥一致",
+      (k_m2d_m, k_d2m_m) == (k_m2d_d, k_d2m_d))
+check("m2d 与 d2m 方向隔离（不同密钥）", k_m2d_m != k_d2m_m)
+
+# --- m2d：手机侧按线格式构造 {"action","payload","seq"} ---
+session_id = "sess-proto-1"
+inner = {"action": "send_prompt",
+         "payload": {"prompt": "真实整链：你好", "model": {"providerID": "p", "modelID": "m"}},
+         "seq": 1}
+ct = e2ee.encrypt(json.dumps(inner, ensure_ascii=False).encode("utf-8"),
+                  k_m2d_m, MOBILE_ID, session_id)
+msg = {"action": "send_prompt", "session_id": session_id, "payload": {},
+       "e2ee": True, "encrypted_payload": ct}
+out = e2ee.decrypt_incoming(msg)
+check("真实 decrypt_incoming 解密并置 _e2ee_ok", out.get("_e2ee_ok") is True)
+check("payload/action 完整还原",
+      out["action"] == "send_prompt" and out["payload"] == inner["payload"])
+check("协商后合法信封放行控制消息", e2ee.control_allowed("send_prompt", out))
+
+# AAD 篡改（换 session）必须解不开
+bad = dict(msg, session_id="other-session",
+           encrypted_payload=e2ee.encrypt(json.dumps(inner).encode(), k_m2d_m,
+                                          MOBILE_ID, "other-session"))
+check("AAD 绑定生效（跨会话重放被拒）",
+      e2ee.decrypt_incoming(bad).get("_e2ee_failed") is not None)
+
+# 序号重放必须被拒（注意：必须用全新的 dict，真实场景每条消息都是新解析的；
+# 复用已解密过的 dict 会把上一次的 _e2ee_ok 带过来）
+replay = e2ee.decrypt_incoming({"action": "send_prompt", "session_id": session_id,
+                                "payload": {}, "e2ee": True,
+                                "encrypted_payload": ct})
+check("序号重放被拒", replay.get("_e2ee_failed") == "replay/old seq=1")
+check("重放消息 control_allowed 拒绝", not e2ee.control_allowed("send_prompt", replay))
+
+# 明文控制消息在已协商后 fail-closed
+plain = {"action": "send_prompt", "session_id": session_id, "payload": {"prompt": "evil"}}
+check("明文 control 消息被拒（fail-closed）",
+      not e2ee.control_allowed("send_prompt", plain))
+check("明文 ping 不受影响", e2ee.control_allowed("ping", plain))
+
+# --- d2m：真实 encrypt_outgoing -> 手机侧真实 decrypt ---
+enc = e2ee.encrypt_outgoing({"type": "stream_chunk", "session_id": session_id, "chunk": "秘密"},
+                            peer_device_id=MOBILE_ID, sender_device_id="desk-relay-1")
+check("d2m 内容被加密（明文字段不外泄）",
+      enc.get("e2ee") is True and "chunk" not in enc)
+inner_o = json.loads(e2ee.decrypt(enc["encrypted_payload"], k_d2m_m,
+                                  "desk-relay-1", session_id).decode("utf-8"))
+check("手机侧可解开且内容/序号正确",
+      inner_o.get("chunk") == "秘密" and inner_o.get("seq") == 1)
+
+# --- 多对端：strict 必须 fail-closed（回归 v5.0.1）---
+e2ee.save_peer_pubkey("mock-mobile-2", base64.b64encode(mob_pub_raw).decode("ascii"))
+try:
+    e2ee.encrypt_outgoing({"type": "stream_chunk", "session_id": session_id, "chunk": "x"},
+                          strict=True)
+    check("多对端 strict 抛 E2EEUnavailable", False)
+except e2ee.E2EEUnavailable:
+    check("多对端 strict 抛 E2EEUnavailable（不降级明文）", True)
+
+print(f"\n全部 {len(PASS)} 项通过")

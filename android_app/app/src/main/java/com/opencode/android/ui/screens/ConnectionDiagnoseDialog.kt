@@ -299,12 +299,12 @@ private fun copyDiagnosticInfo(context: Context, uiState: OpenCodeUiState) {
         "?"
     }
     val mode = when (uiState.appMode) {
-        com.opencode.android.data.model.AppMode.DESKTOP_RELAY -> "电脑中继"
-        com.opencode.android.data.model.AppMode.CLOUD_HOSTED -> "云端直连"
+        com.opencode.android.data.model.AppMode.DESKTOP_RELAY -> context.getString(R.string.diag_n11)
+        com.opencode.android.data.model.AppMode.CLOUD_HOSTED -> context.getString(R.string.diag_n12)
     }
     // 地址脱敏：只显示 host，不带路径参数
     fun hostOf(url: String): String {
-        if (url.isBlank()) return "未配置"
+        if (url.isBlank()) return context.getString(R.string.diag_n01)
         return try {
             val u = java.net.URI(url)
             u.host ?: url
@@ -317,16 +317,20 @@ private fun copyDiagnosticInfo(context: Context, uiState: OpenCodeUiState) {
         com.opencode.android.data.model.AppMode.CLOUD_HOSTED -> hostOf(uiState.cloudServerUrl)
     }
     val latency = uiState.relayLatencyMs?.let { "$it ms" } ?: "--"
+    // v5.0.2: 原先这里全是硬编码中文，与「10 语言/全部文案已抽取」的说法不符，
+    // 且导出的诊断文本永远只有中文。改为走资源（键沿用项目 _nNN 约定）。
     val text = buildString {
-        appendLine("App 版本：$appVersion")
-        appendLine("连接模式：$mode")
-        appendLine("服务器地址：$address")
-        appendLine("连接状态：${uiState.relayConnectionState}")
-        appendLine("延迟：$latency")
-        appendLine("最近错误：${uiState.appError?.code ?: "无"}")
-        appendLine("Android 版本：${Build.VERSION.RELEASE}")
-        append("设备型号：${Build.MODEL}")
+        appendLine(context.getString(R.string.diag_n03, appVersion))
+        appendLine(context.getString(R.string.diag_n04, mode))
+        appendLine(context.getString(R.string.diag_n05, address))
+        appendLine(context.getString(R.string.diag_n06, uiState.relayConnectionState.toString()))
+        appendLine(context.getString(R.string.diag_n07, latency))
+        appendLine(context.getString(
+            R.string.diag_n08,
+            uiState.appError?.code ?: context.getString(R.string.diag_n13)))
+        appendLine(context.getString(R.string.diag_n09, Build.VERSION.RELEASE))
+        append(context.getString(R.string.diag_n10, Build.MODEL))
     }
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    cm.setPrimaryClip(ClipData.newPlainText("诊断信息", text))
+    cm.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.diag_n02), text))
 }

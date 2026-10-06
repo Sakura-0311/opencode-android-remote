@@ -48,10 +48,10 @@ gradle.taskGraph.whenReady {
 
 android {
     namespace = "com.opencode.android"
-    compileSdk = 35
+    compileSdk = 36
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000；4.0.0 -> 40000）
-    val appVersionName = "5.0.0"
+    val appVersionName = "5.0.2"
     val appVersionCode = appVersionName.split(".").let { p ->
         p[0].toInt() * 10000 + p.getOrElse(1) { "0" }.toInt() * 100 + p.getOrElse(2) { "0" }.toInt()
     }
@@ -59,7 +59,7 @@ android {
     defaultConfig {
         applicationId = "com.opencode.android"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
 
@@ -100,12 +100,12 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        // v5.0.2: 从 Java 8 提到 17（AGP 8.x + JDK 17 的常规目标；1.8 早已过时）
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "1.8"
-    }
+    // v5.0.2: Kotlin 2.4 起 kotlinOptions.jvmTarget 字符串 DSL 已移除，
+    // 改用顶层 kotlin { compilerOptions }（见文件末尾同名的 kotlin 块）
     buildFeatures {
         compose = true
         // B-12: UpdateChecker 需要读取 BuildConfig.VERSION_NAME
@@ -119,37 +119,50 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.12.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
-    implementation("androidx.activity:activity-compose:1.8.2")
+    // v5.0.2: 依赖升级。版本不是「取最新」，而是取**当前工具链能吃下的最新**
+    // ——我逐个读了各版本 AAR 里的 aar-metadata.properties（minCompileSdk / minAgp）：
+    //   core 1.19.x      需要 compileSdk 37 + AGP 9.1   → 用 1.18.0（要求 36 / 8.9.1）
+    //   lifecycle 2.11.x 需要 compileSdk 37 + AGP 9.1   → 用 2.10.0（要求 35 / 8.6.0）
+    //   compose 1.12.x   需要 compileSdk 37 + AGP 9.1   → BOM 2026.05.01 = 1.11.2
+    //   okhttp 5.5.x     需要 compileSdk 37             → 用 5.4.0（要求 36）
+    //   acra 5.14.x      需要 compileSdk 37             → 用 5.13.1
+    // 想要再往前升，前提是把 AGP 提到 9.1+ / Gradle 9 / compileSdk 37，属于整链迁移。
+    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
 
-    // Jetpack Compose
-    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    // Jetpack Compose（BOM 统一管理 compose 各库版本）
+    // v5.0.2: 2024.10.01 → 2026.05.01（Compose 1.11.2）。
+    // 为什么不取最新的 2026.09.00（Compose 1.12.1）：我读了各版本 AAR 的
+    // aar-metadata.properties —— 1.12.x 要求 minCompileSdk=37 且 AGP ≥ 9.1.0，
+    // 落到 AGP 9.x + Gradle 9 的整链迁移；1.11.x 只要求 minCompileSdk=35、AGP ≥ 8.6，
+    // 是当前工具链（AGP 8.13.2 + compileSdk 36）能吃下的最新版本。
+    implementation(platform("androidx.compose:compose-bom:2026.05.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // OkHttp WebSocket Client
-        // Security Crypto for EncryptedSharedPreferences (SEC-05)
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
-    // v3.2: Tink 直连（官方推荐方向）。security-crypto 保留至少 1 个版本：旧实现仍需编译（迁移源+回退）
-    implementation("com.google.crypto.tink:tink-android:1.23.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // OkHttp WebSocket Client（4.12 → 5.4：5.x 已稳定；5.5 起要求 compileSdk 37）
+    // v5.0.2: 删除 androidx.security:security-crypto（EncryptedSharedPreferences）。
+    // 官方已弃用、1.1.0-alpha06 多年未更新；项目尚无线上用户，无存量数据需迁移，
+    // 安全存储统一走下面的 Tink（主密钥由 Android Keystore 保护）。
+    implementation("com.google.crypto.tink:tink-android:1.23.0")  // 已是最大稳定版
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
     // Kotlin Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     // v1.6 P0 扫码配对：CameraX + ML Kit 条码扫描
-    implementation("com.google.mlkit:barcode-scanning:17.2.0")
-    implementation("androidx.camera:camera-camera2:1.3.1")
-    implementation("androidx.camera:camera-lifecycle:1.3.1")
-    implementation("androidx.camera:camera-view:1.3.1")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("androidx.camera:camera-camera2:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-view:1.6.2")
 
     // 对外分发：ACRA 崩溃上报（HTTP Sender，自建 Relay 接收端）
     // 注：排除 auto-service 传递的 Guava，避免与 CameraX 的 ListenableFuture 冲突
-    implementation("ch.acra:acra-http:5.11.3") {
+    implementation("ch.acra:acra-http:5.13.1") {
         exclude(group = "com.google.guava", module = "guava")
     }
 
@@ -163,4 +176,12 @@ dependencies {
     // v4.3.1: E2EE 模拟器联调 instrumentation 测试
     // 注：E2EE 集成测试走 tests/e2ee/ 纯 Python 协议级联调（见 .github/workflows/emulator-e2ee.yml），不依赖 androidTest
     // 注：不用 kotlinx-coroutines-test（会引入未锁定的 kotlin-reflect 2.4.10）；runBlocking 走主依赖的 coroutines-core
+}
+
+// v5.0.2: Kotlin 2.4 起 kotlinOptions.jvmTarget 字符串 DSL 已移除，改用 compilerOptions。
+// 与上面 android.compileOptions 的 Java 17 保持一致。
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
 }

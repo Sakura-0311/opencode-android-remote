@@ -114,7 +114,7 @@ fun SessionsManagementModal(
                                     ) {
                                         Icon(
                                             imageVector = if (session.isPinned) Icons.Default.PushPin else Icons.Default.RadioButtonUnchecked,
-                                            contentDescription = "Pin",
+                                            contentDescription = stringResource(R.string.chat_n01),
                                             tint = if (session.isPinned) MaterialTheme.colorScheme.primary else Color.Gray,
                                             modifier = Modifier.size(16.dp)
                                         )
@@ -128,7 +128,7 @@ fun SessionsManagementModal(
                                         onClick = { onArchive(session.id) },
                                         modifier = Modifier.size(24.dp)
                                     ) {
-                                        Icon(Icons.Default.Archive, contentDescription = "Archive", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Archive, contentDescription = stringResource(R.string.chat_n02), tint = Color.Gray, modifier = Modifier.size(16.dp))
                                     }
                                 }
                             }

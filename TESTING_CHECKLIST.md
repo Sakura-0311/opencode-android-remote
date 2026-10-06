@@ -55,13 +55,17 @@
 ## 7. 卸载重装
 - [ ] 7.1 卸载重装后需重新配对（旧凭据不残留）
 
-## 9. 安全存储迁移（v3.2）
-> 2026-10-05 cloud-device upgrade 模式发现：v3.1.0→v4.3.2 覆盖安装后，迁移抛 SecurityException（Could not decrypt key）回退 LEGACY。
-> 根因：v4.1 加 E2EE 时在 OpenCodeApp 里又 new 了一个 PreferencesManager（给 E2eeManager 用），与 ViewModel 里的实例并存；两个 EncryptedSharedPreferences 实例并发初始化导致 keyset 竞争，旧文件写坏。v3.1.0 只有一个实例所以没事。
-> 修复：PreferencesManager 改为单例（getInstance），已合入 main，CI 全绿。回退是优雅的（无崩溃、不丢数据），但修之前升级用户实际走不到 Tink。
-> 2026-10-05 v4.3.3 发版后 upgrade 模式复验（v3.1.0→v4.3.3，run 37268812609）：通过。logcat 无「存储迁移失败」，ESP keyset 正常写入，keystore 有 tink_master_key，无 FATAL。单例修复生效。
-- [ ] 9.1 从 v3.1.x 覆盖安装 v3.2：配对凭据、profile 密钥保留，无需重新配对
-- [ ] 9.2 菜单 → 连接诊断：「安全存储」层显示 Tink 1.23.0（已迁移），状态 OK
+## 9. 安全存储（v5.0.2：迁移链已删除）
+> 历史（v3.2~v4.3.3，仅作记录）：2026-10-05 cloud-device upgrade 模式发现 v3.1.0→v4.3.2
+> 覆盖安装后迁移抛 SecurityException（Could not decrypt key）回退 LEGACY；根因是
+> PreferencesManager 被 new 了两个实例、EncryptedSharedPreferences keyset 竞争。
+> 当时用单例修复，v3.2~v4.3.3 的实测记录见 git 历史。
+>
+> **v5.0.2 起这套迁移逻辑整体删除**：项目尚无线上用户，不存在需要迁移/回退的存量数据。
+> 现在安全存储只有 Tink AEAD + Android Keystore 一种实现，不再有 LEGACY 分支，
+> 因此本节「从 v3.x 覆盖安装」的用例已无意义，替换为新装验证。
+- [ ] 9.1 全新安装后配对：菜单 → 连接诊断 →「安全存储」显示 Tink 1.23.0
+- [ ] 9.2 故意让 Tink 不可用（或模拟异常）时，配对/保存凭据必须**失败并提示**，不得落明文
 - [ ] 9.3 首次启动无「安全存储提示」弹窗（迁移成功时不打扰）
 - [ ] 9.4 飞行模式/重启后凭据仍可读取（Keystore 持久性）
 

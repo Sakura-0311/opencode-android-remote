@@ -145,7 +145,7 @@ fun PairingScreen(
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = Icons.Default.Code,
-                    contentDescription = "OpenCode Logo",
+                    contentDescription = stringResource(R.string.pair_n01),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(36.dp)
                 )
@@ -344,7 +344,7 @@ fun PairingScreen(
                         IconButton(onClick = { isSecretVisible = !isSecretVisible }) {
                             Icon(
                                 imageVector = if (isSecretVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = "Toggle Secret"
+                                contentDescription = stringResource(R.string.pair_n02)
                             )
                         }
                     }
@@ -502,7 +502,7 @@ fun PairingScreen(
                         IconButton(onClick = { isCloudKeyVisible = !isCloudKeyVisible }) {
                             Icon(
                                 imageVector = if (isCloudKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = "Toggle Cloud Key"
+                                contentDescription = stringResource(R.string.pair_n03)
                             )
                         }
                     }

@@ -57,10 +57,32 @@ else:
 # ==============================================================================
 # P0-3: 内存滑动窗口防爆破与限流器
 # ==============================================================================
-TRUSTED_PROXIES = set(filter(None, os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1").split(",")))
+# v5.0.1: 默认不信任任何代理——必须显式配置 TRUSTED_PROXIES 才采信 X-Forwarded-For。
+# 此前默认信任 127.0.0.1/::1，而默认部署恰好只绑回环，导致本机任意进程
+# 自带 XFF 即可伪造来源 IP：既绕过限流，也能反向用受害者 IP 连发失败
+# 把正常用户 jail 15 分钟（未认证 DoS）。
+TRUSTED_PROXIES = set(filter(None, (os.getenv("TRUSTED_PROXIES", "") or "").split(",")))
+if not TRUSTED_PROXIES:
+    logger.info("TRUSTED_PROXIES 未配置：忽略 X-Forwarded-For（直连部署即为正确行为；"
+                "若 relay 在 Nginx/Caddy 之后，请显式配置反代出口 IP）")
+
+# v5.0.1: WebSocket Origin 白名单（防「任意网页直连本机 relay」）。
+# 原生 App 不发送 Origin，因此空白名单不影响 App；浏览器来源一律拒绝，
+# 除非把可信来源显式写进 RELAY_ALLOWED_ORIGINS（逗号分隔）。
+ALLOWED_ORIGINS = set(filter(None, (os.getenv("RELAY_ALLOWED_ORIGINS", "") or "").split(",")))
+
+
+def origin_allowed(ws: WebSocket) -> bool:
+    """浏览器来源校验：无 Origin（原生客户端）放行；有 Origin 必须在白名单内。"""
+    origin = ws.headers.get("origin")
+    if not origin:
+        return True
+    return origin in ALLOWED_ORIGINS
 
 def get_client_ip(ws: WebSocket) -> str:
     direct = ws.client.host if ws.client else "unknown"
+    if not TRUSTED_PROXIES:
+        return direct
     if direct in TRUSTED_PROXIES:
         xff = ws.headers.get("x-forwarded-for")
         if xff:
@@ -143,6 +165,14 @@ class RateLimiter:
             del self.ip_auth_fails[ip]
 
 
+# v5.0.2: 这些类型不进入 route_message，因此原本完全不受限速（限速只在
+# route_message 里）。已认证客户端可以无限刷 create_pairing（每次生成一次性配对码）、
+# list_devices / list_desktops（每次遍历房间设备表）、revoke_device / rename_device。
+# 单独给它们记一次同样的会话限速。
+CONTROL_MESSAGE_TYPES = frozenset({
+    "create_pairing", "list_devices", "list_desktops", "revoke_device", "rename_device",
+})
+
 rate_limiter = RateLimiter()
 
 # ==============================================================================
@@ -192,10 +222,14 @@ class RoomBuffer:
         self._buf: deque = deque()
         self._bytes: int = 0
 
-    def append(self, seq: int, msg: str) -> None:
+    def append(self, seq: int, msg: str, target_device_id: str = "") -> None:
         now = time.time()
         size = len(msg.encode("utf-8"))
-        self._buf.append({"seq": seq, "msg": msg, "ts": now, "size": size})
+        # v5.0.2: 记录定向目标。desktop 按对端分别加密时会发出多份定向消息，
+        # 补发时必须只把「发给这台手机」的帧还给这台手机，
+        # 否则重连的 A 会收到发给 B 的密文（解不开、还刷错误提示）。
+        self._buf.append({"seq": seq, "msg": msg, "ts": now, "size": size,
+                          "target": target_device_id or ""})
         self._bytes += size
         self._evict(now)
 
@@ -743,6 +777,8 @@ class ConnectionManager:
             # v1.6 P0 断线恢复：分配单调序号并入环形缓冲，供移动端断线重连补发
             seq = room.get("next_seq", 1)
             room["next_seq"] = seq + 1
+            target_id = ""
+            msg_obj = None
             try:
                 msg_obj = json.loads(message_str)
                 if isinstance(msg_obj, dict):
@@ -751,6 +787,9 @@ class ConnectionManager:
                     _src_id = getattr(sender_session, "device_id", "") or ""
                     if _src_id:
                         msg_obj["source_device_id"] = _src_id
+                    # v5.0.2: d2m 定向——desktop 多对端 E2EE 时为每台手机单独加密，
+                    # 用 target_device_id 指明这份密文只属于谁
+                    target_id = str(msg_obj.get("target_device_id", "") or "")
                     sequenced_str = json.dumps(msg_obj)
                 else:
                     sequenced_str = message_str
@@ -758,7 +797,7 @@ class ConnectionManager:
                 sequenced_str = message_str
             buf = room.get("msg_buffer")
             if buf is not None:
-                buf.append(seq, sequenced_str)
+                buf.append(seq, sequenced_str, target_device_id=target_id)
             # v4.7.0/R1: 扇出改 gather+超时——慢连接不再阻塞整个房间，
             # 发送超时（10s）的连接直接断开
             async def _fanout(sess, data):
@@ -774,6 +813,10 @@ class ConnectionManager:
                 except Exception as e:
                     logger.error(f"Error routing desktop -> mobile in {account_id}: {e}")
             targets = list(room.get("mobiles", []))
+            if target_id:
+                # v5.0.2: 定向帧只发给该 device_id；不在线则只留在缓冲里等重连补发
+                targets = [s for s in targets
+                           if (getattr(s, "device_id", "") or "") == target_id]
             if targets:
                 await asyncio.gather(*(_fanout(s, sequenced_str) for s in targets),
                                      return_exceptions=True)
@@ -919,6 +962,13 @@ async def websocket_endpoint(
     path_client_type: Optional[str] = None
 ):
     client_ip = get_client_ip(websocket)
+
+    # 0. v5.0.1: 浏览器来源校验（原生 App 不发 Origin，不受影响）
+    if not origin_allowed(websocket):
+        logger.warning("Rejected WebSocket with disallowed Origin: "
+                       f"{websocket.headers.get('origin')}")
+        await websocket.close(code=4403, reason="Origin not allowed.")
+        return
 
     # 1. 检查 IP 限流
     if not rate_limiter.check_connection_allowed(client_ip):
@@ -1113,9 +1163,15 @@ async def websocket_endpoint(
             last_seq = 0
         room = manager.rooms.get(account_id)
         if room:
-            missed = [m for m in room.get("msg_buffer", []) if m["seq"] > last_seq]
+            _my_id = getattr(session, "device_id", "") or ""
+            # v5.0.2: 先按序号取全部，再按定向目标过滤出「属于这台手机」的帧。
+            # 用 all_after 判断是否需要重同步——否则缓冲里全是别人的定向帧时，
+            # 会误判为「没有可补发的消息」而错误地要求重同步。
+            all_after = [m for m in room.get("msg_buffer", []) if m["seq"] > last_seq]
+            missed = [m for m in all_after
+                      if not m.get("target") or m.get("target") == _my_id]
             # 超过缓冲窗口：明确告知需要重同步，而非静默丢失
-            if last_seq > 0 and not missed and room.get("next_seq", 1) - 1 > last_seq:
+            if last_seq > 0 and not all_after and room.get("next_seq", 1) - 1 > last_seq:
                 await websocket.send_text(json.dumps({
                     "type": "resync_required",
                     "message": "断线时间过长，本地缓存已过期，请重新同步会话状态。",
@@ -1151,6 +1207,13 @@ async def websocket_endpoint(
             
             try:
                 parsed = json.loads(text)
+                # v5.0.2: 控制类消息补上限速（见 CONTROL_MESSAGE_TYPES 注释）
+                if (parsed.get("type") in CONTROL_MESSAGE_TYPES
+                        and not session.check_rate_limit()):
+                    logger.warning(f"R2: 控制消息限速丢弃 "
+                                   f"(type={parsed.get('type')}, "
+                                   f"{session.client_type}/{session.account_id})")
+                    continue
                 if parsed.get("type") == "pong":
                     session.last_pong_time = time.time()
                     continue
@@ -1243,7 +1306,10 @@ if __name__ == "__main__":
     _ap.add_argument("--port", type=int, default=None, help="监听端口（默认 $PORT）")
     _ap.add_argument("--admin-token", default=None, help="建房管理令牌（默认 $RELAY_ADMIN_TOKEN）")
     _ap.add_argument("--trusted-proxies", default=None,
-                     help="信任的代理 IP，逗号分隔（默认 $TRUSTED_PROXIES）")
+                     help="信任的代理 IP，逗号分隔（默认 $TRUSTED_PROXIES；不配置则不采信 XFF）")
+    _ap.add_argument("--allowed-origins", default=None,
+                     help="允许的浏览器 Origin，逗号分隔（默认 $RELAY_ALLOWED_ORIGINS；"
+                          "不配置则拒绝一切带 Origin 的浏览器连接）")
     # v4.7.0/R2: WebSocket 单帧上限（默认 2 MiB；文件预览上限仅 200 KB）
     _ap.add_argument("--ws-max-size", type=int, default=None,
                      help="WebSocket 单帧字节上限（默认 $WS_MAX_SIZE 或 2097152）")
@@ -1253,7 +1319,14 @@ if __name__ == "__main__":
         os.environ["RELAY_ADMIN_TOKEN"] = _args.admin_token
         globals()["RELAY_ADMIN_TOKEN"] = _args.admin_token
     if _args.trusted_proxies is not None:
+        # v5.0.1: 必须同时写 os.environ —— uvicorn.run("server:app") 会再 import
+        # 一份名为 server 的模块对外服务，只改 __main__ 的 globals() 对它无效
+        # （此前 --trusted-proxies 完全失效，只有 --admin-token 因写了 env 才生效）
+        os.environ["TRUSTED_PROXIES"] = _args.trusted_proxies
         globals()["TRUSTED_PROXIES"] = set(filter(None, _args.trusted_proxies.split(",")))
+    if _args.allowed_origins is not None:
+        os.environ["RELAY_ALLOWED_ORIGINS"] = _args.allowed_origins
+        globals()["ALLOWED_ORIGINS"] = set(filter(None, _args.allowed_origins.split(",")))
 
     # v4.7.0/P1-6: 建房令牌强制——未设置或仍为占位符则拒绝启动
     # （否则任何客户端都能建房/抢注 account_id）

@@ -13,10 +13,14 @@
 2. **强制密码保护**：必须配置 `OPENCODE_SERVER_PASSWORD` 强密码（compose 用
    `${OPENCODE_SERVER_PASSWORD:?}` 强制显式指定，严禁弱口令）。
 3. **强制启用 HTTPS**：Caddy 自动申请 Let's Encrypt 证书对外提供 HTTPS。
-4. **暴力破解防护**（v4.7.0/D3）：Caddy 本身只有 HTTP Basic 认证、无失败限流。
-   建议二选一：
+4. **暴力破解防护**（v4.7.0/D3，v5.0.1 更正）：**Caddy 默认配置不提供任何认证**
+   （`Caddyfile` 里没有 `basicauth`，只做 TLS + 反代），**唯一的口令校验来自 opencode
+   自身的 `OPENCODE_SERVER_PASSWORD`，且它没有失败限流**。原文写成「Caddy 本身只有
+   HTTP Basic 认证」会让人误以为边缘已有一层认证，实际没有。建议：
    - 用 Cloudflare Tunnel / Zero Trust 在边缘挡（推荐）；
-   - 或在宿主机装 fail2ban，监控 Caddy 日志里 401 密集的 IP 并封禁。
+   - 或给 Caddy 加 Basic 认证（`Caddyfile` 里已留注释片段，用
+     `caddy hash-password` 生成哈希）；
+   - 或至少装 fail2ban，监控 Caddy 日志里 401 密集的 IP 并封禁。
 
 ---
 
@@ -43,6 +47,13 @@ docker compose up -d
 ---
 
 ## 2. 生产环境推荐：配置 Nginx + HTTPS (SSL)
+
+> ⚠️ **本节与第 1 节互斥，二选一**（v5.0.1 更正）。
+> 第 1 节的 compose **不发布** 4096 端口，只让容器走 Docker 内部网络给 Caddy，
+> 因此照抄下面的 `proxy_pass http://127.0.0.1:4096` **一定连不上**。
+> 如果你要用 Nginx 取代 Caddy，必须显式把端口只发布到宿主机回环：
+> `ports: ["127.0.0.1:4096:4096"]`（**不要**写成 `4096:4096`，那是绑 0.0.0.0）。
+> 用 Caddy 的话就不需要本节。
 
 通过 Nginx 对外提供带有 TLS 加密的访问：
 

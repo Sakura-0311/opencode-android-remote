@@ -92,7 +92,12 @@ with open(os.path.join(_tmp, "e2ee_privkey"), "w", encoding="utf-8") as f:
 os.chmod(os.path.join(_tmp, "e2ee_privkey"), 0o600)
 priv_raw, pub_b64 = e2ee.get_or_create_keypair()
 mode = stat.S_IMODE(os.stat(os.path.join(_tmp, "e2ee_privkey")).st_mode)
-check("私钥文件 0600", mode == 0o600)
+# v5.0.1: POSIX 权限位在 Windows/NTFS 上不可表达（chmod 0600 无效），
+# 仅在 POSIX 平台断言，避免 Windows 开发者本地永远红一条（CI 是 Ubuntu，覆盖仍在）
+if os.name == "posix":
+    check("私钥文件 0600", mode == 0o600)
+else:
+    print("[SKIP] 私钥文件 0600（Windows 无 POSIX 权限位，由 CI(Ubuntu) 覆盖）")
 check("私钥读取一致（本机=B）", priv_raw == priv_b)
 priv_raw2, pub_b64_2 = e2ee.get_or_create_keypair()
 check("私钥持久化（二次读取一致）", priv_raw == priv_raw2 and pub_b64 == pub_b64_2)

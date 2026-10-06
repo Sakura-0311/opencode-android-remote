@@ -161,6 +161,22 @@ data class FileEntry(
 
 class RelayWebSocketClient(private val appContext: Context) {
 
+    /**
+     * v5.0.2: E2EE 失败码 → 本地化文案。全工程唯一把 [E2eeManager.Failure] 变成
+     * 用户可读文字的地方——安全类不持有 Context，文案集中在这里。
+     */
+    private fun e2eeFailureText(r: E2eeManager.PayloadResult.Failed): String =
+        when (r.failure) {
+            E2eeManager.Failure.NO_PRIVATE_KEY -> appContext.getString(R.string.e2ee_n01)
+            E2eeManager.Failure.NO_PEER_KEY ->
+                appContext.getString(R.string.e2ee_n02, r.detail ?: "?")
+            E2eeManager.Failure.NO_RELAY_DEVICE_ID -> appContext.getString(R.string.e2ee_n03)
+            // 异常信息本身是技术细节（多为英文）；没有就用手写兜底文案
+            E2eeManager.Failure.CRYPTO_ERROR ->
+                r.detail ?: appContext.getString(R.string.e2ee_n04)
+        }
+
+
     private val client = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -1108,8 +1124,10 @@ class RelayWebSocketClient(private val appContext: Context) {
             e2eeManager?.encryptInnerForDesktop(inner, effectiveTarget, sessionId)
         } else null
         if (payloadResult is E2eeManager.PayloadResult.Failed) {
-            AppLog.e("E2EE", "发送中止：${payloadResult.reason}")
-            listener?.onError("E2EE 加密失败，已拒绝发送：${payloadResult.reason}")
+            AppLog.e("E2EE", "发送中止：${payloadResult.failure}" +
+                (payloadResult.detail?.let { " / $it" } ?: ""))
+            // v5.0.2: 失败原因是错误码，本地化在这里做（本类持有 Context）
+            listener?.onError(appContext.getString(R.string.relay_n01, e2eeFailureText(payloadResult)))
             return
         }
         val envelope = JSONObject().apply {

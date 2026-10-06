@@ -284,6 +284,32 @@ async def _drain(ws, n=5):
             break
 
 
+async def _recv_business(ws, timeout=3.0, keys=("prompt",)):
+    """v5.0.1: 读一条业务消息，跳过心跳(ping)与广播类控制帧。
+
+    原实现直接 `await ws.recv()` 就断言，于是 relay 的 ping / 设备上下线广播
+    一旦落在窗口内就会被当成业务消息——本用例因此在基线代码上就会间歇性
+    报「target_device_id 路由到 A -- A=True B=True」。改成按关键字过滤后，
+    断言的是「B 没有收到这条 prompt」，而不是「B 没收到任何帧」。
+    """
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return None
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        except asyncio.TimeoutError:
+            return None
+        try:
+            m = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(m, dict) and any(k in m for k in keys):
+            return m
+
+
 async def test_desktop_routing():
     """v3.1: desktop_routing —— target_device_id 定向路由 / 缺省走主 / 目标不存在报错 / source 打标 / list_desktops"""
     dA = await new_ws("desktop")
@@ -302,17 +328,8 @@ async def test_desktop_routing():
     # 1. 带 target_device_id=desk-A：消息应到 A（而非主 B）
     await m.send(json.dumps({"type": "send_prompt", "session_id": "s1",
                              "prompt": "to-A", "target_device_id": "desk-A"}))
-    got_a = got_b = None
-    try:
-        raw = await asyncio.wait_for(dA.recv(), timeout=3)
-        got_a = json.loads(raw)
-    except asyncio.TimeoutError:
-        pass
-    try:
-        raw = await asyncio.wait_for(dB.recv(), timeout=1)
-        got_b = json.loads(raw)
-    except asyncio.TimeoutError:
-        pass
+    got_a = await _recv_business(dA, 3)
+    got_b = await _recv_business(dB, 1)
     check("target_device_id 路由到 A",
           got_a and got_a.get("prompt") == "to-A" and not got_b,
           f"A={bool(got_a)} B={bool(got_b)}")
@@ -320,12 +337,7 @@ async def test_desktop_routing():
     # 2. 不带 target：走主 desktop（B）
     await _drain(dA); await _drain(dB)
     await m.send(json.dumps({"type": "send_prompt", "session_id": "s2", "prompt": "to-primary"}))
-    got_b2 = None
-    try:
-        raw = await asyncio.wait_for(dB.recv(), timeout=3)
-        got_b2 = json.loads(raw)
-    except asyncio.TimeoutError:
-        pass
+    got_b2 = await _recv_business(dB, 3)
     check("无 target 走主 desktop（B）",
           got_b2 and got_b2.get("prompt") == "to-primary", str(bool(got_b2)))
 
@@ -345,11 +357,7 @@ async def test_desktop_routing():
     # 4. desktop->mobile 消息带 source_device_id
     await _drain(m)
     await dA.send(json.dumps({"type": "task_update", "session_id": "s1", "text": "hi"}))
-    fwd = None
-    try:
-        fwd = json.loads(await asyncio.wait_for(m.recv(), timeout=3))
-    except asyncio.TimeoutError:
-        pass
+    fwd = await _recv_business(m, 3, keys=("source_device_id",))
     check("desktop->mobile 带 source_device_id",
           fwd and fwd.get("source_device_id") == "desk-A", str(fwd))
 

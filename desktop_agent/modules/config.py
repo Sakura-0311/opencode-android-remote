@@ -11,7 +11,7 @@ DEFAULT_ACCOUNT_ID = os.getenv("OPENCODE_ACCOUNT_ID", "user_dev_001")
 # v2.2.1-A: 主 Secret 默认移到 ~/.config/opencode-remote/（目录 0700 / 文件 0600）
 _DEFAULT_SECRET_DIR = os.path.join(os.path.expanduser("~"), ".config", "opencode-remote")
 _DEFAULT_SECRET_PATH = os.path.join(_DEFAULT_SECRET_DIR, ".opencode_secret")
-_LEGACY_SECRET_PATH = os.path.abspath(".opencode_secret")
+# v5.0.2: 旧位置（启动目录）迁移路径已删除——项目尚无线上用户，无存量部署。
 SECRET_FILE_PATH = os.getenv("OPENCODE_SECRET_FILE", _DEFAULT_SECRET_PATH)
 SSE_CURSOR_FILE = os.getenv("OPENCODE_SSE_CURSOR_FILE", ".opencode_sse_cursor")
 KNOWN_SESSION_TTL_SEC = float(os.getenv("AGENT_KNOWN_SESSION_TTL_SEC", "3600"))
