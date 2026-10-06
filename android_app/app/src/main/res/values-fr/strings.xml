@@ -633,7 +633,7 @@
     <string name="approval_005">Cette approbation a expiré et ne peut plus être approuvée ni refusée</string>
     <string name="approval_006">Expire dans %1$d secondes</string>
     <string name="vm_041">Le bureau a rejeté cette approbation (%1$s) ; la tâche attend peut-être encore une approbation.</string>
-    <string name="vm_042">L'approbation %1$s a expiré ; rien n'a été envoyé.</string>
+    <string name="vm_042">L\'approbation %1$s a expiré ; rien n\'a été envoyé.</string>
     <string name="chat_055">Se reconnecter</string>
     <string name="chat_056">Reconnexion automatique arrêtée. Vérifiez le réseau et reconnectez-vous manuellement.</string>
 </resources>
