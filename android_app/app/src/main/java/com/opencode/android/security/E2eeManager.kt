@@ -115,7 +115,7 @@ class E2eeManager(private val prefs: E2eePrefs) : PairingE2ee {
     }
 
     /** v5.0.3 (A-1): 最近一次协商成功的对端 deviceId；没有则 null（走明文）。 */
-    fun lastNegotiatedPeerId(): String? =
+    override fun lastNegotiatedPeerId(): String? =
         prefs.getE2eeLastPeerId()?.takeIf { it.isNotBlank() }
 
     private fun constantTimeEq(a: String, b: String): Boolean {

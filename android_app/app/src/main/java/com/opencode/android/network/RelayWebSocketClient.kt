@@ -674,6 +674,8 @@ class RelayWebSocketClient(private val appContext: Context) {
                     return
                 }
                 is RelayMessageParser.Outcome.BadInnerJson -> return
+                // v5.0.3 (C-3): 解析线程已用明文 relay_seq 预检出重复，不解密直接丢弃
+                is RelayMessageParser.Outcome.Duplicate -> return
             }
             // v1.6 P0 断线恢复：幂等去重——服务端补发的消息可能与已收到的重复
             // v2.3: 先 track（内存），处理成功后再 flush 落盘
