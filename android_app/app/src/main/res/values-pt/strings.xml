@@ -143,6 +143,17 @@
     <string name="diag_037">Copiar diagnóstico</string>
     <string name="diag_038">Diagnóstico copiado para a área de transferência</string>
     <string name="diag_039">Latência: %1$d ms</string>
+    <string name="diag_040">Resolução DNS</string>
+    <string name="diag_041">Resolvido: %1$s</string>
+    <string name="diag_042">Falhou: %1$s</string>
+    <string name="diag_043">Sem endereço de destino</string>
+    <string name="diag_044">Resolvendo: %1$s</string>
+    <string name="diag_048">Qualidade da conexão: Boa</string>
+    <string name="diag_049">Qualidade da conexão: Razoável</string>
+    <string name="diag_050">Qualidade da conexão: Ruim</string>
+    <string name="diag_045">Erros recentes</string>
+    <string name="diag_046">%1$s: %2$s</string>
+    <string name="diag_047">%1$d erros no total</string>
     <string name="diag_n01">Não configurado</string>
     <string name="diff_001">Resumo de alterações: </string>
     <string name="diff_002">Ocultar linhas inalteradas</string>
@@ -618,6 +629,8 @@
     <string name="diag_n11">Retransmissão do PC</string>
     <string name="diag_n12">Nuvem direta</string>
     <string name="diag_n13">Nenhum</string>
+    <string name="diag_n14">Qualidade da conexão: %1$s</string>
+    <string name="diag_n15">Erros recentes: %1$d</string>
     <string name="e2ee_n01">A chave privada E2EE deste dispositivo está ausente</string>
     <string name="e2ee_n02">Chave pública E2EE ainda não negociada com %1$s</string>
     <string name="e2ee_n03">relay device_id deste dispositivo ausente; emparede novamente</string>

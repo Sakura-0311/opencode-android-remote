@@ -12,6 +12,7 @@ import com.opencode.android.data.local.MessageStore
 import com.opencode.android.data.model.AppError
 import com.opencode.android.data.model.AppMode
 import com.opencode.android.data.model.ChatMessage
+import com.opencode.android.data.model.ConnectionQuality
 import com.opencode.android.data.model.DiagnosticsResult
 import com.opencode.android.data.model.DiffLine
 import com.opencode.android.data.model.DiffLineType
@@ -96,7 +97,9 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         }
 
         override fun onTransportError(code: String, message: String) {
-            _uiState.update { it.copy(appError = AppError(code, message)) }
+            val err = AppError(code, message)
+            _uiState.update { it.copy(appError = err) }
+            pushRecentError(err)
         }
     }
     private val relayTransport: Transport by lazy { RelayTransport(relayClient, this) }
@@ -257,6 +260,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         private const val MAX_MESSAGES_COUNT = 500
         // P1-5: chunk 批处理间隔（文档建议 30–80ms）
         private const val STREAM_FLUSH_MS = 50L
+        // v5.1 (优化方案 §8): 诊断中心「最近错误」环形缓冲大小
+        private const val MAX_RECENT_ERRORS = 10
     }
 
     fun switchMode(mode: AppMode) {
@@ -497,6 +502,16 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(appError = null) }
     }
 
+    /**
+     * v5.1 (优化方案 §8): 将错误追加到「最近错误」环形缓冲，供诊断中心展示。
+     * 仅保留最近 [MAX_RECENT_ERRORS] 条，避免内存无限增长。
+     */
+    private fun pushRecentError(error: AppError) {
+        _uiState.update { state ->
+            state.copy(recentErrors = (state.recentErrors + error).takeLast(MAX_RECENT_ERRORS))
+        }
+    }
+
     fun sendMessage(content: String) {
         // 阶段 1: 乐观消息构造委托 SendMessageReducer（空内容返回 null 即直接返回）
         val userMsg = SendMessageReducer.buildUserMessage(
@@ -561,6 +576,13 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
         taskStartTimeMs = System.currentTimeMillis()
         taskName = trimmed.take(40)
         taskModifiedFiles.clear()
+        // v5.1 (优化方案 §9): 生成任务 ID 并记录创建时间，供诊断中心与任务恢复使用
+        _uiState.update {
+            it.copy(
+                taskId = UUID.randomUUID().toString(),
+                taskCreatedAtMs = taskStartTimeMs
+            )
+        }
         OpenCodeKeepAliveService.startTaskProgress(
             app,
             app.getString(R.string.vm_020, trimmed.take(30)),
@@ -797,7 +819,12 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     // v4.9.0: 延迟测量回执
     override fun onLatencyMeasured(latencyMs: Long) {
-        _uiState.update { it.copy(relayLatencyMs = latencyMs) }
+        _uiState.update {
+            it.copy(
+                relayLatencyMs = latencyMs,
+                connectionQuality = ConnectionQuality.fromLatency(latencyMs)
+            )
+        }
     }
 
     override fun onDiagnoseResult(reqId: String, opencodeOk: Boolean, version: String, error: String) {
@@ -812,13 +839,15 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onAuthError(error: String) {
+        val err = AppError("AUTH_FAILED", error)
+        pushRecentError(err)
         _uiState.update {
             it.copy(
                 isAuthenticated = false,
                 isRelayConnected = false,
                 isGenerating = false,
                 isPaired = false,
-                appError = AppError("AUTH_FAILED", error),
+                appError = err,
                 statusBanner = null
             )
         }
@@ -970,6 +999,8 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
 
     override fun onAppError(code: String, message: String) {
         OpenCodeKeepAliveService.stopTaskProgress(getApplication())
+        val err = AppError(code, message)
+        pushRecentError(err)
         // v1.6 P0: 任务失败状态 + 失败通知
         setTaskStatus(TaskStatus.FAILED, getApplication<Application>().getString(R.string.vm_030, message))
         OpenCodeKeepAliveService.notifyTaskFailed(
@@ -987,13 +1018,15 @@ class OpenCodeViewModel(application: Application) : AndroidViewModel(application
             state.copy(
                 messages = (state.messages + errorMsg).takeLast(MAX_MESSAGES_COUNT),
                 isGenerating = false,
-                appError = AppError(code, message)
+                appError = err
             )
         }
     }
 
     override fun onError(error: String) {
-        _uiState.update { it.copy(appError = AppError("NETWORK_ERROR", error)) }
+        val err = AppError("NETWORK_ERROR", error)
+        pushRecentError(err)
+        _uiState.update { it.copy(appError = err) }
     }
 
     /**

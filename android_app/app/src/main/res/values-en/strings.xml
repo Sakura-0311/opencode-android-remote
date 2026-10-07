@@ -143,6 +143,17 @@
     <string name="diag_037">Copy diagnostics</string>
     <string name="diag_038">Diagnostics copied to clipboard</string>
     <string name="diag_039">Latency: %1$d ms</string>
+    <string name="diag_040">DNS resolution</string>
+    <string name="diag_041">Resolved: %1$s</string>
+    <string name="diag_042">Failed: %1$s</string>
+    <string name="diag_043">No target address configured</string>
+    <string name="diag_044">Resolving: %1$s</string>
+    <string name="diag_048">Connection quality: Good</string>
+    <string name="diag_049">Connection quality: Fair</string>
+    <string name="diag_050">Connection quality: Poor</string>
+    <string name="diag_045">Recent errors</string>
+    <string name="diag_046">%1$s: %2$s</string>
+    <string name="diag_047">%1$d error record(s) total</string>
     <string name="diag_n01">Not configured</string>
     <string name="diff_001">Change summary: </string>
     <string name="diff_002">Collapse unchanged lines</string>
@@ -618,6 +629,8 @@
     <string name="diag_n11">Desktop relay</string>
     <string name="diag_n12">Cloud direct</string>
     <string name="diag_n13">None</string>
+    <string name="diag_n14">Connection quality: %1$s</string>
+    <string name="diag_n15">Recent errors: %1$d</string>
     <string name="e2ee_n01">This device\'s E2EE private key is missing</string>
     <string name="e2ee_n02">E2EE public key not yet negotiated with %1$s</string>
     <string name="e2ee_n03">This device\'s relay device_id is missing; please pair again</string>

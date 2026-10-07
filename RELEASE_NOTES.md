@@ -1,3 +1,44 @@
+# OpenCode Android Remote - Release v5.1.0（优化方案落地批次）
+
+## 说明
+
+v5.1.0 按 `OpenCode_Android_Remote_v4.8.0_进一步优化与迭代方案.docx` 的对照表，
+在 v5.0.3 基础上补齐仍未落地的优化项。协议 v4 既有帧语义与字段未改动。
+
+## 本次落地项（对照优化方案）
+
+### §3.2 连接质量指标
+- 新增 `ConnectionQuality` 枚举（GOOD / FAIR / POOR / UNKNOWN），
+  由最近一次 ping 往返延迟推导（<150ms 良好 / 150~499ms 一般 / ≥500ms 较差）。
+- `OpenCodeUiState` 新增 `connectionQuality` 字段，`onLatencyMeasured` 同步更新。
+- 诊断中心「WebSocket/鉴权」层追加连接质量分级文案。
+- 单测 `ConnectionQualityTest` 覆盖阈值边界。
+
+### §8 诊断中心增强
+- 新增「DNS 解析」检测层：异步解析目标 host（IO 线程），区分成功/失败/未配置/解析中。
+- 新增「最近错误」层：展示最近一条错误码与信息，以及错误记录总数。
+- 一键复制诊断信息追加「连接质量」与「最近错误数」两项。
+- `OpenCodeUiState` 新增 `recentErrors: List<AppError>` 环形缓冲（最多 10 条），
+  所有错误入口（transport/auth/app/network）统一写入。
+
+### §9 远程任务队列生命周期
+- `OpenCodeUiState` 新增 `taskId` 与 `taskCreatedAtMs` 字段；
+  任务开始（`startTaskUi`）时生成 UUID 并记录创建时间，供诊断与恢复使用。
+
+### §7.3 配置版本化迁移机制
+- `PreferencesManager` 新增 `CONFIG_VERSION` 常量与 `runMigrations()` 方法；
+  迁移注册表 `MIGRATIONS` 支持按版本顺序执行、单步失败不阻断、最终推进版本号。
+- `OpenCodeApp.onCreate` 在读取任何偏好前调用 `runMigrations()`，幂等安全。
+
+## 验证
+- 10 个 locale 的 `strings.xml` 均为合法 XML、key 集合一致（650 键）。
+- 新增 13 个 `diag_*` 文案键覆盖 10 语种。
+- 静态校验：修改文件括号/花括号配平；新增字段均有默认值，不破坏既有调用点。
+- Android 侧未编译（本环境无 Android SDK），请按本地环境跑
+  `./gradlew :app:testDebugUnitTest` 与 `:app:assembleDebug` 验证。
+
+---
+
 # OpenCode Android Remote - Release v5.0.3（优化审查批次）
 
 ## 说明

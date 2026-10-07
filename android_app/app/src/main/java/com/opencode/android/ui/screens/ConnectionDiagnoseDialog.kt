@@ -36,7 +36,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -47,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.opencode.android.data.model.ConnectionQuality
 import com.opencode.android.data.model.OpenCodeUiState
 import com.opencode.android.network.RelayConnectionState
 
@@ -72,7 +79,18 @@ fun ConnectionDiagnoseDialog(
     val context = LocalContext.current
     val phoneNetOk = remember { isPhoneNetworkAvailable(context) }
 
-    val layers = buildLayers(uiState, phoneNetOk)
+    // v5.1 (优化方案 §8): DNS 解析检测——异步解析目标 host，避免主线程网络调用
+    val targetHost = remember(uiState.appMode, uiState.relayUrl, uiState.cloudServerUrl) {
+        val url = if (uiState.appMode == com.opencode.android.data.model.AppMode.CLOUD_HOSTED)
+            uiState.cloudServerUrl else uiState.relayUrl
+        runCatching { java.net.URI(url).host }.getOrDefault("")
+    }
+    var dnsOk by remember(targetHost) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(targetHost) {
+        dnsOk = if (targetHost.isBlank()) null else resolveDns(targetHost)
+    }
+
+    val layers = buildLayers(uiState, phoneNetOk, dnsOk, targetHost)
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -148,13 +166,33 @@ fun ConnectionDiagnoseDialog(
 }
 
 @Composable
-private fun buildLayers(uiState: OpenCodeUiState, phoneNetOk: Boolean): List<DiagnoseLayer> {
+private fun buildLayers(
+    uiState: OpenCodeUiState,
+    phoneNetOk: Boolean,
+    dnsOk: Boolean?,
+    targetHost: String
+): List<DiagnoseLayer> {
     val state = uiState.relayConnectionState
-    return listOf(
+    val layers = mutableListOf(
         DiagnoseLayer(
             name = stringResource(R.string.diag_006),
             status = if (phoneNetOk) LayerStatus.OK else LayerStatus.ERROR,
             detail = if (phoneNetOk) stringResource(R.string.diag_007) else stringResource(R.string.diag_008)
+        ),
+        // v5.1 (优化方案 §8): DNS 解析检测层
+        DiagnoseLayer(
+            name = stringResource(R.string.diag_040),
+            status = when (dnsOk) {
+                true -> LayerStatus.OK
+                false -> LayerStatus.ERROR
+                null -> if (targetHost.isBlank()) LayerStatus.UNKNOWN else LayerStatus.WARN
+            },
+            detail = when {
+                dnsOk == true -> stringResource(R.string.diag_041, targetHost)
+                dnsOk == false -> stringResource(R.string.diag_042, targetHost)
+                targetHost.isBlank() -> stringResource(R.string.diag_043)
+                else -> stringResource(R.string.diag_044, targetHost)
+            }
         ),
         DiagnoseLayer(
             name = stringResource(R.string.diag_009),
@@ -184,7 +222,9 @@ private fun buildLayers(uiState: OpenCodeUiState, phoneNetOk: Boolean): List<Dia
                 RelayConnectionState.AUTH_FAILED -> stringResource(R.string.diag_017)
                 RelayConnectionState.AUTHENTICATED,
                 RelayConnectionState.DESKTOP_ONLINE -> stringResource(R.string.diag_018)
-            } + (uiState.relayLatencyMs?.let { "\n${stringResource(R.string.diag_039, it)}" } ?: "")
+            } + (uiState.relayLatencyMs?.let { "\n${stringResource(R.string.diag_039, it)}" } ?: "") +
+                    // v5.1: 连接质量分级
+                    qualityDetail(uiState.connectionQuality)
         ),
         DiagnoseLayer(
             name = stringResource(R.string.diag_019),
@@ -242,6 +282,23 @@ private fun buildLayers(uiState: OpenCodeUiState, phoneNetOk: Boolean): List<Dia
             detail = uiState.secureStorageInfo.ifBlank { stringResource(R.string.diag_036) }
         )
     )
+    // v5.1 (优化方案 §8): 最近错误层——仅在有记录时展示
+    if (uiState.recentErrors.isNotEmpty()) {
+        val recent = uiState.recentErrors.last()
+        layers.add(
+            DiagnoseLayer(
+                name = stringResource(R.string.diag_045),
+                status = LayerStatus.ERROR,
+                detail = stringResource(
+                    R.string.diag_046,
+                    recent.code,
+                    recent.message.take(80)
+                ) + if (uiState.recentErrors.size > 1)
+                    "\n" + stringResource(R.string.diag_047, uiState.recentErrors.size) else ""
+            )
+        )
+    }
+    return layers.toList()
 }
 
 @Composable
@@ -288,6 +345,28 @@ private fun isPhoneNetworkAvailable(context: Context): Boolean {
 }
 
 /**
+ * v5.1 (优化方案 §8): 异步 DNS 解析，供诊断层调用。
+ * 成功返回 true，失败（无网络/解析超时）返回 false。
+ */
+private suspend fun resolveDns(host: String): Boolean = withContext(Dispatchers.IO) {
+    try {
+        java.net.InetAddress.getByName(host)
+        true
+    } catch (e: Exception) {
+        false
+    }
+}
+
+/** v5.1: 连接质量分级文案（追加在延迟之后） */
+@Composable
+private fun qualityDetail(quality: ConnectionQuality): String = when (quality) {
+    ConnectionQuality.GOOD -> "\n" + stringResource(R.string.diag_048)
+    ConnectionQuality.FAIR -> "\n" + stringResource(R.string.diag_049)
+    ConnectionQuality.POOR -> "\n" + stringResource(R.string.diag_050)
+    ConnectionQuality.UNKNOWN -> ""
+}
+
+/**
  * v4.9.0: 一键复制诊断信息。中文标签，地址只取 host 脱敏，
  * 不含 secret / API key 等敏感字段。
  */
@@ -317,6 +396,14 @@ private fun copyDiagnosticInfo(context: Context, uiState: OpenCodeUiState) {
         com.opencode.android.data.model.AppMode.CLOUD_HOSTED -> hostOf(uiState.cloudServerUrl)
     }
     val latency = uiState.relayLatencyMs?.let { "$it ms" } ?: "--"
+    // v5.1: 连接质量与最近错误数（诊断信息导出，便于用户自助定位）
+    val qualityLabel = when (uiState.connectionQuality) {
+        ConnectionQuality.GOOD -> context.getString(R.string.diag_048)
+        ConnectionQuality.FAIR -> context.getString(R.string.diag_049)
+        ConnectionQuality.POOR -> context.getString(R.string.diag_050)
+        ConnectionQuality.UNKNOWN -> context.getString(R.string.diag_n13)
+    }
+    val recentErrCount = uiState.recentErrors.size
     // v5.0.2: 原先这里全是硬编码中文，与「10 语言/全部文案已抽取」的说法不符，
     // 且导出的诊断文本永远只有中文。改为走资源（键沿用项目 _nNN 约定）。
     val text = buildString {
@@ -325,9 +412,11 @@ private fun copyDiagnosticInfo(context: Context, uiState: OpenCodeUiState) {
         appendLine(context.getString(R.string.diag_n05, address))
         appendLine(context.getString(R.string.diag_n06, uiState.relayConnectionState.toString()))
         appendLine(context.getString(R.string.diag_n07, latency))
+        appendLine(context.getString(R.string.diag_n14, qualityLabel))
         appendLine(context.getString(
             R.string.diag_n08,
             uiState.appError?.code ?: context.getString(R.string.diag_n13)))
+        appendLine(context.getString(R.string.diag_n15, recentErrCount))
         appendLine(context.getString(R.string.diag_n09, Build.VERSION.RELEASE))
         append(context.getString(R.string.diag_n10, Build.MODEL))
     }

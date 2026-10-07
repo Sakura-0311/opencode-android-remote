@@ -143,6 +143,17 @@
     <string name="diag_037">Copiar diagnóstico</string>
     <string name="diag_038">Diagnóstico copiado al portapapeles</string>
     <string name="diag_039">Latencia: %1$d ms</string>
+    <string name="diag_040">Resolución DNS</string>
+    <string name="diag_041">Resuelto: %1$s</string>
+    <string name="diag_042">Falló: %1$s</string>
+    <string name="diag_043">Sin dirección de destino</string>
+    <string name="diag_044">Resolviendo: %1$s</string>
+    <string name="diag_048">Calidad de conexión: Buena</string>
+    <string name="diag_049">Calidad de conexión: Regular</string>
+    <string name="diag_050">Calidad de conexión: Mala</string>
+    <string name="diag_045">Errores recientes</string>
+    <string name="diag_046">%1$s: %2$s</string>
+    <string name="diag_047">%1$d errores en total</string>
     <string name="diag_n01">Sin configurar</string>
     <string name="diff_001">Resumen de cambios: </string>
     <string name="diff_002">Ocultar líneas sin cambios</string>
@@ -618,6 +629,8 @@
     <string name="diag_n11">Retransmisión de PC</string>
     <string name="diag_n12">Nube directa</string>
     <string name="diag_n13">Ninguno</string>
+    <string name="diag_n14">Calidad de conexión: %1$s</string>
+    <string name="diag_n15">Errores recientes: %1$d</string>
     <string name="e2ee_n01">Falta la clave privada E2EE de este dispositivo</string>
     <string name="e2ee_n02">Aún no se ha negociado la clave pública E2EE con %1$s</string>
     <string name="e2ee_n03">Falta el relay device_id de este dispositivo; vuelve a emparejar</string>

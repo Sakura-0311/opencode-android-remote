@@ -143,6 +143,17 @@
     <string name="diag_037">نسخ التشخيص</string>
     <string name="diag_038">تم نسخ التشخيص إلى الحافظة</string>
     <string name="diag_039">زمن الاستجابة: %1$d مللي ثانية</string>
+    <string name="diag_040">تحليل DNS</string>
+    <string name="diag_041">تم التحليل: %1$s</string>
+    <string name="diag_042">فشل التحليل: %1$s</string>
+    <string name="diag_043">لا يوجد عنوان مستهدف</string>
+    <string name="diag_044">جارٍ التحليل: %1$s</string>
+    <string name="diag_048">جودة الاتصال: جيدة</string>
+    <string name="diag_049">جودة الاتصال: مقبولة</string>
+    <string name="diag_050">جودة الاتصال: ضعيفة</string>
+    <string name="diag_045">الأخطاء الأخيرة</string>
+    <string name="diag_046">%1$s: %2$s</string>
+    <string name="diag_047">إجمالي الأخطاء: %1$d</string>
     <string name="diag_n01">غير مُهيأ</string>
     <string name="diff_001">نظرة عامة على التغييرات: </string>
     <string name="diff_002">طي الأسطر غير المتغيرة</string>
@@ -618,6 +629,8 @@
     <string name="diag_n11">مرحّل الكمبيوتر</string>
     <string name="diag_n12">سحابة مباشرة</string>
     <string name="diag_n13">لا يوجد</string>
+    <string name="diag_n14">جودة الاتصال: %1$s</string>
+    <string name="diag_n15">عدد الأخطاء الأخيرة: %1$d</string>
     <string name="e2ee_n01">مفتاح E2EE الخاص بهذا الجهاز مفقود</string>
     <string name="e2ee_n02">لم يتم بعد تبادل مفتاح E2EE العام مع %1$s</string>
     <string name="e2ee_n03">معرّف relay device_id لهذا الجهاز مفقود؛ أعد الاقتران</string>

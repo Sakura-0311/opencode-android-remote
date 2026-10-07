@@ -144,6 +144,17 @@
     <string name="diag_037">Копировать диагностику</string>
     <string name="diag_038">Диагностика скопирована в буфер обмена</string>
     <string name="diag_039">Задержка: %1$d ms</string>
+    <string name="diag_040">Разрешение DNS</string>
+    <string name="diag_041">Разрешено: %1$s</string>
+    <string name="diag_042">Не удалось: %1$s</string>
+    <string name="diag_043">Адрес не задан</string>
+    <string name="diag_044">Разрешается: %1$s</string>
+    <string name="diag_048">Качество соединения: Хорошо</string>
+    <string name="diag_049">Качество соединения: Средне</string>
+    <string name="diag_050">Качество соединения: Плохо</string>
+    <string name="diag_045">Недавние ошибки</string>
+    <string name="diag_046">%1$s: %2$s</string>
+    <string name="diag_047">Всего ошибок: %1$d</string>
     <string name="diag_n01">Не настроено</string>
     <string name="diff_001">Обзор изменений: </string>
     <string name="diff_002">Свернуть неизменённые строки</string>
@@ -619,6 +630,8 @@
     <string name="diag_n11">Релей ПК</string>
     <string name="diag_n12">Прямое облако</string>
     <string name="diag_n13">Нет</string>
+    <string name="diag_n14">Качество соединения: %1$s</string>
+    <string name="diag_n15">Недавних ошибок: %1$d</string>
     <string name="e2ee_n01">Отсутствует закрытый ключ E2EE этого устройства</string>
     <string name="e2ee_n02">Открытый ключ E2EE ещё не согласован с %1$s</string>
     <string name="e2ee_n03">Отсутствует relay device_id этого устройства; выполните сопряжение заново</string>

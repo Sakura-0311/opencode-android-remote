@@ -143,6 +143,20 @@
     <string name="diag_037">复制诊断信息</string>
     <string name="diag_038">诊断信息已复制到剪贴板</string>
     <string name="diag_039">延迟：%1$d ms</string>
+    <!-- v5.1 (优化方案 §8): DNS 解析检测 -->
+    <string name="diag_040">DNS 解析</string>
+    <string name="diag_041">已解析：%1$s</string>
+    <string name="diag_042">解析失败：%1$s</string>
+    <string name="diag_043">未配置目标地址</string>
+    <string name="diag_044">正在解析：%1$s</string>
+    <!-- v5.1 (优化方案 §8): 连接质量分级 -->
+    <string name="diag_048">连接质量：良好</string>
+    <string name="diag_049">连接质量：一般</string>
+    <string name="diag_050">连接质量：较差</string>
+    <!-- v5.1 (优化方案 §8): 最近错误 -->
+    <string name="diag_045">最近错误</string>
+    <string name="diag_046">%1$s：%2$s</string>
+    <string name="diag_047">共 %1$d 条错误记录</string>
     <string name="diag_n01">未配置</string>
     <string name="diff_001">改动概览: </string>
     <string name="diff_002">收起未变动行</string>
@@ -619,6 +633,9 @@
     <string name="diag_n11">电脑中继</string>
     <string name="diag_n12">云端直连</string>
     <string name="diag_n13">无</string>
+    <!-- v5.1 (优化方案 §8): 诊断信息导出附加项 -->
+    <string name="diag_n14">连接质量：%1$s</string>
+    <string name="diag_n15">最近错误数：%1$d</string>
     <string name="e2ee_n01">本机 E2EE 私钥缺失</string>
     <string name="e2ee_n02">尚未与 %1$s 协商 E2EE 公钥</string>
     <string name="e2ee_n03">本机 relay device_id 缺失，请重新配对</string>

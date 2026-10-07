@@ -51,7 +51,7 @@ android {
     compileSdk = 36
 
     // B-12: versionCode 随 versionName 自动递增（2.0.0 -> 20000；4.0.0 -> 40000）
-    val appVersionName = "5.0.3"
+    val appVersionName = "5.1.0"
     // v5.0.3 (C-5): 次版本与补丁号必须 < 100，否则 5.0.100 与 5.1.0 会算出同一个
     // versionCode（50099+1 撞 50100）。这里直接 fail-fast，不靠人记住。
     val appVersionCode = appVersionName.split(".").let { p ->

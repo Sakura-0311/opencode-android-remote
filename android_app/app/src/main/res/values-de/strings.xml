@@ -143,6 +143,17 @@
     <string name="diag_037">Diagnose kopieren</string>
     <string name="diag_038">Diagnose in Zwischenablage kopiert</string>
     <string name="diag_039">Latenz: %1$d ms</string>
+    <string name="diag_040">DNS-Auflösung</string>
+    <string name="diag_041">Aufgelöst: %1$s</string>
+    <string name="diag_042">Fehlgeschlagen: %1$s</string>
+    <string name="diag_043">Keine Zieladresse konfiguriert</string>
+    <string name="diag_044">Wird aufgelöst: %1$s</string>
+    <string name="diag_048">Verbindungsqualität: Gut</string>
+    <string name="diag_049">Verbindungsqualität: Mittel</string>
+    <string name="diag_050">Verbindungsqualität: Schlecht</string>
+    <string name="diag_045">Letzte Fehler</string>
+    <string name="diag_046">%1$s: %2$s</string>
+    <string name="diag_047">%1$d Fehler gesamt</string>
     <string name="diag_n01">Nicht konfiguriert</string>
     <string name="diff_001">Änderungsübersicht: </string>
     <string name="diff_002">Unveränderte Zeilen einklappen</string>
@@ -618,6 +629,8 @@
     <string name="diag_n11">PC-Relay</string>
     <string name="diag_n12">Cloud-Direkt</string>
     <string name="diag_n13">Keine</string>
+    <string name="diag_n14">Verbindungsqualität: %1$s</string>
+    <string name="diag_n15">Letzte Fehler: %1$d</string>
     <string name="e2ee_n01">Der private E2EE-Schlüssel dieses Geräts fehlt</string>
     <string name="e2ee_n02">E2EE-Schlüssel wurde mit %1$s noch nicht ausgetauscht</string>
     <string name="e2ee_n03">relay device_id dieses Geräts fehlt; bitte neu koppeln</string>

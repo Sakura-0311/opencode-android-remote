@@ -143,6 +143,17 @@
     <string name="diag_037">Copier le diagnostic</string>
     <string name="diag_038">Diagnostic copié dans le presse-papiers</string>
     <string name="diag_039">Latence : %1$d ms</string>
+    <string name="diag_040">Résolution DNS</string>
+    <string name="diag_041">Résolu : %1$s</string>
+    <string name="diag_042">Échec : %1$s</string>
+    <string name="diag_043">Aucune adresse cible</string>
+    <string name="diag_044">Résolution : %1$s</string>
+    <string name="diag_048">Qualité de connexion : Bonne</string>
+    <string name="diag_049">Qualité de connexion : Moyenne</string>
+    <string name="diag_050">Qualité de connexion : Faible</string>
+    <string name="diag_045">Erreurs récentes</string>
+    <string name="diag_046">%1$s : %2$s</string>
+    <string name="diag_047">%1$d erreur(s) au total</string>
     <string name="diag_n01">Non configuré</string>
     <string name="diff_001">Aperçu des modifications : </string>
     <string name="diff_002">Réduire les lignes inchangées</string>
@@ -618,6 +629,8 @@
     <string name="diag_n11">Relais PC</string>
     <string name="diag_n12">Cloud direct</string>
     <string name="diag_n13">Aucun</string>
+    <string name="diag_n14">Qualité de connexion : %1$s</string>
+    <string name="diag_n15">Erreurs récentes : %1$d</string>
     <string name="e2ee_n01">La clé privée E2EE de cet appareil est absente</string>
     <string name="e2ee_n02">Clé publique E2EE pas encore négociée avec %1$s</string>
     <string name="e2ee_n03">relay device_id de cet appareil manquant ; réappairez</string>

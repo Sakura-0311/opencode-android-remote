@@ -144,6 +144,17 @@
     <string name="diag_037">診断情報をコピー</string>
     <string name="diag_038">診断情報をクリップボードにコピーしました</string>
     <string name="diag_039">遅延：%1$d ms</string>
+    <string name="diag_040">DNS解決</string>
+    <string name="diag_041">解決済み：%1$s</string>
+    <string name="diag_042">解決失敗：%1$s</string>
+    <string name="diag_043">対象アドレス未設定</string>
+    <string name="diag_044">解決中：%1$s</string>
+    <string name="diag_048">接続品質：良好</string>
+    <string name="diag_049">接続品質：普通</string>
+    <string name="diag_050">接続品質：悪い</string>
+    <string name="diag_045">最近のエラー</string>
+    <string name="diag_046">%1$s：%2$s</string>
+    <string name="diag_047">合計 %1$d 件のエラー</string>
     <string name="diag_n01">未設定</string>
     <string name="diff_001">変更概要: </string>
     <string name="diff_002">変更なしの行を折りたたむ</string>
@@ -619,6 +630,8 @@
     <string name="diag_n11">PC リレー</string>
     <string name="diag_n12">クラウド直結</string>
     <string name="diag_n13">なし</string>
+    <string name="diag_n14">接続品質：%1$s</string>
+    <string name="diag_n15">最近のエラー数：%1$d</string>
     <string name="e2ee_n01">本機の E2EE 秘密鍵が見つかりません</string>
     <string name="e2ee_n02">%1$s と E2EE 公開鍵をまだ交換していません</string>
     <string name="e2ee_n03">本機の relay device_id がありません。再ペアリングしてください</string>

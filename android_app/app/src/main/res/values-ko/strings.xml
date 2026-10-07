@@ -144,6 +144,17 @@
     <string name="diag_037">진단 정보 복사</string>
     <string name="diag_038">진단 정보가 클립보드에 복사됨</string>
     <string name="diag_039">지연: %1$d ms</string>
+    <string name="diag_040">DNS 확인</string>
+    <string name="diag_041">확인됨: %1$s</string>
+    <string name="diag_042">실패: %1$s</string>
+    <string name="diag_043">대상 주소 없음</string>
+    <string name="diag_044">확인 중: %1$s</string>
+    <string name="diag_048">연결 품질: 좋음</string>
+    <string name="diag_049">연결 품질: 보통</string>
+    <string name="diag_050">연결 품질: 나쁨</string>
+    <string name="diag_045">최근 오류</string>
+    <string name="diag_046">%1$s: %2$s</string>
+    <string name="diag_047">총 %1$d개 오류</string>
     <string name="diag_n01">구성되지 않음</string>
     <string name="diff_001">변경 개요: </string>
     <string name="diff_002">변경 없는 줄 접기</string>
@@ -619,6 +630,8 @@
     <string name="diag_n11">PC 릴레이</string>
     <string name="diag_n12">클라우드 직접 연결</string>
     <string name="diag_n13">없음</string>
+    <string name="diag_n14">연결 품질: %1$s</string>
+    <string name="diag_n15">최근 오류 수: %1$d</string>
     <string name="e2ee_n01">이 기기의 E2EE 개인 키가 없습니다</string>
     <string name="e2ee_n02">%1$s와(과) E2EE 공개 키를 아직 교환하지 않았습니다</string>
     <string name="e2ee_n03">이 기기의 relay device_id가 없습니다. 다시 페어링하세요</string>

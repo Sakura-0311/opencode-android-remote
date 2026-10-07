@@ -43,6 +43,27 @@ enum class TaskStatus(@StringRes val labelRes: Int) {
     DISCONNECTED(R.string.msg_status_disconnected)
 }
 
+/**
+ * v5.1: 连接质量分级（优化方案 §3.2「Ping/延迟/连接质量指标」）。
+ * 由最近一次 ping 往返延迟推导，阈值参考常见移动网络体感：
+ * - GOOD: < 150ms，交互流畅
+ * - FAIR: 150~499ms，可用但偶有迟滞
+ * - POOR: >= 500ms，明显卡顿，建议检查网络
+ * - UNKNOWN: 尚未测到延迟
+ */
+enum class ConnectionQuality {
+    GOOD, FAIR, POOR, UNKNOWN;
+
+    companion object {
+        fun fromLatency(latencyMs: Long?): ConnectionQuality = when {
+            latencyMs == null -> UNKNOWN
+            latencyMs < 150L -> GOOD
+            latencyMs < 500L -> FAIR
+            else -> POOR
+        }
+    }
+}
+
 data class ChatMessage(
     val id: String,
     val role: MessageRole,
@@ -113,6 +134,9 @@ data class OpenCodeUiState(
     val taskStatusDetail: String = "",
     // P2-13: 任务中心用——当前任务开始时间戳
     val taskStartTimeMs: Long = 0L,
+    // v5.1 (优化方案 §9): 任务生命周期追踪——任务 ID 与创建时间，便于诊断与恢复
+    val taskId: String = "",
+    val taskCreatedAtMs: Long = 0L,
     // v1.6 P0 多设备管理：已配对设备列表
     val pairedDevices: List<DeviceInfo> = emptyList(),
     // v1.6 P1 Model/Agent：可用列表与当前选择
@@ -165,6 +189,8 @@ data class OpenCodeUiState(
     val relayConnectionState: RelayConnectionState = RelayConnectionState.DISCONNECTED,
     // v4.9.0: 诊断中心用——最近一次 ping/pong 往返延迟毫秒数，未测到为 null
     val relayLatencyMs: Long? = null,
+    // v5.1 (优化方案 §3.2): 连接质量分级，由 relayLatencyMs 推导
+    val connectionQuality: ConnectionQuality = ConnectionQuality.UNKNOWN,
     // v2.5: 云端直连状态机；顶部状态条按 appMode 二选一订阅显示
     val cloudConnectionState: CloudConnectionState = CloudConnectionState.DISCONNECTED,
     // v2.5: 多连接 profiles
@@ -204,5 +230,7 @@ data class OpenCodeUiState(
 
     val messages: List<ChatMessage> = emptyList(),
     val appError: AppError? = null,
+    // v5.1 (优化方案 §8 诊断中心「最近错误」): 最近 N 条错误的环形缓冲，供诊断页展示
+    val recentErrors: List<AppError> = emptyList(),
     val statusBanner: String? = null
 )

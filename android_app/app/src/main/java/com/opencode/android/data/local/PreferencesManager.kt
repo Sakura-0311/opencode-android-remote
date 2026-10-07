@@ -201,6 +201,51 @@ class PreferencesManager private constructor(context: Context) : com.opencode.an
         // Tink 存储
         private const val TINK_BACKING_PREFS = "opencode_tink_values"
         private const val KEY_OLD_RELAY_WARN_PREFIX = "old_relay_warn_dismissed_"
+        // v5.1 (优化方案 §7.3): 配置 schema 版本——为版本化迁移提供锚点
+        private const val KEY_CONFIG_VERSION = "config_version"
+        /** 当前配置 schema 版本。每次需迁移时 +1，并在 [MIGRATIONS] 注册迁移步骤。 */
+        const val CONFIG_VERSION = 1
+    }
+
+    // ============ v5.1 (优化方案 §7.3): 配置版本化迁移机制 ============
+
+    /**
+     * 配置迁移步骤：[fromVersion] -> [toVersion]。
+     * 按版本顺序执行；任一步骤抛异常都不会阻止后续步骤（记日志继续），
+     * 最终把版本号推进到 [CONFIG_VERSION]。
+     */
+    private data class Migration(val from: Int, val to: Int, val run: () -> Unit)
+
+    /**
+     * 迁移注册表。当前无存量用户，暂无实际迁移步骤；
+     * 后续新增配置字段变更时在此注册，例如：
+     *   Migration(1, 2) { /* 把旧字段搬到新字段 */ }
+     */
+    private val MIGRATIONS: List<Migration> = emptyList()
+
+    /**
+     * 启动时调用：读取当前配置版本，顺序执行未完成的迁移，再把版本号写回。
+     * 幂等：已迁移到最新版本时直接返回。
+     */
+    fun runMigrations() {
+        val current = prefs.getInt(KEY_CONFIG_VERSION, 0)
+        if (current >= CONFIG_VERSION) return
+        var ver = current
+        for (m in MIGRATIONS.sortedBy { it.from }) {
+            if (m.from != ver) continue
+            try {
+                m.run()
+                ver = m.to
+                android.util.Log.i("PrefsManager", "配置迁移 ${m.from} -> ${m.to} 完成")
+            } catch (e: Exception) {
+                android.util.Log.e("PrefsManager", "配置迁移 ${m.from} -> ${m.to} 失败", e)
+                // 不阻断：继续尝试后续迁移，避免某次失败导致永远停在旧版本
+            }
+        }
+        // 无论是否有步骤执行，都把版本推进到当前（缺省迁移 = 直接接受新结构）
+        if (ver != current || current < CONFIG_VERSION) {
+            prefs.edit().putInt(KEY_CONFIG_VERSION, CONFIG_VERSION).apply()
+        }
     }
 
     fun getAppMode(): AppMode {
