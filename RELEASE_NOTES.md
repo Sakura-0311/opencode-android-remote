@@ -879,3 +879,9 @@ export OPENCODE_SERVER_PASSWORD="your_secure_password"
 export GEMINI_API_KEY="AIzaSy..."
 docker compose up -d
 ```
+
+---
+
+## 封版说明（2026-10-07）
+
+v5.1.0 为当前封版版本。协议 v4 已冻结，后续只做兼容修复与安全更新，不再主动迭代新功能。
