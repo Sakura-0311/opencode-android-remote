@@ -1,9 +1,12 @@
 # OpenCode Android Remote (OpenCode 原生安卓远程客户端)
 
+[English](README_EN.md) | **中文版**
+
 把电脑与云端上的 OpenCode 编码 Agent，装进你的手机。
 
 基于 **Kotlin + Jetpack Compose** 构建，结合手机移动端的使用场景，提供**“电脑远程中继 (Desktop Relay)”**与**“云端工作区直连 (Cloud Hosted)”**双模支持。
 
+> **维护状态**：v5.1.0 为当前封版版本。协议 v4 已冻结，后续只做兼容修复与安全更新，不再主动迭代新功能。
 > 隐私说明：[PRIVACY.md](PRIVACY.md) —— 你的数据只保存在你自己的手机上，只发往你自己配置的服务器。
 
 ---
@@ -113,40 +116,44 @@
 
 ```
 .
-├── README.md                                # 项目使用与安全指南
-├── docs/archive/                            # 历史报告归档（含 v1.x 优化报告）
-├── scripts/
-│   └── smoke_test_contract.py               # OpenCode 官方真实契约端到端自动化冒烟测试
-├── cloud_server/                            # 云端直连 Docker 部署
-│   ├── docker-compose.yml                   # 仅绑定 127.0.0.1 安全配置
-│   └── README.md                            # 云端部署与 Nginx 反代配置说明
-├── desktop_agent/                           # 电脑端代理桥接 (Python)
-│   ├── agent.py                             # 电脑端长连接守护与 /event 订阅
-│   ├── opencode_api.py                      # 官方真实 REST/SSE HTTP API 客户端
+├── README.md / README_EN.md               # 项目使用与安全指南（中文 / English）
+├── PRIVACY.md                             # 隐私说明
+├── RELEASE_NOTES.md                       # 各版本发版记录
+├── TESTING_CHECKLIST.md                   # 手动测试清单
+├── docs/                                  # 设计文档（E2EE 线路协议、威胁模型、
+│                                          # 迁移说明、安全须知等）
+├── cloud_server/                          # 云端直连 Docker 部署
+│   ├── docker-compose.yml                 # 仅绑定 127.0.0.1 安全配置
+│   ├── Caddyfile
+│   └── README.md                          # 云端部署与反代配置说明
+├── desktop_agent/                         # 电脑端代理桥接 (Python)
+│   ├── agent.py                           # 电脑端长连接守护与 /event 订阅
+│   ├── opencode_api.py                    # 官方真实 REST/SSE HTTP API 客户端
+│   ├── endpoints.py                       # 端点契约表（/doc）
 │   └── requirements.txt
-├── relay_server/                            # 安全中继服务器 (FastAPI)
-│   ├── server.py                            # WSS 中继路由、防爆破限流与心跳
+├── relay_server/                          # 安全中继服务器 (FastAPI)
+│   ├── server.py                          # WSS 中继路由、防爆破限流与心跳
+│   ├── crash_report.py                    # 崩溃上报接口
 │   ├── Dockerfile
 │   └── requirements.txt
-└── android_app/                             # Android 原生客户端 (Kotlin + Compose)
-    ├── app/
-    │   ├── build.gradle.kts
-    │   └── src/main/
-    │       ├── AndroidManifest.xml          # 禁用云备份，声明权限与前台服务
-    │       ├── java/com/opencode/android/
-    │       │   ├── MainActivity.kt          # 运行时通知权限申请
-    │       │   ├── data/local/PreferencesManager.kt # 本地持久化与无默认假地址
-    │       │   ├── network/
-    │       │   │   ├── CloudApiClient.kt    # 真实契约云端直连与 SSE 客户端
-    │       │   │   ├── RelayWebSocketClient.kt # 中继长连接与真实会话/审批协议
-    │       │   │   └── TunnelDiagnosticsHelper.kt # 连通性测试与隧道排错
-    │       │   ├── service/OpenCodeKeepAliveService.kt # 前台保活与异常捕获
-    │       │   ├── ui/components/
-    │       │   │   ├── CompactDiffView.kt   # 精简 Diff 预览组件
-    │       │   │   └── ToolApprovalDialog.kt # 真实工具审批弹窗
-    │       │   └── ui/screens/
-    │       │       ├── ChatScreen.kt        # 聊天主屏、搜索高亮与防滚屏
-    │       │       └── PairingScreen.kt     # 剪贴板一键粘贴密钥与双模配对
-    │       └── res/values/strings.xml
-    └── build.gradle.kts
+├── android_app/                           # Android 原生客户端 (Kotlin + Compose)
+│   └── app/src/main/
+│       ├── AndroidManifest.xml            # 禁用云备份，声明权限与前台服务
+│       └── java/com/opencode/android/
+│           ├── MainActivity.kt            # 运行时通知权限申请
+│           ├── data/local/PreferencesManager.kt # 本地持久化与无默认假地址
+│           ├── network/
+│           │   ├── CloudApiClient.kt      # 真实契约云端直连与 SSE 客户端
+│           │   ├── RelayWebSocketClient.kt # 中继长连接与真实会话/审批协议
+│           │   └── TunnelDiagnosticsHelper.kt # 连通性测试与隧道排错
+│           ├── service/OpenCodeKeepAliveService.kt # 前台保活与异常捕获
+│           ├── ui/components/
+│           │   ├── CompactDiffView.kt     # 精简 Diff 预览组件
+│           │   └── ToolApprovalDialog.kt  # 真实工具审批弹窗
+│           └── ui/screens/
+│               ├── ChatScreen.kt          # 聊天主屏、搜索高亮与防滚屏
+│               └── PairingScreen.kt       # 剪贴板一键粘贴密钥与双模配对
+├── e2e/                                   # 端到端测试（Maestro）
+├── tests/                                 # E2EE 协议测试
+└── scripts/                               # 契约冒烟测试、i18n 工具
 ```
