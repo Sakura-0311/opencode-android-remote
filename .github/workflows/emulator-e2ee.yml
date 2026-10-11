@@ -29,7 +29,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install cryptography
+        # hardening 回归测试 import state.py，顶层依赖 aiohttp + websockets，
+        # 不装的话 ModuleNotFoundError（2026-10-11 周检红过一次）。
+        run: pip install cryptography aiohttp websockets
 
       - name: E2EE wire-format conformance (doc <-> Python <-> Kotlin)
         run: python3 tests/e2ee/e2ee_protocol_test.py
